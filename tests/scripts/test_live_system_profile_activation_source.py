@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
-from live_test import system_profile_activation_source as arm
+from live_test.arms import system_profile_activation_source as arm
 
 from hmcpctl.config import HMCConfig
 
@@ -2224,3 +2224,78 @@ async def test_one_negative_invalid_first_counter_refuses_recovery(
     with pytest.raises(ValueError, match="uptime"):
         await arm.recover(h, packet, doc)
     assert (len(state["jobs"]), h.delete_logical_partition.await_count) == mutations
+
+
+@pytest.mark.parametrize("borrowed_tree", [False, True])
+def test_activation_tree_check_uses_physical_checkout(
+    packet, tmp_path, monkeypatch, isolated_git, borrowed_tree
+):
+    import subprocess
+
+    owner = tmp_path / "owner"
+    foreign = tmp_path / "foreign"
+    trees = []
+    for root in (owner, foreign):
+        root.mkdir()
+        (root / "marker").write_text(root.name)
+        subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "marker"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.test",
+                "commit",
+                "-qm",
+                "candidate",
+            ],
+            check=True,
+        )
+        trees.append(
+            subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], text=True
+            ).strip()
+        )
+    packet["tested_tree"] = trees[1 if borrowed_tree else 0]
+    monkeypatch.setattr(
+        arm,
+        "__file__",
+        str(owner / "scripts/live_test/arms/system_profile_activation_source.py"),
+    )
+    # Independently isolate the additional tree query; source._revision has its own real-Git cases.
+    monkeypatch.setattr(
+        arm.source, "_revision", lambda: (packet["tested_commit"], True)
+    )
+    path = tmp_path / "packet.json"
+    path.write_text(json.dumps(packet))
+    path.chmod(0o600)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(owner))
+    output = tmp_path / "output"
+    constructor = AsyncMock()
+    monkeypatch.setattr(arm, "HMCClient", constructor)
+    error = ValueError if borrowed_tree else PermissionError
+    message = (
+        "exact clean deployed candidate"
+        if borrowed_tree
+        else "exact prepared fixture grant"
+    )
+    with pytest.raises(error, match=message):
+        arm._main(
+            [
+                "capture",
+                "--packet",
+                str(path),
+                "--packet-sha256",
+                digest,
+                "--output",
+                str(output),
+            ]
+        )
+    assert not output.exists()
+    constructor.assert_not_called()

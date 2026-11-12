@@ -9,14 +9,14 @@ import shlex
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
-from typing import Literal
+from typing import Literal, NamedTuple
 from urllib.parse import urlsplit
 
 import asyncssh
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from ...client.core import HMCClient
-from ...errors import HMCError
+from ...errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from ...jobs import JobOutcome, validate_wait_timing
 from ...resource_identity import is_uuid, resolve_system_uuid
 from ...ssh.commands import parse_hmc_delimited_rows
@@ -130,9 +130,23 @@ class _Phase:
     records: tuple[SystemProfileRecord, ...] = ()
 
 
+class _StableSnapshot(NamedTuple):
+    system_uuid: str
+    cli_name: str
+    namespace: tuple[str, ...]
+    members: dict[
+        str, tuple[str, dict[str, object], list[tuple[str, dict[str, object]]]]
+    ]
+
+
 class _RestInterrupted(Exception):
-    def __init__(self, job: JobOutcome | None, code: str | None):
-        super().__init__("interrupted; caller reconciliation required")
+    def __init__(
+        self,
+        job: JobOutcome | None,
+        code: str | None,
+        message: str = "interrupted; caller reconciliation required",
+    ):
+        super().__init__(message)
         self.job = job
         self.return_code = code
 
@@ -262,7 +276,7 @@ async def _observe(hmc: HMCClient, system: str) -> _Phase:
     return _Phase(system, cli, entries, tuple(sorted(names)))
 
 
-def _stable(phase: _Phase) -> tuple:
+def _stable(phase: _Phase) -> _StableSnapshot:
     members = {}
     for uuid, e in phase.entries.items():
         r = e["entry"]["Resource"]
@@ -293,7 +307,7 @@ def _stable(phase: _Phase) -> tuple:
                 key=lambda p: p[0],
             ),
         )
-    return phase.system_uuid, phase.cli_name, phase.namespace, members
+    return _StableSnapshot(phase.system_uuid, phase.cli_name, phase.namespace, members)
 
 
 def _records(raw: str, phase: _Phase) -> tuple[SystemProfileRecord, ...]:
@@ -746,6 +760,8 @@ async def _rest(hmc, system, operation, document, timeout, poll):
             state = "failed" if outcome.status in FAILED_JOB_STATUSES else "uncertain"
             return state, outcome, code, warnings, str(exc)[:2048]
         return "completed", outcome, code, warnings, None
+    except HMCTLSFingerprintError as exc:
+        raise _RestInterrupted(outcome, code, TLS_OBSERVATION_ABORTED) from exc
     except asyncio.CancelledError as exc:
         raise _RestInterrupted(outcome, code) from exc
     except (
@@ -862,11 +878,16 @@ async def _metadata(
             expected = {r.name: r for r in initial if r.name != name}
             if action != "delete":
                 expected[desired.name] = desired
-            exact = (
-                {r.name: r for r in records} == expected
-                and _stable(phase)[:2] == _stable(after)[:2]
-                and _stable(phase)[3] == _stable(after)[3]
-            )
+            exact = {r.name: r for r in records} == expected
+            if exact:
+                before_snapshot = _stable(phase)
+                after_snapshot = _stable(after)
+                # Metadata writes may change the namespace, not the system or members.
+                exact = (
+                    before_snapshot.system_uuid == after_snapshot.system_uuid
+                    and before_snapshot.cli_name == after_snapshot.cli_name
+                    and before_snapshot.members == after_snapshot.members
+                )
             if state == "completed":
                 return _metadata_result(
                     system,
@@ -921,7 +942,26 @@ async def create_system_profile(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
 ) -> SystemProfileOutcome:
-    """Create one bound system profile after every new member is authorized."""
+    """Create one bound system profile after every new member is authorized.
+
+    The attempt boundary follows admission and the fresh baseline check, before
+    job construction; crossing it does not prove dispatch.
+
+    Raises:
+        ValueError: Timing, selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with independent state and postcondition fields. A normal
+        return does not prove completion; metadata success requires state=completed
+        and postcondition=verified. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures become error plus failed/uncertain state
+        and unverified postcondition; any known job identity is retained. Cancellation
+        therefore does not always propagate. Inspect state, postcondition, error and
+        job before retrying an uncertain attempt; no automatic replay occurs.
+    """
     return await _metadata(
         hmc,
         system_name_or_uuid,
@@ -947,7 +987,26 @@ async def update_system_profile(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
 ) -> SystemProfileOutcome:
-    """Rename, replace paired members, or both; authorize the old/new union."""
+    """Rename, replace paired members, or both; authorize the old/new union.
+
+    The attempt boundary follows admission and the fresh baseline check, before
+    job construction; crossing it does not prove dispatch.
+
+    Raises:
+        ValueError: Timing, selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with independent state and postcondition fields. A normal
+        return does not prove completion; metadata success requires state=completed
+        and postcondition=verified. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures become error plus failed/uncertain state
+        and unverified postcondition; any known job identity is retained. Cancellation
+        therefore does not always propagate. Inspect state, postcondition, error and
+        job before retrying an uncertain attempt; no automatic replay occurs.
+    """
     return await _metadata(
         hmc,
         system_name_or_uuid,
@@ -970,7 +1029,26 @@ async def delete_system_profile(
     exclusive_writer_window: bool = False,
     ownership_override: bool = False,
 ) -> SystemProfileOutcome:
-    """Delete through the fixed CLI route, never as an automatic REST fallback."""
+    """Delete through the fixed CLI route, never as an automatic REST fallback.
+
+    The attempt boundary follows admission and the fresh baseline check, before
+    the native delete call; crossing it does not prove dispatch.
+
+    Raises:
+        ValueError: Selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with independent state and postcondition fields. A normal
+        return does not prove completion; metadata success requires state=completed
+        and postcondition=verified. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures become error plus failed/uncertain state
+        and unverified postcondition; any known job identity is retained. Cancellation
+        therefore does not always propagate. Inspect state, postcondition, error and
+        job before retrying an uncertain attempt; no automatic replay occurs.
+    """
     return await _metadata(
         hmc,
         system_name_or_uuid,
@@ -982,7 +1060,7 @@ async def delete_system_profile(
 
 
 async def _facts(hmc, phase, members):
-    from ...ssh.commands import build_filter
+    from ...documents.native_records import build_filter
 
     result = {}
     for member in members:
@@ -1133,7 +1211,29 @@ async def activate_system_profile(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
 ) -> SystemProfileOutcome:
-    """Validate or activate once, reporting backend facts separately from bounded witnesses."""
+    """Validate or activate once, reporting backend facts separately from bounded witnesses.
+
+    The attempt boundary follows admission, member observations and the fresh
+    baseline check, before job construction or the native validation call; crossing
+    it does not prove dispatch.
+
+    Raises:
+        ValueError: Action, timing, selectors or admission are invalid before the attempt.
+        TypeError, KeyError, HMCError, TimeoutError: Preparation fails before the attempt.
+        PermissionError: Ownership authorization refuses the operation.
+        asyncio.CancelledError: Cancellation arrives before the attempt boundary.
+
+    Returns:
+        SystemProfileOutcome with backend state, postcondition, activation_execution
+        and per-member observations. A normal return does not prove success. Activation
+        requires state=completed, activation_execution=complete and a verified
+        postcondition; validation-only success has postcondition=not-applicable and
+        no activation_execution. After the attempt boundary, caught HMC, validation,
+        timeout and cancellation failures return error, failed/uncertain state and
+        unverified postcondition, retaining known job facts. Cancellation therefore
+        does not always propagate. Inspect these fields and reconcile known effects
+        before retrying; no automatic replay occurs.
+    """
     from ...jobs import activate_system_profile_job
     from ...ssh.profiles import validate_system_profile_record
 

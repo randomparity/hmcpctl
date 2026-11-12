@@ -31,7 +31,10 @@ from hmcpctl.authorization.connection_scope import ConnectionScopeError
 from hmcpctl.authorization.dispatch_scope import dispatch_authorizer
 from hmcpctl.authorization.target_scope import TargetScopeError
 from hmcpctl.config import config_dir
-from hmcpctl.operations.lpar.provision import ProvisionAdapters, ProvisionStorage
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionAdapters,
+    ProvisionStorage,
+)
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 
 # Two grants that are individually narrow and, combined, would authorize a
@@ -135,6 +138,26 @@ def test_each_grant_still_permits_the_call_it_describes():
 
 def test_a_matching_table_permits():
     assert _authorize(LAB_NARROW, "hmc_delete_lpar", _delete()) is None
+
+
+@pytest.mark.parametrize("tool", ["hmc_list_vios_backups", "hmc_power_on_vios"])
+@pytest.mark.parametrize("system", ["sys-2", None])
+def test_vios_optional_system_scope_cannot_escape_grant(monkeypatch, tool, system):
+    opened: list[str] = []
+    _seal_every_outbound_path(monkeypatch, opened)
+    grants = [
+        {
+            "tools": [tool],
+            "connections": ["lab"],
+            "targets": {"managed_system": ["sys-1"], "vios": ["vios-1"]},
+        }
+    ]
+    arguments = {"vios_name_or_uuid": "vios-1", "profile": "lab"}
+    if system is not None:
+        arguments["system_name_or_uuid"] = system
+    with pytest.raises(ToolError):
+        _call(create_mcp(_policy(grants), catalog="registered"), tool, arguments)
+    assert opened == []
 
 
 @pytest.mark.parametrize(

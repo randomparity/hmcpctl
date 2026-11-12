@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from hmcpctl import cli
 from hmcpctl.cli_commands.lpar import decommission as command
-from hmcpctl.operations.lpar.decommission import DecommissionResult
+from hmcpctl.operations.lpar.decommission.core import DecommissionResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 _PAUSED = SimpleNamespace(outcome="needs_attention")
@@ -158,7 +158,7 @@ def test_real_redirected_decommission_is_lossless(evidence_result):
     source = f"""
 from hmcpctl import cli
 from hmcpctl.cli_commands.lpar import decommission as command
-from hmcpctl.operations.lpar.decommission import DecommissionResult
+from hmcpctl.operations.lpar.decommission.core import DecommissionResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 result = {evidence_result!r}
 from types import SimpleNamespace

@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import runner
-from live_test import system_profiles as arm
+from live_test.arms import system_profiles as arm
 
 
 def config():

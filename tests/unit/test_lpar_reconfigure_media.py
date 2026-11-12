@@ -7,17 +7,19 @@ the optical mappings, the root disk mapping and the pending boot string.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import live_fixture
 from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects, _run
 from unit.test_lpar_reconfigure import hmc as hmc  # noqa: PLC0414 - fixture import
 
-from hmcpctl.errors import HMCError, LparUpdateError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from hmcpctl.operations.logical import store
 from hmcpctl.operations.logical.engine import EffectNotApplied, OperationFailed
-from hmcpctl.operations.lpar import reconfigure, reconfigure_media
-from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
+from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
+from hmcpctl.operations.lpar.reconfiguration import media as reconfigure_media
+from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch
 
 VIOS = "0000000c-0000-4000-d000-000000000000"
 MEDIA = "hmcpctl_000000000001.iso"
@@ -445,6 +447,77 @@ def test_an_unknown_boot_write_resumes_by_the_pending_string(media):
 
 
 @pytest.mark.parametrize(
+    "legs,pending,mounted,done,evidence",
+    [
+        ({}, None, [MEDIA], True, {}),
+        ({"boot": None, "media": None}, None, [MEDIA], True, {}),
+        (
+            {"boot": {"before": None, "after": DISK_PATH}},
+            DISK_PATH,
+            [MEDIA],
+            True,
+            {"boot": DISK_PATH},
+        ),
+        (
+            {"boot": {"before": None, "after": DISK_PATH}},
+            None,
+            [MEDIA],
+            False,
+            {"boot": None},
+        ),
+        (
+            {"media": {"vios_uuid": VIOS, "media_name": MEDIA}},
+            None,
+            [],
+            True,
+            {"installer_media": "detached"},
+        ),
+        (
+            {"media": {"vios_uuid": VIOS, "media_name": MEDIA}},
+            None,
+            [MEDIA],
+            False,
+            {"installer_media": "mounted"},
+        ),
+        (
+            {
+                "boot": {"before": None, "after": DISK_PATH},
+                "media": {"vios_uuid": VIOS, "media_name": MEDIA},
+            },
+            DISK_PATH,
+            [],
+            True,
+            {"boot": DISK_PATH, "installer_media": "detached"},
+        ),
+        (
+            {
+                "boot": {"before": None, "after": DISK_PATH},
+                "media": {"vios_uuid": VIOS, "media_name": MEDIA},
+            },
+            OPTICAL_PATH,
+            [],
+            False,
+            {"boot": OPTICAL_PATH, "installer_media": "detached"},
+        ),
+    ],
+)
+def test_observed_reads_only_recorded_media_legs(
+    media, monkeypatch, legs, pending, mounted, done, evidence
+):
+    media.pending, media.mounted = pending, mounted
+    boot_read = AsyncMock(wraps=media.read_boot)
+    media_read = AsyncMock(wraps=media.list_optical_mappings)
+    monkeypatch.setattr(reconfigure_media, "read_lpar_boot_order", boot_read)
+    monkeypatch.setattr(media.fake, "list_optical_mappings", media_read)
+    plan = {"system_uuid": SYS, "lpar_uuid": LPAR, **legs}
+
+    assert asyncio.run(reconfigure_media.observed(media.fake, plan)) == (done, evidence)
+    assert boot_read.await_count == int(legs.get("boot") is not None)
+    assert media_read.await_count == int(legs.get("media") is not None)
+    assert media.fake.calls == []
+
+
+@pytest.mark.parametrize(
     "error", [ValueError("no identity"), PermissionError("owner"), LookupError("gone")]
 )
 def test_media_write_refusals_before_the_post_are_not_applied(media, error):
@@ -471,6 +544,30 @@ def test_media_write_reraises_when_the_listing_also_fails(media):
         asyncio.run(reconfigure_media.media_write(media.fake, plan)())
 
 
+@pytest.mark.parametrize("failure_at", ["unmount", "readback"])
+def test_media_write_propagates_tls_identity_failure_without_recovery(
+    media, failure_at
+):
+    mismatch = HMCTLSFingerprintError("pinned certificate identity mismatch")
+    media.unmount_error = (
+        mismatch if failure_at == "unmount" else HMCError("unmount failed", 500)
+    )
+    listing = AsyncMock(return_value=[])
+    if failure_at == "readback":
+        listing.side_effect = mismatch
+    media.fake.list_optical_mappings = listing
+    plan = {
+        "lpar_uuid": LPAR,
+        "system_uuid": SYS,
+        "media": {"vios_uuid": VIOS, "media_name": MEDIA},
+    }
+    with pytest.raises(HMCTLSFingerprintError) as raised:
+        asyncio.run(reconfigure_media.media_write(media.fake, plan)())
+    assert raised.value is mismatch
+    assert listing.await_count == (0 if failure_at == "unmount" else 1)
+    assert media.fake.calls == ["unmount"]
+
+
 @pytest.mark.parametrize(
     ("mounted", "status"),
     [([], "applied"), ([MEDIA], "not_applied"), ([MEDIA, MEDIA], "needs_attention")],
@@ -483,9 +580,9 @@ def test_media_classifier(media, mounted, status):
         "media": {"vios_uuid": VIOS, "media_name": MEDIA},
     }
     classify = reconfigure_media.media_classifier(
-        lambda _ctx: plan, lambda _c: media.fake
+        lambda _ctx: plan, lambda _c, _host: media.fake
     )
-    ctx = type("Ctx", (), {"connection": "<default>"})()
+    ctx = type("Ctx", (), {"connection": "<default>", "host": "hmc.test"})()
     assert asyncio.run(classify(ctx, None)).status == status
 
 
@@ -505,9 +602,9 @@ def test_boot_classifier(media, pending, status):
         "boot": {"before": OPTICAL_PATH, "after": DISK_PATH},
     }
     classify = reconfigure_media.boot_classifier(
-        lambda _ctx: plan, lambda _c: media.fake
+        lambda _ctx: plan, lambda _c, _host: media.fake
     )
-    ctx = type("Ctx", (), {"connection": "<default>"})()
+    ctx = type("Ctx", (), {"connection": "<default>", "host": "hmc.test"})()
     assert asyncio.run(classify(ctx, None)).status == status
 
 

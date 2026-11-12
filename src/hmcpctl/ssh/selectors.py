@@ -8,10 +8,9 @@ from hmcpctl.client.core import HMCClient
 
 from ..config import HMCConfig
 from ..errors import HMCError, HMCTransportError
-from ..operations.logical.holds import HoldRefused
-from ..operations.logical.store import OperationRefused
 from ..resource_identity import (
     guard_partition,
+    guard_unresolved_partition_name,
     is_uuid,
     lpar_name_from_uuid,
     partition_names_need_resolution,
@@ -117,15 +116,8 @@ async def _guard_named_partition(
                 await resolve_lpar_uuid(hmc, lpar_name, system_name_or_uuid=system)
         else:
             await resolve_lpar_uuid(config, lpar_name, system_name_or_uuid=system)
-    except OperationRefused:
-        raise
     except (HMCError, ValueError) as error:
-        raise HoldRefused(
-            "partition_hold_unverified",
-            f"partitions on this host are held and LPAR {lpar_name!r} could not be identified "
-            f"to check for a hold ({type(error).__name__}); name it by UUID or retry when the "
-            "HMC REST API answers",
-        ) from error
+        guard_unresolved_partition_name(lpar_name, error)
 
 
 async def _resolve_ssh_names(

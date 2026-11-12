@@ -58,7 +58,7 @@ register new semantic operation without duplicating source units or changing den
 Input owner documents/lpar_memory.py: LparMemoryStatisticsReset(BaseModel), frozen,
 strict=True, extra=forbid; wait_minutes:StrictInt>=0|None=None;
 detail_level:StrictInt between1and4|None=None. Empty request selects native defaults.
-Domain operations/lpar/memory_statistics.py:
+Domain operations/lpar/memory/statistics.py:
 reset_lpar_memory_statistics(hmc:HMCClient,lpar_name_or_uuid:str,reset:LparMemoryStatisticsReset,
 *,system_name_or_uuid:str,ownership_override:bool=False)->dict[str,Any].
 No companion public statistics-read operation. Private observation is an internal helper.

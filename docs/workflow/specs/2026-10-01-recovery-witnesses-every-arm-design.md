@@ -40,7 +40,7 @@ Those trigger tools are every mutating tool `vmedia.py` calls except `hmc_power_
 arm's end state is off) and the mount/unmount pair (covered by the unconditional classes); a
 test pins that set against the source so a new mutating call cannot go unwitnessed. Power is
 judged only after ST20's power-on: ST14 provisions with `power_on=True`
-(`scripts/live_test/provisioning.py:186`), so "off" is not an absolute expectation.
+(`scripts/live_test/arms/provisioning.py:186`), so "off" is not an absolute expectation.
 
 The boot baseline is the `data.pending_boot_string` of the ST20 row labelled
 `hmc_read_lpar_boot_order (baseline)` (a new `vmedia.py` constant, imported like
@@ -128,7 +128,7 @@ whose step 4 carries the coverage and the by-hand list.
   `scripts/live_test_runner.py:1331-1333`) and an arm write, while the rows and the existing
   ownership artifacts already record each change.
 - **Absolute expectations for power.** verified: ST14 provisions the test partition with
-  `power_on=True` (`scripts/live_test/provisioning.py:186`), so a clean round2 run would read
+  `power_on=True` (`scripts/live_test/arms/provisioning.py:186`), so a clean round2 run would read
   as stranded.
 - **Exit 3 for not-witnessed subtasks.** judgment: the frozen criterion puts "could not be
   judged" under exit 2, and a fourth code escapes the runbook's "exit 2 is not clean" rule.

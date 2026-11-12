@@ -13,12 +13,12 @@ from hmcpctl.documents.adapters import (
     validate_network_adapter_creation_fields,
     validate_network_adapter_update_fields,
 )
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.ownership import (
     authorize_lpar_mutation,
     resolve_and_authorize_lpar_mutation,
 )
-from hmcpctl.operations.lpar.profile_sync import (
+from hmcpctl.operations.lpar.profiles.sync import (
     ChangeLocation,
     change_location_of,
     read_change_location,
@@ -115,20 +115,18 @@ _VSI_ROUTE = (
 )
 
 
-def classified_add_refusal(error: HMCError, vsi_selected: bool) -> HMCError | None:
-    """Return the add's known HMC refusal with its next step (ADR 0315), or None."""
+def classified_add_refusal(error: HMCError, vsi_selected: bool) -> str | None:
+    """Return safe guidance for a known add refusal (ADR 0315), or None."""
     if error.status_code != 500:
         return None
     for code, guidance in _ADD_REFUSALS:
         if code in (error.body or ""):
             if code == "HSCLB021" and vsi_selected:
                 guidance += _VSI_ROUTE
-            return HMCError(
+            return (
                 f"Client network adapter add refused: {guidance}. List the partition's "
                 "adapters (hmc_list_adapters, or hmcpctl adapters list) to confirm the "
-                "refused add left none",
-                500,
-                error.body,
+                "refused add left none"
             )
     return None
 
@@ -140,10 +138,16 @@ async def list_adapters(
     *,
     system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List one kind of virtual adapter on an LPAR.
+    """List one adapter kind on a resolved LPAR.
+
+    ClientNetworkAdapter requires complete inventory: an empty Atom feed returns
+    [], while HTTP 204, blank responses, pagination and ambiguous entries raise
+    HMCError. Other adapter kinds return [] for an empty successful response.
 
     Raises:
-        ValueError: If ``adapter_type`` is unsupported.
+        ValueError: If ``adapter_type`` is unsupported or selector scope is invalid.
+        HMCError: If lookup or listing fails, the response is malformed, or network
+            inventory is unavailable or incomplete.
     """
     validate_adapter_type(adapter_type)
     lpar_uuid = await resolve_lpar_uuid(
@@ -175,7 +179,9 @@ async def add_network_adapter(
     Raises:
         ValueError: Invalid selectors, PVID or selected policy values.
         PermissionError: Partition ownership authorization rejects the mutation.
-        HMCError: Baseline identity is unavailable or the native submission fails.
+        HMCError: Baseline identity is unavailable, submission fails, or TLS identity
+            verification aborts readback. Post-submission TLS errors retain acknowledged
+            adapter and partition identities in an exception note.
     """
     require_vlan_id("port_vlan_id", port_vlan_id)
     fields: dict[str, Any] = {
@@ -202,7 +208,7 @@ async def add_network_adapter(
     location = await read_change_location(hmc, lpar_uuid)
     baseline = (
         _network_inventory_identities(
-            await hmc._network_adapter_creation_feed(lpar_uuid)
+            await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter")
         )
         if selected
         else set()
@@ -223,12 +229,19 @@ async def add_network_adapter(
         )
         if refusal is None:
             raise
-        raise refusal from error
-    verification = (
-        await _verify_network_creation(hmc, lpar_uuid, baseline, resource, selected)
-        if selected
-        else None
-    )
+        raise HMCError(refusal, error.status_code, error.body) from error
+    try:
+        verification = (
+            await _verify_network_creation(hmc, lpar_uuid, baseline, resource, selected)
+            if selected
+            else None
+        )
+    except HMCTLSFingerprintError as error:
+        error.add_note(
+            f"{TLS_OBSERVATION_ABORTED} Acknowledged adapter UUID: "
+            f"{_network_identity(resource)}; partition UUID: {lpar_uuid}."
+        )
+        raise
     return AdapterResult(lpar_uuid, resource, location, verification)
 
 
@@ -265,7 +278,34 @@ async def update_network_adapter(
     remove_vsi_profile: bool = False,
     ownership_override: bool = False,
 ) -> NetworkUpdateResult:
-    """Attempt one coordinated native update, independently observing its stored result."""
+    """Attempt one coordinated native update, independently observing its stored result.
+
+    Raises:
+        ValueError: Invalid fields, selectors or writer acknowledgement; unavailable
+            or contradictory preflight facts; a changed baseline; or invalid native
+            command inputs, before that command is dispatched.
+        PermissionError: The selected partition is not authorized for mutation.
+        HMCError: Resolution or preflight inventory fails before native submission.
+            A fingerprint mismatch during this phase also propagates.
+        asyncio.CancelledError: Cancellation propagates, including during submission
+            or readback. A dispatched command may still have taken effect; reconcile
+            the independent state before considering a retry.
+
+    Returns:
+        Independent submission, selected-field verification and unrelated-adapter
+        preservation facts. Already-satisfied requests return not_dispatched.
+        Native HMCCLIError/HMCError failures are captured as rejected or unknown
+        submission with bounded diagnostics; selected readback failures become
+        unavailable observations and errors. A post-submission fingerprint mismatch
+        stops further readback and returns the safe TLS-abort diagnostic.
+
+        A normal return, or submission=completed, does not establish verified change
+        or preservation. Inspect mutation_dispatched, submission, verification.status,
+        preservation.status and errors together. mutation_dispatched records the
+        native attempt, not confirmed remote execution; preservation is bounded by
+        preservation.scope. No automatic retry or rollback is performed; reconcile
+        uncertain or drifted state before another attempt.
+    """
     fields: dict[str, Any] = {
         "tagged": tagged,
         "addl_vlan_ids": addl_vlan_ids,
@@ -309,7 +349,7 @@ async def update_network_adapter(
     await authorize_lpar_mutation(
         hmc, system_name, parent[0], ownership_override=ownership_override
     )
-    before = deepcopy(await hmc._network_adapter_creation_feed(lpar_uuid))
+    before = deepcopy(await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter"))
     inventory = _network_update_inventory(before)
     if adapter_uuid not in inventory:
         raise ValueError(
@@ -319,7 +359,7 @@ async def update_network_adapter(
         inventory[adapter_uuid], selected
     )
     fresh_parent = await _network_update_parent(hmc, system_uuid, lpar_uuid)
-    fresh = deepcopy(await hmc._network_adapter_creation_feed(lpar_uuid))
+    fresh = deepcopy(await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter"))
     if (
         await _network_update_system(hmc, system_uuid) != system_name
         or fresh_parent[:2] != parent[:2]
@@ -352,15 +392,21 @@ async def update_network_adapter(
     submission, code, errors = await _network_update_submission(
         hmc, system_name, parent[1], slot, attributes
     )
-    verification, preservation, after_errors = await _network_update_after(
-        hmc,
-        system_uuid,
-        lpar_uuid,
-        parent[:2],
-        before,
-        adapter_uuid,
-        expected,
-    )
+    try:
+        verification, preservation, after_errors = await _network_update_after(
+            hmc,
+            system_uuid,
+            lpar_uuid,
+            parent[:2],
+            before,
+            adapter_uuid,
+            expected,
+        )
+    except HMCTLSFingerprintError:
+        verification, preservation = _network_update_observation(
+            before, None, adapter_uuid, expected
+        )
+        after_errors = (TLS_OBSERVATION_ABORTED,)
     return NetworkUpdateResult(
         system_uuid,
         lpar_uuid,
@@ -689,10 +735,14 @@ async def _network_update_after(
     try:
         after_parent = await _network_update_parent(hmc, system, lpar)
         parent_matches = after_parent[:2] == parent
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError):
         parent_matches = False
     try:
-        after = await hmc._network_adapter_creation_feed(lpar)
+        after = await hmc.list_adapters(lpar, "ClientNetworkAdapter")
+    except HMCTLSFingerprintError:
+        raise
     except HMCError:
         after = None
         errors += ("adapter readback is unavailable",)
@@ -804,8 +854,10 @@ async def _verify_network_creation(
     if identity is None or identity in baseline:
         return result
     try:
-        after = await hmc._network_adapter_creation_feed(lpar_uuid)
+        after = await hmc.list_adapters(lpar_uuid, "ClientNetworkAdapter")
         identities = _network_inventory_identities(after)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError:
         return result
     if identity not in identities:

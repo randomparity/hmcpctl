@@ -2188,7 +2188,7 @@ def test_xml_validation_rejects_entity_declarations(declaration: str) -> None:
     assert not export._parses(body)
 
 
-def test_enum_derivation_skips_entity_bearing_schema() -> None:
+def test_enum_derivation_rejects_entity_bearing_schema() -> None:
     hostile = ENUMS_XSD.replace('value="Normal"', 'value="&probe;"')
     hostile = (
         '<!DOCTYPE schema [<!ENTITY probe "expanded">]>' + hostile.split("?>", 1)[1]
@@ -2201,8 +2201,35 @@ def test_enum_derivation_skips_entity_bearing_schema() -> None:
             "body": hostile,
         }
     ]
-    with pytest.raises(ValueError, match="no Enumerations.xsd"):
+    with pytest.raises(export.ExportError, match="schema record 1"):
         export.derive_enums(corpus, "vX")
+
+
+def test_enum_cli_refuses_partial_bindings_from_malformed_schema(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    records = [
+        *_corpus(),
+        {
+            "kind": "rest",
+            "status": 200,
+            "path": "/rest/api/web/private-fixture.xsd",
+            "body": "<schema><element>",
+        },
+    ]
+    corpus = tmp_path / "corpus.json"
+    corpus.write_text(json.dumps(records), encoding="utf-8")
+    output = tmp_path / "enums.json"
+    output.write_text("previous export", encoding="utf-8")
+
+    assert (
+        export.main(["enums", str(corpus), "--firmware", "vX", "--out", str(output)])
+        == 1
+    )
+    assert output.read_text(encoding="utf-8") == "previous export"
+    error = capsys.readouterr().err
+    assert f"schema record {len(records)}" in error
+    assert "private-fixture" not in error
 
 
 def test_enums_refuse_a_corpus_without_the_schema() -> None:
@@ -2368,7 +2395,8 @@ def test_derived_output_is_scanned(tmp_path: Path) -> None:
     assert not out.exists()
 
 
-def test_cli_round_trip(tmp_path: Path) -> None:
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_cli_round_trip(tmp_path: Path, overwrite: bool) -> None:
     raw = tmp_path / "sweep.capture.jsonl"
     raw.write_text(
         "\n".join(
@@ -2377,6 +2405,9 @@ def test_cli_round_trip(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     corpus = tmp_path / "corpus.json"
+    if overwrite:
+        corpus.write_text("stale" * 1_000, encoding="utf-8")
+        corpus.chmod(0o644)
     enums = tmp_path / "enums.json"
     vocab = tmp_path / "vocab.json"
     assert export.main(["tokenize", str(raw), "--out", str(corpus)]) == 0

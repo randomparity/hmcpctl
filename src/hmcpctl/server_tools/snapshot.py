@@ -56,9 +56,10 @@ def hmc_snapshot_assess_affinity(
 
 @tool(effect="read", operation="snapshot.capture", target_kind="lpar")
 def hmc_snapshot_capture(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     profile_name: str,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> dict[str, object]:
     """Capture replayable profile configuration and separate placement observations.

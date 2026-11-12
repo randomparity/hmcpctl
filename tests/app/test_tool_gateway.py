@@ -356,7 +356,7 @@ def test_workflow_step_job_survives_actual_mcp_schema_and_serialization(
     monkeypatch, has_job
 ):
     from hmcpctl.jobs import job_outcome
-    from hmcpctl.operations.lpar.provision import AttachDiskResult
+    from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
     from hmcpctl.server_tools.storage import resources
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,3 +46,27 @@ def test_environment_paths_are_platform_native(
     assert smoke_release_wheel.environment_command(tmp_path, "hmcpctl", platform) == (
         tmp_path / command_path
     )
+
+
+@pytest.mark.parametrize("optimization", ["1", "2"])
+def test_library_probe_still_rejects_app_dependencies_under_optimization(
+    tmp_path, monkeypatch, optimization
+):
+    (tmp_path / "hmcpctl-1-py3-none-any.whl").touch()
+    created = []
+
+    def use_existing_app_environment(path, wheel, *, app):
+        created.append(app)
+        if app:
+            pytest.fail(
+                "The library probe accepted an environment with app dependencies"
+            )
+        return Path(sys.executable)
+
+    monkeypatch.setattr(
+        smoke_release_wheel, "_create_environment", use_existing_app_environment
+    )
+    monkeypatch.setenv("PYTHONOPTIMIZE", optimization)
+    with pytest.raises(subprocess.CalledProcessError):
+        smoke_release_wheel.smoke(tmp_path)
+    assert created == [False]

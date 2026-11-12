@@ -12,7 +12,7 @@ from conftest import JOB_ENTRY, make_config
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.jobs import (
     BOOT_MODES,
     POWER_OFF_OPERATIONS,
@@ -25,7 +25,6 @@ from hmcpctl.jobs import (
     power_on_system_job,
     power_on_vios_job,
 )
-from hmcpctl.operations.lpar import decommission
 from hmcpctl.operations.lpar.activation import (
     LparPowerResult,
     _unapplied_activation_clause,
@@ -35,6 +34,7 @@ from hmcpctl.operations.lpar.activation import (
     power_on_outcome,
     submit_power_on_lpar,
 )
+from hmcpctl.operations.lpar.decommission import core as decommission
 from hmcpctl.operations.partition_state import PARTITION_STATES
 
 SYSTEM_UUID = "00000000-0000-0000-0000-000000000001"
@@ -568,7 +568,7 @@ async def test_decommission_power_off_document_is_unchanged(immediate):
     )
 
     with patch(
-        "hmcpctl.operations.lpar.decommission.wait_for_submitted_job",
+        "hmcpctl.operations.lpar.decommission.core.wait_for_submitted_job",
         new=AsyncMock(
             return_value={
                 "UUID": "job-uuid",
@@ -1190,3 +1190,22 @@ async def test_shutdown_rejects_activation_options_before_side_effects(kwargs):
         await activation.power_off_lpar(hmc, LPAR_UUID, **kwargs)
     hmc.submit_job.assert_not_awaited()
     hmc.get_quick_property.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_power_on_profile_advisory_fingerprint_failure_prevents_submission():
+    hmc = _profile_power_client([], {})
+    read = hmc.list_child.side_effect
+    failure = HMCTLSFingerprintError("private-pin")
+
+    async def failed_adapter(parent, lpar_uuid, child):
+        if child == "LogicalPartitionProfile":
+            return await read(parent, lpar_uuid, child)
+        raise failure
+
+    hmc.list_child.side_effect = failed_adapter
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await _power_on_with_profile(hmc)
+    assert caught.value is failure
+    hmc.submit_job.assert_not_awaited()
+    assert hmc.list_child.await_count == 2

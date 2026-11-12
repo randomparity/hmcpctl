@@ -7,7 +7,7 @@ from xml.etree.ElementTree import ParseError
 import httpx
 import pytest
 
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.templates import core as operations_templates
 from hmcpctl.operations.templates.core import (
     _new_lpar_from_snapshots,
@@ -280,4 +280,28 @@ async def test_non_waited_deploy_does_not_list_or_stamp(monkeypatch):
 
     hmc.list_logical_partitions.assert_not_awaited()
     assert result["ownership_stamped"] is None
+    stamp.assert_not_awaited()
+
+
+@pytest.mark.parametrize("stage", ["baseline", "post"])
+@pytest.mark.asyncio
+async def test_template_pin_mismatch_stops_deployment_workflow(monkeypatch, stage):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = _client(snapshots=[failure] if stage == "baseline" else [[], failure])
+    stamp = AsyncMock()
+    monkeypatch.setattr(
+        operations_templates, "resolve_system_uuid", AsyncMock(return_value=SYSTEM_UUID)
+    )
+    monkeypatch.setattr(
+        operations_templates,
+        "wait_for_submitted_job",
+        AsyncMock(return_value=COMPLETED_JOB),
+    )
+    monkeypatch.setattr(operations_templates, "stamp_created_lpar_ownership", stamp)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await deploy_partition_template(hmc, "draft", "system", wait=True)
+    assert caught.value is failure
+    assert hmc.deploy_partition_template.await_count == (
+        0 if stage == "baseline" else 1
+    )
     stamp.assert_not_awaited()

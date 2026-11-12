@@ -49,9 +49,17 @@ def test_mcp_settings_and_create_forward_false_zero(monkeypatch):
     monkeypatch.setattr(
         lifecycle_create, "with_client", lambda f, **kw: asyncio.run(f("hmc"))
     )
-    assert hmc_configure_lpar("s", "l", settings) == result
+    assert (
+        hmc_configure_lpar(
+            system_name_or_uuid="s", lpar_name_or_uuid="l", settings=settings
+        )
+        == result
+    )
     assert configure.await_args.args[2] == settings
-    assert hmc_get_lpar_settings("s", "l") == settings
+    assert (
+        hmc_get_lpar_settings(system_name_or_uuid="s", lpar_name_or_uuid="l")
+        == settings
+    )
     hmc_create_lpar("s", "l", settings=settings)
     assert create.await_args.args[2].settings == settings
 

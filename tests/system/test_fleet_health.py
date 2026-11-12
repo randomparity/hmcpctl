@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import live_fixture
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.systems import health as operations_health
 from hmcpctl.operations.systems.health import FleetHealthResult
 from hmcpctl.operations.systems.health import fetch_fleet_health as fleet_health
@@ -411,3 +411,24 @@ async def test_fleet_health_does_not_read_the_job_feed() -> None:
     await fleet_health(client)
 
     client.list_uom.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "feed,state", [("vios", "operating"), ("vios", "standby"), ("lpars", "standby")]
+)
+@pytest.mark.asyncio
+async def test_pin_mismatch_aborts_health_instead_of_returning_partial_result(
+    feed, state
+):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = _healthy_client()
+    hmc.list_system_summaries.return_value = [
+        _summary("first", SystemName="first", State=state),
+    ]
+    method = hmc.list_vios if feed == "vios" else hmc.list_logical_partitions
+    method.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await fleet_health(hmc)
+    assert caught.value is failure
+    for read in (hmc.list_vios, hmc.list_logical_partitions):
+        assert all(call.args == ("first",) for call in read.await_args_list)

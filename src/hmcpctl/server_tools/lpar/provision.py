@@ -12,6 +12,23 @@ from typing import Any, Literal
 
 from fastmcp import FastMCP
 
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionAdapters,
+    ProvisionRequest,
+    ProvisionResult,
+    ProvisionStorage,
+    preview_provision,
+)
+from hmcpctl.operations.lpar.provisioning.media import Boot, LparInstall
+from hmcpctl.operations.lpar.provisioning.operation import (
+    DEFAULT_ARGUMENTS,
+    json_value,
+    provision_body,
+    provision_classifiers,
+    request_from_arguments,
+    result_from_record,
+)
+
 from ..._app import with_client
 from ...config import build_config
 from ...documents.lpar import LparResources, PartitionType
@@ -21,7 +38,6 @@ from ...operations.logical import engine, store
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.store import OperationRefused, connection_label
 from ...operations.lpar.assignments import LparPcieAssignments
-from ...operations.lpar.install_media import Boot, LparInstall
 from ...operations.lpar.plan import (
     PlanAdapters,
     PlanRequest,
@@ -29,21 +45,6 @@ from ...operations.lpar.plan import (
     check_request,
     plan_lpar,
     required_tools,
-)
-from ...operations.lpar.provision import (
-    ProvisionAdapters,
-    ProvisionRequest,
-    ProvisionResult,
-    ProvisionStorage,
-    preview_provision,
-)
-from ...operations.lpar.provision_operation import (
-    DEFAULT_ARGUMENTS,
-    json_value,
-    provision_body,
-    provision_classifiers,
-    request_from_arguments,
-    result_from_record,
 )
 from ...ssh.affinity import MinimumAffinityPolicy
 from ...tool_registry import (
@@ -55,6 +56,7 @@ from ...tool_registry import (
     validate_security,
 )
 from ..delegation import authorize_as
+from .continuation import continuation_arguments
 from .plan import PLAN_TOOL_NAME, _admitter
 
 PROVISION_TOOL_NAME = "hmc_provision_lpar"
@@ -115,14 +117,7 @@ def _effective(
     """The arguments to run and authorize, and whether a record already exists."""
     recorded = engine.recorded_arguments(agent_id, request_id, PROVISION_TOOL_NAME)
     if continuation != "none":
-        if recorded is None:
-            # Refused here, not by submit: nothing may be admitted without the delegated
-            # check, even if a concurrent call records this request_id meanwhile.
-            raise OperationRefused(
-                "not_found",
-                f"no operation has request_id {request_id}; omit continuation to start one",
-            )
-        return {**recorded, **given}, True
+        return continuation_arguments(recorded, given, request_id), True
     missing = [name for name in _REQUIRED if name not in given]
     if missing:
         raise ValueError(f"a new operation needs {', '.join(missing)}")

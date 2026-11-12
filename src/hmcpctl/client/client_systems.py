@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..errors import HMCError
+from ..errors import HMCError, HMCTLSFingerprintError
 from ..jobs import (
     power_off_system_job,
     power_off_vios_job,
@@ -121,15 +121,16 @@ class SystemsMixin:
         """UUID -> SystemName map from quick/All, keyed by the lower-cased UUID.
 
         Used only as a fallback when a direct entry read trips the
-        null-property serialization bug, so entries missing UUID or
-        SystemName are skipped rather than raised.
+        null-property serialization bug, so entries missing UUID or a usable,
+        nonblank SystemName string are skipped rather than raised.
         """
         return {
             entry["UUID"].lower(): entry["SystemName"]
             for entry in await self.list_system_summaries()
             if isinstance(entry, dict)
             and isinstance(entry.get("UUID"), str)
-            and "SystemName" in entry
+            and isinstance(entry.get("SystemName"), str)
+            and entry["SystemName"].strip()
         }
 
     async def get_managed_system(
@@ -161,9 +162,15 @@ class SystemsMixin:
                 name = names.get(uuid.lower())
                 if name:
                     entry = await self.find_system_by_name(name)
+            except HMCTLSFingerprintError:
+                raise
             except (HMCError, ValueError) as fb_exc:
                 fallback_exc = fb_exc
-            if entry is None:
+            if (
+                entry is None
+                or not isinstance(entry.get("UUID"), str)
+                or entry["UUID"].lower() != uuid.lower()
+            ):
                 raise HMCError(
                     f"Managed system {uuid} is unavailable because the HMC "
                     "could not serialize a null hardware property, and it "
@@ -344,6 +351,11 @@ class SystemsMixin:
         the system's ``VirtualIOServer`` collection: V10R3 answers a VIOS PUT to
         ``LogicalPartition`` with 500 REST0140 (#1214). Omits the
         X-HMC-Schema-Version header; the write headers follow ADR 0178.
+
+        Returns:
+            The first parsed VirtualIOServer response entry, or None when the
+            successful response has no body or entries. None leaves creation
+            unconfirmed; inspect the VIOS identity before retrying.
         """
         _reject_non_uuid_path_argument("system_uuid", system_uuid)
         path = f"/rest/api/uom/ManagedSystem/{system_uuid}/VirtualIOServer"

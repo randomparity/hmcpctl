@@ -11,18 +11,12 @@ from typing import Any, cast
 import pytest
 
 from hmcpctl.documents.lpar import LparResources
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.affinity.rest import ProvisionAffinityAssessment
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
-    SriovLogicalPortAssignment,
-)
-from hmcpctl.operations.lpar.install_media import (
-    InstallMedia,
-    InstallNetwork,
-    InstallRoute,
-    LparInstall,
 )
 from hmcpctl.operations.lpar.plan import (
     CAPACITY_TOOL,
@@ -46,6 +40,12 @@ from hmcpctl.operations.lpar.plan import (
     plan_digest,
     plan_lpar,
     required_tools,
+)
+from hmcpctl.operations.lpar.provisioning.media import (
+    InstallMedia,
+    InstallNetwork,
+    InstallRoute,
+    LparInstall,
 )
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy
 
@@ -1499,3 +1499,26 @@ def test_check_request_rejects_update_weight(weight, monkeypatch):
     monkeypatch.setattr("hmcpctl.operations.lpar.plan.plan_digest", forbidden)
     with pytest.raises(ValueError, match="uncapped_weight.*only.*update"):
         check_request(_request(resources=LparResources(uncapped_weight=weight)))
+
+
+@pytest.mark.parametrize("stage", ["enumeration", "selector", "checks"])
+def test_pin_mismatch_aborts_planning_before_further_reads(stage):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    first = World(1)
+    if stage == "checks":
+        first.partitions = failure
+    hmc = FakeHMC(first, World(2))
+    if stage != "checks":
+        hmc.systems_error = failure
+    request = (
+        _new_disk()
+        if stage == "checks"
+        else _placement(systems=("sys1", "sys2") if stage == "selector" else None)
+    )
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        _plan(hmc, request)
+    assert caught.value is failure
+    if stage == "checks":
+        assert hmc.calls[-1] == ("list_logical_partitions", _uuid(1))
+    else:
+        assert hmc.calls == [("list_system_summaries", None)]

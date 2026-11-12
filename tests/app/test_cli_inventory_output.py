@@ -19,11 +19,8 @@ from hmcpctl.cli_commands.storage import resources as storage
 from hmcpctl.cli_commands.systems import core as systems
 from hmcpctl.cli_commands.vios import core as vios
 from hmcpctl.operations.inventory.composite import _lpar_summary
-from hmcpctl.operations.storage.resources import (
-    OpticalMedia,
-    StorageMapping,
-    VolumeGroup,
-)
+from hmcpctl.operations.storage.optical import OpticalMedia
+from hmcpctl.operations.storage.resources import StorageMapping, VolumeGroup
 from hmcpctl.operations.systems.fleet import FleetListing
 from hmcpctl.operations.systems.health import FleetHealthResult
 

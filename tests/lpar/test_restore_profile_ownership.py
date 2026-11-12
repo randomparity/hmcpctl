@@ -11,8 +11,8 @@ import pytest
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.configuration import restore_system_lpar_profiles
 from hmcpctl.operations.lpar.ownership import _authorize_system_lpar_profile_restore
+from hmcpctl.operations.lpar.profiles.artifacts import restore_system_lpar_profiles
 from hmcpctl.server_tools.lpar import profiles as server_profiles
 
 SYSTEM_UUID = "11111111-1111-4111-8111-111111111111"
@@ -53,7 +53,7 @@ async def test_foreign_partition_blocks_restore_before_ssh(caplog) -> None:
         caplog.at_level(logging.WARNING),
         pytest.raises(PermissionError, match="db01"),
         patch(
-            "hmcpctl.operations.lpar.configuration.restore_lpar_profiles",
+            "hmcpctl.operations.lpar.profiles.artifacts.restore_lpar_profiles",
             new=write,
         ),
     ):
@@ -118,7 +118,10 @@ async def test_override_skips_inventory_audits_wildcard_and_restores(caplog) -> 
 
     with (
         caplog.at_level(logging.WARNING),
-        patch("hmcpctl.operations.lpar.configuration.restore_lpar_profiles", new=write),
+        patch(
+            "hmcpctl.operations.lpar.profiles.artifacts.restore_lpar_profiles",
+            new=write,
+        ),
     ):
         result = await restore_system_lpar_profiles(
             hmc,

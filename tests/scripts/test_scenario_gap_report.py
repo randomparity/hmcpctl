@@ -296,6 +296,76 @@ def test_module_aliases_and_plain_package_imports_still_reach_a_helper():
     assert not [line for line in lines if line.startswith("departed:")]
 
 
+def test_nested_discovery_keeps_unknown_arms_and_excludes_recovery(
+    tmp_path, monkeypatch
+):
+    package = tmp_path / "scripts" / "live_test"
+    (package / "arms").mkdir(parents=True)
+    (package / "recovery").mkdir()
+    (package / "helper.py").write_text(
+        "async def shared(client, state):\n"
+        '    await state.call(client, "hmc_list_lpars")\n'
+    )
+    (package / "arms" / "m.py").write_text(
+        "from ..helper import shared\n"
+        "async def s(client, state):\n"
+        "    await shared(client, state)\n"
+        '    await state.call(client, "hmc_unknown_tool")\n'
+        "async def orphan(client, state):\n"
+        '    await state.call(client, "hmc_list_lpars")\n'
+    )
+    (package / "recovery" / "ignored.py").write_text("not python!")
+    monkeypatch.setattr(report, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(report, "_SCENARIO_PACKAGE", package)
+
+    scans = report.scenario_scans()
+    lines = report.build_report(scans, ROOTS, OPERATIONS, ROWS, SCHEMAS)
+
+    assert [scan.module for scan in scans] == ["m", "helper"]
+    assert "unregistered: scripts/live_test/arms/m.py:4 tool hmc_unknown_tool" in lines
+    assert [line for line in lines if line.startswith("departed:")] == [
+        "departed: scripts/live_test/arms/m.py:6 orphan dispatches hmc_list_lpars"
+    ]
+    assert "uncovered-operation: lpar.list" not in lines
+
+
+def test_nested_import_forms_reach_real_module_owners():
+    imports_and_calls = [
+        ("live_test", "from live_test.arms.helper import shared as reused", "reused"),
+        ("live_test", "from live_test.arms import helper as reused", "reused.shared"),
+        ("live_test", "import live_test.arms.helper as reused", "reused.shared"),
+        ("live_test", "import live_test.arms.helper", "live_test.arms.helper.shared"),
+        ("live_test.arms", "from .helper import shared", "shared"),
+        ("live_test.arms", "from . import helper", "helper.shared"),
+        ("live_test.arms", "from ..helper import shared", "shared"),
+        ("live_test.arms", "from .. import helper", "helper.shared"),
+        ("live_test.arms", "from live_test.helper import shared", "shared"),
+        ("live_test.arms", "import live_test.helper", "live_test.helper.shared"),
+    ]
+    helper = report.scan_source(
+        "async def shared(client, state):\n"
+        '    await state.call(client, "hmc_list_lpars")\n',
+        "helper.py",
+        "helper",
+    )
+    for package, statement, call in imports_and_calls:
+        source = f"{statement}\nasync def s(client, state):\n    await {call}(client, state)\n"
+        scan = report.scan_source(source, "m.py", "m", containing_package=package)
+        lines = report.build_report([scan, helper], ROOTS, OPERATIONS, ROWS, SCHEMAS)
+        assert not any(line.startswith("departed:") for line in lines), statement
+        assert "uncovered-operation: lpar.list" not in lines, statement
+
+
+def test_nested_relative_import_outside_live_package_stays_outside():
+    scan = report.scan_source(
+        "from ...helper import shared\ndef s():\n    shared()\n",
+        "m.py",
+        "m",
+        containing_package="outside.live_test.arms",
+    )
+    assert scan.references["s"] == frozenset()
+
+
 def test_a_dispatch_outside_a_top_level_function_is_unreadable():
     source = (
         "if True:\n"
@@ -339,7 +409,7 @@ def test_system_profiles_dispatch(capsys):
     for operation in ("create", "list", "update", "delete", "activate"):
         assert f"uncovered-operation: system_profile.{operation}" not in lines
     assert not any(
-        line.startswith("unreadable: scripts/live_test/system_profiles.py")
+        line.startswith("unreadable: scripts/live_test/arms/system_profiles.py")
         for line in lines
     )
 

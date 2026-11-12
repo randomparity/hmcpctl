@@ -301,7 +301,9 @@ def test_mcp_policy_adapter_delegates_to_shared_operation():
         ),
         patch.object(server_lpar_config, "get_minimum_affinity_policy", operation),
     ):
-        actual = server_lpar_config.hmc_get_minimum_affinity_policy("system", "lpar")
+        actual = server_lpar_config.hmc_get_minimum_affinity_policy(
+            system_name_or_uuid="system", lpar_name_or_uuid="lpar"
+        )
 
     assert actual == expected
     operation.assert_awaited_once_with(ANY, "lpar", system_name_or_uuid="system")
@@ -318,8 +320,8 @@ def test_mcp_registers_minimum_affinity_policy_as_lpar_read():
     security = TOOL_SECURITY["hmc_get_minimum_affinity_policy"]
     assert security.effect == "read"
     assert [(target.kind, target.argument) for target in security.targets] == [
-        ("managed_system", "system_name_or_uuid"),
         ("lpar", "lpar_name_or_uuid"),
+        ("managed_system", "system_name_or_uuid"),
     ]
 
 

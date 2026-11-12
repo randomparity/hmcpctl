@@ -49,7 +49,7 @@ arguments, not nested fields. This prevents hiding a second mutation target in a
 model whose original MCP selector covers only one partition.
 
 Add `move_lpar_memory(hmc, lpar_name_or_uuid, target_lpar_name_or_uuid, move, *,
-system_name_or_uuid, ownership_override=False)` in `operations/lpar/memory_move.py`.
+system_name_or_uuid, ownership_override=False)` in `operations/lpar/memory/move.py`.
 Reuse D01's existing internal snapshot, identity, state, postcondition and endpoint
 result functions directly; no utility layer or responsibility migration is needed.
 Do not reuse its growth-versus-free-system-memory check: a transfer releases the

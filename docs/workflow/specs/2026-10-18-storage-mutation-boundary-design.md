@@ -39,11 +39,12 @@ Review exact output/schema compatibility and commit one task. Full assembled
 verification and pinned hooks remain separate.
 
 ## Implemented representation
-`StorageMutationResult` retains the original details projection in `raw`, the
-optional existing `JobOutcome` in `job`, and optional resolved LPAR and
-change-location metadata. Map and mount retain their original three-field
-metadata envelope in `raw`; detach and unmount retain the original location
-projection; delete-repository retains its resolved VIOS string. MCP adapters
-project their respective original values explicitly. Provisioning ignores the
-create-disk operation result as before. The attach workflow retains its own
-result and step semantics; its renderer supplies an uninterpreted details value.
+`StorageMutationResult` retains diagnostic `raw`, the optional existing
+`JobOutcome` in `job`, and typed resolved LPAR/change-location metadata.
+[The storage presentation boundary design](2026-11-11-storage-presentation-boundary-design.md)
+replaces the original raw envelopes for four operations: map retains the provider
+entry, mount retains its extracted provider body, and detach/unmount retain None.
+MCP/CLI adapters assemble the same external envelopes and location projections.
+Delete-repository retains its resolved VIOS string; other diagnostic raw meanings
+stay unchanged. Provisioning ignores the create-disk result as before. Attach
+retains its own result and step semantics and supplies explicit details to its printer.

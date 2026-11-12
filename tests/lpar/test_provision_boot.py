@@ -25,10 +25,11 @@ from hmcpctl.operations.logical import engine
 from hmcpctl.operations.logical.engine import OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
 from hmcpctl.operations.logical.store import OperationRefused
-from hmcpctl.operations.lpar import provision_boot, provision_operation
-from hmcpctl.operations.lpar.install_media import UNVERIFIED, media_name_for
-from hmcpctl.operations.lpar.provision_boot import newer_rows, wait_for_boot
-from hmcpctl.operations.lpar.provision_operation import (
+from hmcpctl.operations.lpar.provisioning import boot as provision_boot
+from hmcpctl.operations.lpar.provisioning import operation as provision_operation
+from hmcpctl.operations.lpar.provisioning.boot import newer_rows, wait_for_boot
+from hmcpctl.operations.lpar.provisioning.media import UNVERIFIED, media_name_for
+from hmcpctl.operations.lpar.provisioning.operation import (
     EFFECT_KINDS,
     provision_body,
     provision_classifiers,
@@ -87,8 +88,10 @@ class BootHMC(FakeHMC):
 class Boot(Writes):
     """Writes plus the boot's reads: refcodes, the boot order and the power-on."""
 
-    def __init__(self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch) -> None:
-        super().__init__(hmc, monkeypatch)
+    def __init__(
+        self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch, creation_mock
+    ) -> None:
+        super().__init__(hmc, monkeypatch, creation_mock)
         self.hmc: BootHMC = hmc
         self.refcodes: list[list[dict[str, Any]]] = [[OLD]]
         self.refcode_error: Exception | None = None
@@ -137,8 +140,8 @@ def _submit(boot: Boot, request=IMMEDIATE, continuation="none", rid=None):
     hmc = boot.hmc
     record = engine.submit(
         operation,
-        provision_body(SYSTEM, request, lambda _c: hmc),
-        classifiers=provision_classifiers(request, lambda _c: hmc),
+        provision_body(SYSTEM, request, lambda _c, _host: hmc),
+        classifiers=provision_classifiers(request, lambda _c, _host: hmc),
         continuation=continuation,
         wait_seconds=30,
     )
@@ -147,8 +150,8 @@ def _submit(boot: Boot, request=IMMEDIATE, continuation="none", rid=None):
 
 
 @pytest.fixture
-def boot(monkeypatch: pytest.MonkeyPatch) -> Boot:
-    return Boot(BootHMC(), monkeypatch)
+def boot(monkeypatch: pytest.MonkeyPatch, creation_mock) -> Boot:
+    return Boot(BootHMC(), monkeypatch, creation_mock)
 
 
 def _step(record, name: str):
@@ -379,7 +382,9 @@ def test_the_baseline_classifier_always_reads_again():
         "uncertain",
         None,
     )
-    classifier = provision_classifiers(IMMEDIATE, lambda _c: BootHMC())[effect.kind]
+    classifier = provision_classifiers(IMMEDIATE, lambda _c, _host: BootHMC())[
+        effect.kind
+    ]
 
     verdict = asyncio.run(classifier(None, effect))  # type: ignore[arg-type]
 
@@ -490,8 +495,8 @@ def test_the_wait_ends_when_the_calls_own_wait_does(boot, monkeypatch):
     )
     engine.submit(
         operation,
-        provision_body(SYSTEM, IMMEDIATE, lambda _c: hmc, wait_seconds=30),
-        classifiers=provision_classifiers(IMMEDIATE, lambda _c: hmc),
+        provision_body(SYSTEM, IMMEDIATE, lambda _c, _host: hmc, wait_seconds=30),
+        classifiers=provision_classifiers(IMMEDIATE, lambda _c, _host: hmc),
         wait_seconds=30,
     )
 

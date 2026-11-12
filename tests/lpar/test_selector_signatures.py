@@ -5,7 +5,10 @@ from importlib import import_module
 from unittest.mock import AsyncMock
 
 import pytest
+from fastmcp.tools.function_tool import FunctionTool
 
+from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
+from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
 from hmcpctl.operations.lpar.activation import (
     power_off_lpar,
     power_on_lpar,
@@ -19,6 +22,7 @@ from hmcpctl.operations.lpar.migration import (
     recover_lpar_migration,
     validate_lpar_migration,
 )
+from hmcpctl.server import TOOL_SECURITY, create_mcp
 
 
 @pytest.mark.parametrize(
@@ -75,14 +79,14 @@ SELECTOR_FAMILY = [
     ("hmcpctl.operations.lpar.boot_order", "read_lpar_boot_order", False),
     ("hmcpctl.operations.lpar.boot_order", "set_lpar_boot_order", False),
     ("hmcpctl.operations.lpar.boot_order", "clear_lpar_boot_order", False),
-    ("hmcpctl.operations.lpar.configuration", "synchronize_lpar_profile", False),
+    ("hmcpctl.operations.lpar.profiles.sync", "synchronize_lpar_profile", False),
     ("hmcpctl.operations.lpar.configuration", "configure_lpar_msp", False),
     (
         "hmcpctl.operations.lpar.configuration",
         "configure_lpar_processor_compatibility",
         False,
     ),
-    ("hmcpctl.operations.lpar.decommission", "decommission_lpar", False),
+    ("hmcpctl.operations.lpar.decommission.core", "decommission_lpar", False),
     ("hmcpctl.operations.lpar.dlpar", "modify_lpar", True),
     ("hmcpctl.operations.lpar.dlpar", "set_lpar_processors", True),
     ("hmcpctl.operations.lpar.dlpar", "set_lpar_memory", True),
@@ -90,7 +94,7 @@ SELECTOR_FAMILY = [
     ("hmcpctl.operations.lpar.ownership", "resolve_and_authorize_lpar_mutation", True),
     ("hmcpctl.operations.lpar.ownership", "resolve_and_authorize_lpar_names", False),
     ("hmcpctl.operations.lpar.ownership", "set_lpar_ownership_description", False),
-    ("hmcpctl.operations.lpar.provision", "attach_disk_to_lpar", True),
+    ("hmcpctl.operations.lpar.provisioning.core", "attach_disk_to_lpar", True),
     ("hmcpctl.operations.virtualization.adapters", "list_adapters", True),
     ("hmcpctl.operations.virtualization.adapters", "add_network_adapter", True),
     ("hmcpctl.operations.virtualization.adapters", "add_vscsi_adapter", True),
@@ -144,3 +148,33 @@ async def test_required_family_scope_precedes_client_access(module, name, option
     with pytest.raises(TypeError, match="system_name_or_uuid"):
         await operation(*args, **keywords)
     assert hmc.mock_calls == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_partition_selector_contract():
+    policy = compile_legacy_policy(TOOL_SECURITY, (DEFAULT_CONNECTION_TOKEN,))
+    application = create_mcp(policy, catalog="registered")
+    violations = []
+    selected = []
+    for tool in await application.list_tools():
+        if "lpar_name_or_uuid" not in tool.parameters.get("properties", {}):
+            continue
+        assert isinstance(tool, FunctionTool), tool.name
+        selected.append(tool.name)
+        parameters = inspect.signature(tool.fn).parameters
+        if next(iter(parameters)) != "lpar_name_or_uuid":
+            violations.append((tool.name, "partition selector is not first"))
+        for name in ("system_name_or_uuid", "connection", "profile"):
+            if (
+                name in parameters
+                and parameters[name].kind is not inspect.Parameter.KEYWORD_ONLY
+            ):
+                violations.append((tool.name, name + " is not keyword-only"))
+    expected = {
+        name
+        for name, security in TOOL_SECURITY.items()
+        if any(target.argument == "lpar_name_or_uuid" for target in security.targets)
+    }
+    assert expected, "the registry has no LPAR selector handlers"
+    assert set(selected) == expected
+    assert violations == []

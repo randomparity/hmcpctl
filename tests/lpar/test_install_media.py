@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from hmcpctl.config import parse_iso_url_allowlist
-from hmcpctl.operations.lpar.install_media import (
+from hmcpctl.operations.lpar.provisioning.media import (
     InstallMedia,
     InstallNetwork,
     InstallRoute,

@@ -7,6 +7,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
+from hmcpctl.operations import partition_creation
 
 COUNT_FIELDS = (
     "min_num_huge_pages",
@@ -394,7 +395,7 @@ def layout_creation_target(monkeypatch):
 
     from hmcpctl.client.core import HMCClient
     from hmcpctl.config import HMCConfig
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     hmc = AsyncMock(spec=HMCClient)
     hmc.config = HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
@@ -418,7 +419,7 @@ def layout_creation_target(monkeypatch):
         core, "resolve_system_cli_name", AsyncMock(return_value="sys-R1")
     )
     mode = AsyncMock(return_value=({}, False))
-    monkeypatch.setattr(core, "read_creation_authority", mode)
+    monkeypatch.setattr(partition_creation, "read_creation_authority", mode)
     stamp = AsyncMock(return_value=(True, ()))
     monkeypatch.setattr(core, "stamp_created_lpar_ownership", stamp)
     apply = AsyncMock()
@@ -453,7 +454,7 @@ def layout_creation_target(monkeypatch):
 
 def layout_creation(layout=None, **kwargs):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     return LparCreation(
         "part-R1",
@@ -474,7 +475,7 @@ def layout_creation(layout=None, **kwargs):
 async def test_layout_single_native_record_contains_six_fields(layout_creation_target):
     import shlex
 
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     layout = LparMemoryLayout(0, 1, 2, "1:128", "1:256", Decimal("0.00"))
@@ -496,7 +497,7 @@ async def test_layout_single_native_record_contains_six_fields(layout_creation_t
 async def test_layout_omission_preserves_rest_without_reads_or_steps(
     layout_creation_target,
 ):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     result = await create_and_stamp_lpar(target.hmc, "selector", layout_creation())
@@ -509,7 +510,7 @@ async def test_layout_omission_preserves_rest_without_reads_or_steps(
 
 @pytest.mark.asyncio
 async def test_layout_keylock_rejected_without_traffic(layout_creation_target):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     with pytest.raises(ValueError, match="keylock"):
@@ -529,7 +530,7 @@ async def test_layout_postcondition_distinguishes_missing_and_mismatch(
     layout_creation_target, mode
 ):
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     request = LparMemoryLayout(min_num_huge_pages=0, desired_num_huge_pages=1)
@@ -566,7 +567,7 @@ async def test_layout_contradiction_requires_a_valid_row_before_workflow_promoti
     layout_creation_target, missing
 ):
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
 
     target = layout_creation_target
     target.read.side_effect = None
@@ -608,7 +609,7 @@ async def test_layout_invalid_record_preserves_reason_without_reconciliation(
 ):
     from dataclasses import replace
 
-    from hmcpctl.operations.lpar.core import _create_via_cli
+    from hmcpctl.operations.lpar.creation.core import _create_via_cli
     from hmcpctl.ssh.transport import HMCCLIError
 
     target = layout_creation_target
@@ -616,7 +617,14 @@ async def test_layout_invalid_record_preserves_reason_without_reconciliation(
         layout_creation(LparMemoryLayout(min_num_huge_pages=0)), name=name
     )
     with pytest.raises(HMCCLIError, match="attribute 'name'.*contains") as caught:
-        await _create_via_cli(target.hmc, LAYOUT_SYSTEM, "selector", creation)
+        await _create_via_cli(
+            target.hmc,
+            LAYOUT_SYSTEM,
+            "selector",
+            creation,
+            defer_apply=True,
+            native_readback=True,
+        )
     assert name in str(caught.value)
     assert "Remove" in str(caught.value)
     target.write.assert_not_awaited()
@@ -633,7 +641,7 @@ async def test_layout_controller_omits_profile_and_reports_unavailable(
 ):
     import shlex
 
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.mode.return_value = ({}, True)
@@ -653,7 +661,7 @@ async def test_layout_controller_omits_profile_and_reports_unavailable(
 
 @pytest.mark.asyncio
 async def test_layout_controller_apply_denial_precedes_create(layout_creation_target):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.mode.return_value = ({}, True)
@@ -691,7 +699,7 @@ async def test_layout_reconciliation_never_retries_or_stamps(
     import asyncssh
 
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
     from hmcpctl.ssh.transport import (
         HMCCLIError,
         _command_connection_error,
@@ -766,7 +774,7 @@ async def test_layout_identity_unavailable_never_stamps_or_reads_profile(
 ):
     from copy import deepcopy
 
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     entry = deepcopy(target.entry)
@@ -794,7 +802,7 @@ async def test_layout_identity_unavailable_never_stamps_or_reads_profile(
 async def test_layout_successful_native_write_with_lookup_error_is_unavailable(
     layout_creation_target,
 ):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.hmc.find_partition_by_name.side_effect = [
@@ -818,7 +826,7 @@ async def test_layout_uncoded_native_failure_with_absence_remains_unknown(
     layout_creation_target,
 ):
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
     from hmcpctl.ssh.transport import HMCCLIError
 
     target = layout_creation_target
@@ -838,7 +846,7 @@ async def test_layout_percentage_zero_adds_no_kvm_role_or_companion(
 ):
     import shlex
 
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     result = await create_and_stamp_lpar(
@@ -860,7 +868,7 @@ async def test_layout_percentage_zero_adds_no_kvm_role_or_companion(
 async def test_layout_ratio_admission_refuses_before_single_create(
     layout_creation_target,
 ):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     with pytest.raises(ValueError, match="not advertised"):
@@ -874,7 +882,7 @@ async def test_layout_ratio_admission_refuses_before_single_create(
 @pytest.mark.asyncio
 async def test_layout_controller_initial_profile_io_denied(layout_creation_target):
     from hmcpctl.documents.lpar_io import LparPhysicalIO
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.mode.return_value = ({}, True)
@@ -898,15 +906,14 @@ async def test_layout_role_selection_retains_independent_kvm_admission(
     from unittest.mock import AsyncMock
 
     from hmcpctl.documents.lpar import LparSettings
-    from hmcpctl.operations.lpar import core
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
     from hmcpctl.operations.lpar.linux_roles import RoleCapabilities
 
     target = layout_creation_target
     role_mode = AsyncMock(
         return_value=RoleCapabilities(False, False, None, None, False)
     )
-    monkeypatch.setattr(core, "read_role_capabilities", role_mode)
+    monkeypatch.setattr(partition_creation, "read_role_capabilities", role_mode)
     with pytest.raises(ValueError, match="KVM selection requires"):
         await create_and_stamp_lpar(
             target.hmc,
@@ -926,16 +933,16 @@ async def test_layout_role_selection_retains_independent_kvm_admission(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["ok", "error", None])
 async def test_layout_workflow_assignment_barrier(
-    layout_creation_target, monkeypatch, status
+    layout_creation_target, monkeypatch, status, creation_mock
 ):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.lpar import workflows
     from hmcpctl.operations.lpar.assignments import (
         AssignmentResult,
         LparPcieAssignments,
     )
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation import workflow as workflows
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     target = layout_creation_target
@@ -944,11 +951,9 @@ async def test_layout_workflow_assignment_barrier(
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
     monkeypatch.setattr(
         workflows,
-        "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
-                True, target.entry, True, (), memory_layout_step=step
-            )
+        "_create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(True, target.entry, True, (), memory_layout_step=step)
         ),
     )
     apply = AsyncMock(return_value=AssignmentResult(True, True, ()))
@@ -970,16 +975,16 @@ async def test_layout_workflow_assignment_barrier(
     ["hardware_memory", "security_policy", "settings", "reporting_settings", "vtpm"],
 )
 async def test_layout_preserves_each_mixed_workflow_barrier(
-    layout_creation_target, monkeypatch, failed
+    layout_creation_target, monkeypatch, failed, creation_mock
 ):
     from unittest.mock import AsyncMock
 
     from hmcpctl.documents.lpar import LparReportingSettings, LparSettings
     from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
     from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
-    from hmcpctl.operations.lpar import workflows
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation import workflow as workflows
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     target = layout_creation_target
@@ -1005,10 +1010,8 @@ async def test_layout_preserves_each_mixed_workflow_barrier(
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
     monkeypatch.setattr(
         workflows,
-        "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(True, target.entry, True, (), **steps)
-        ),
+        "_create_and_stamp_lpar",
+        creation_mock(LparCreationResult(True, target.entry, True, (), **steps)),
     )
     apply = AsyncMock()
     monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", apply)
@@ -1024,7 +1027,7 @@ async def test_layout_admission_read_failure_is_not_create_uncertainty(
     layout_creation_target,
 ):
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.read.side_effect = HMCError("advertisement read unavailable")
@@ -1044,7 +1047,7 @@ async def test_layout_os400_ratios_do_not_borrow_linux_role_prerequisites(
     import shlex
     from dataclasses import replace
 
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.entry["Resource"]["PartitionType"] = "OS400"
@@ -1065,7 +1068,7 @@ async def test_layout_invalid_os400_count_refused_before_traffic(
 ):
     from dataclasses import replace
 
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     creation = replace(
@@ -1155,11 +1158,12 @@ async def test_layout_workflow_controller_assignment_denial_before_prevalidation
 ):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.lpar import core, workflows
     from hmcpctl.operations.lpar.assignments import (
         DedicatedPcieAssignment,
         LparPcieAssignments,
     )
+    from hmcpctl.operations.lpar.creation import core
+    from hmcpctl.operations.lpar.creation import workflow as workflows
 
     target = layout_creation_target
     target.mode.return_value = ({}, True)
@@ -1190,8 +1194,8 @@ async def test_layout_workflow_keylock_refused_before_assignment_preflight(
 ):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.lpar import workflows
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.creation import workflow as workflows
 
     target = layout_creation_target
     prevalidate = AsyncMock()
@@ -1209,7 +1213,7 @@ async def test_layout_workflow_keylock_refused_before_assignment_preflight(
 
 @pytest.mark.asyncio
 async def test_layout_stamp_failure_blocks_apply(layout_creation_target):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.stamp.return_value = (False, ("stamp unavailable",))
@@ -1226,7 +1230,7 @@ async def test_layout_stamp_failure_blocks_apply(layout_creation_target):
 
 @pytest.mark.asyncio
 async def test_layout_does_not_prevalidate_current_huge_pool(layout_creation_target):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
     target.hmc.get_managed_system.return_value["Resource"][
@@ -1243,22 +1247,22 @@ async def test_layout_does_not_prevalidate_current_huge_pool(layout_creation_tar
 
 @pytest.mark.asyncio
 async def test_layout_workflow_stamp_failure_blocks_assignments(
-    layout_creation_target, monkeypatch
+    layout_creation_target, monkeypatch, creation_mock
 ):
     from unittest.mock import AsyncMock
 
-    from hmcpctl.operations.lpar import workflows
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation import workflow as workflows
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     target = layout_creation_target
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", AsyncMock())
     monkeypatch.setattr(
         workflows,
-        "create_and_stamp_lpar",
-        AsyncMock(
-            return_value=LparCreationResult(
+        "_create_and_stamp_lpar",
+        creation_mock(
+            LparCreationResult(
                 True,
                 target.entry,
                 False,
@@ -1295,8 +1299,9 @@ async def test_layout_ancillary_provider_errors_are_private(
     )
     from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar import core, workflows
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
+    from hmcpctl.operations.lpar.creation import core
+    from hmcpctl.operations.lpar.creation import workflow as workflows
     from hmcpctl.operations.lpar.vtpm import VtpmCapabilities
 
     target = layout_creation_target
@@ -1311,12 +1316,12 @@ async def test_layout_ancillary_provider_errors_are_private(
         "vtpm": "get_lpar_vtpm_state",
     }
     monkeypatch.setattr(
-        core,
+        partition_creation if setting == "vtpm" else core,
         getters[setting],
         AsyncMock(side_effect=HMCError("private-provider-marker")),
     )
     monkeypatch.setattr(
-        core,
+        partition_creation,
         "read_vtpm_capabilities",
         AsyncMock(return_value=VtpmCapabilities(("1.2",), ("RSA2048",), False)),
     )
@@ -1408,3 +1413,32 @@ def test_memory_layout_exact_field_scope():
         "memory_layout.hpt_ratio",
         "memory_layout.ppt_ratio",
     }
+
+
+@pytest.mark.asyncio
+async def test_uncertain_layout_creation_preserves_tls_identity_failure(
+    layout_creation_target,
+):
+    from hmcpctl.errors import HMCTLSFingerprintError
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
+    from hmcpctl.ssh.transport import HMCCLIError
+
+    target = layout_creation_target
+    failure = HMCTLSFingerprintError("Certificate fingerprint differs")
+    target.hmc.find_partition_by_name.side_effect = [None, failure]
+    target.write.side_effect = HMCCLIError("Native submission unconfirmed")
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await create_and_stamp_lpar(
+            target.hmc, "selector", layout_creation(LparMemoryLayout(hpt_ratio="1:128"))
+        )
+    assert caught.value is failure
+    assert any(
+        "Inspect scoped identity before retrying" in note
+        for note in getattr(failure, "__notes__", ())
+    )
+    assert target.hmc.find_partition_by_name.await_count == 2
+    target.write.assert_awaited_once()
+    target.hmc.create_logical_partition.assert_not_awaited()
+    target.stamp.assert_not_awaited()
+    target.apply.assert_not_awaited()
+    target.hmc.delete_logical_partition.assert_not_awaited()

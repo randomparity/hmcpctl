@@ -37,6 +37,17 @@ def test_metric_links_parse_error_tags_context():
     assert isinstance(exc_info.value.__cause__, DET.ParseError)
 
 
+@pytest.mark.parametrize(
+    "link", ["", "<link/>", '<link href=""/>', '<link href="  "/>']
+)
+def test_metric_links_missing_href_tags_context(link):
+    feed = f'<feed xmlns="http://www.w3.org/2005/Atom"><entry>{link}</entry></feed>'
+    with pytest.raises(HMCError, match="Failed to parse PCM feed response") as exc_info:
+        _metric_links(feed, "PCM feed")
+    assert isinstance(exc_info.value.__cause__, ValueError)
+    assert "nonblank href" in str(exc_info.value)
+
+
 def test_find_text_entity_error_tags_context():
     body = (
         "<!DOCTYPE feed [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><feed>&xxe;</feed>"
@@ -84,3 +95,26 @@ def test_parse_feed_recursion_error_tags_context():
     assert "Failed to parse test context response" in str(exc_info.value)
     assert "nesting is too deep" in str(exc_info.value)
     assert isinstance(exc_info.value.__cause__, RecursionError)
+
+
+def test_discovery_adapter_forwards_named_parser_arguments():
+    names, present = _discovery_names(
+        "<Names><Name>value</Name></Names>",
+        "discovery",
+        name_tag="Name",
+        container_tag="Names",
+        member_tag="Name",
+    )
+    assert names == ["value"] and present
+
+
+def test_named_parser_arguments_retain_context_and_parse_cause():
+    with pytest.raises(HMCError, match="Failed to parse discovery response") as caught:
+        _discovery_names(
+            "<Names>",
+            "discovery",
+            name_tag="Name",
+            container_tag="Names",
+            member_tag="Name",
+        )
+    assert isinstance(caught.value.__cause__, DET.ParseError)

@@ -9,7 +9,7 @@ from typing import Any
 
 from hmcpctl.client.core import HMCClient
 
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 
 _SYSTEM_WORKERS = 8
 _MAX_SYSTEMS = 256
@@ -116,6 +116,8 @@ async def _vios_or_warning(
     """
     try:
         return await hmc.list_vios(system_uuid), None
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         warning = f"VIOS inventory for system {system_name} is unavailable: {exc}"
         return [], warning[:_MAX_WARNING_LENGTH]
@@ -132,6 +134,8 @@ async def _lpars_or_warning(
     """
     try:
         return await hmc.list_logical_partitions(system_uuid), None
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         if operating:
             raise

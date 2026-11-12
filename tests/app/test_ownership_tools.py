@@ -11,10 +11,8 @@ import pytest
 import respx
 from conftest import mock_system_summaries
 
-from hmcpctl.operations.lpar.assignments import (
-    LparPcieAssignments,
-    SriovLogicalPortAssignment,
-)
+from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
+from hmcpctl.operations.lpar.assignments import LparPcieAssignments
 from hmcpctl.operations.virtualization.pcie import InventorySelector
 from hmcpctl.server_tools.lpar.lifecycle_create import hmc_create_lpar
 

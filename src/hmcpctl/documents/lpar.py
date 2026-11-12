@@ -8,7 +8,8 @@ from uuid import UUID
 
 from pydantic import ConfigDict, StrictBool, StrictInt
 
-from ..xmlutil import escapes_string_arguments
+from ..errors import HMCError
+from ..xmlutil import escapes_string_arguments, localname
 from .common import UOM_NS, document_envelope
 
 # The types a LogicalPartition create accepts. V10R3 answers a LogicalPartition PUT typed
@@ -706,6 +707,18 @@ def _shared_updates(resources: LparResources) -> dict[str, str]:
     }
     updates |= {f"{config}/{name}": str(v) for name, v in vcpus if v is not None}
     return updates
+
+
+def exact_partition_path(lpar: ET.Element, path: str) -> ET.Element | None:
+    node = lpar
+    for part in path.split("/"):
+        matches = [child for child in node if localname(child.tag) == part]
+        if not matches:
+            return None
+        if len(matches) != 1 or matches[0].tag != f"{{{UOM_NS}}}{part}":
+            raise HMCError(f"Ambiguous or wrong-namespace partition path {path}")
+        node = matches[0]
+    return node
 
 
 def _sharing_scalar(lpar: ET.Element, path: str) -> str | None:

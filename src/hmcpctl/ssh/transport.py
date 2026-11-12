@@ -8,33 +8,12 @@ import re
 from collections.abc import Collection, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 import asyncssh
 
 from ..config import HMCConfig
-from ..errors import HMCError
-
-
-class HMCCLIError(HMCError):
-    """An HMC CLI operation failed or was refused before execution."""
-
-    def __init__(
-        self,
-        message: str,
-        status_code: int | None = None,
-        body: str | None = None,
-        *,
-        remote_refusal_code: str | None = None,
-        remote_nonzero_completed: bool = False,
-    ) -> None:
-        super().__init__(message, status_code, body)
-        self.remote_refusal_code = remote_refusal_code
-        self.remote_nonzero_completed = remote_nonzero_completed is True
-
-
-#: What a declared secret value reads as in any diagnostic (ADR 0246).
-REDACTED: Final = "<redacted>"
+from ..errors import REDACTED, HMCCLIError
 
 
 def _connect_kwargs(config: HMCConfig) -> dict[str, Any]:

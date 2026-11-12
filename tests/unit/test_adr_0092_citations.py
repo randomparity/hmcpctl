@@ -72,20 +72,25 @@ _INVENTORY_PATHS = tuple(
         "operations/lpar/assignments.py",
         "operations/lpar/boot_order.py",
         "operations/lpar/configuration.py",
+        "operations/lpar/profiles/sync.py",
+        "operations/lpar/profiles/artifacts.py",
         "operations/lpar/vtpm.py",
         "operations/lpar/core.py",
-        "operations/lpar/decommission.py",
+        "operations/lpar/creation/core.py",
+        "operations/lpar/decommission/core.py",
         "operations/lpar/dlpar.py",
-        "operations/lpar/processors.py",
+        "operations/lpar/processors/current.py",
         "operations/lpar/migration.py",
         "operations/lpar/ownership.py",
-        "operations/lpar/provision.py",
-        "operations/lpar/provision_operation.py",
+        "operations/lpar/provisioning/core.py",
+        "operations/lpar/provisioning/operation.py",
         "operations/affinity/ssh.py",
         "operations/virtualization/adapters.py",
         "operations/virtualization/pcie.py",
         "operations/virtualization/vnic.py",
         "operations/storage/resources.py",
+        "operations/storage/optical.py",
+        "operations/storage/iso_upload.py",
         "operations/templates/core.py",
         "operations/vios/install.py",
     )
@@ -143,6 +148,7 @@ _OPERATIONAL_MUTATORS = frozenset({"submit_power_on_lpar", "power_off_lpar"})
 _CREATION_MUTATORS = frozenset({"create_and_stamp_lpar", "deploy_partition_template"})
 _NON_LPAR_MUTATORS = frozenset(
     {
+        "delete_backup_profile_artifact",
         "create_volume_group",
         "create_virtual_disk",
         "delete_virtual_disk",
@@ -413,7 +419,7 @@ def test_malformed_symbol_citations_are_rejected() -> None:
 @pytest.mark.parametrize(
     ("operation", "raw_path"),
     [
-        ("change_lpar_processors", "operations/lpar/processors.py"),
+        ("change_lpar_processors", "operations/lpar/processors/current.py"),
         ("set_lpar_accelerator_qos", "operations/lpar/accelerator.py"),
         ("update_network_adapter", "operations/virtualization/adapters.py"),
     ],

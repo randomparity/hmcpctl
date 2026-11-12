@@ -6,12 +6,8 @@ import shlex
 from typing import Literal, get_args
 
 from ..config import HMCConfig
-from .commands import (
-    _parse_lshwres_output,
-    build_attribute_record,
-    build_filter,
-    parse_hmc_result_rows,
-)
+from ..documents.native_records import build_attribute_record, build_filter
+from .commands import _parse_lshwres_output, parse_hmc_result_rows
 from .transport import HMCCLIError, run_hmc_command
 
 SriovMode = Literal["sriov", "dedicated"]

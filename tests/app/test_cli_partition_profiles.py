@@ -10,7 +10,7 @@ from click import unstyle
 from typer.testing import CliRunner
 
 from hmcpctl.cli_commands.lpar import profiles as cli
-from hmcpctl.operations.lpar.profiles import (
+from hmcpctl.operations.lpar.profiles.core import (
     PartitionProfileInventory,
     PartitionProfileOutcome,
 )

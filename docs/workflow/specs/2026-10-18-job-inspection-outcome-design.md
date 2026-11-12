@@ -8,7 +8,7 @@ foundfalse/jobnull, not top-levelnull. No new model or changes to polling/read.
 C2: corrected job_href remains available after stale-link fallback; raw entry may
 still advertise stale href and must remain unchanged. Preserve response-derived
 job_id/mispair warnings and authorization/all-targets policy/decorators/arguments.
-C3: migrate scripts live_test.metrics/bare_cec job.get readers using their existing
+C3: migrate scripts live_test.arms.metrics/bare_cec job.get readers using their existing
 _as_outcome path as for job.wait, and direct tests. Keep evidenceassertionsstrict;
 do not wrap normalized outcome again with job_outcome(raw).
 C4: actual FastMCP wire schema is JobOutcome, all required nullable fields retained;

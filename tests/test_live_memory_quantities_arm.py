@@ -16,11 +16,12 @@ from lpar.test_memory_quantities import (
 )
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.operations.lpar.core import LparCreationResult
+from hmcpctl.operations.lpar.creation.core import LparCreationResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import config, lpar_config, memory_quantities, runner
+from live_test import config, runner
+from live_test.arms import lpar_config, memory_quantities
 from live_test.observation import CallFailure
 
 UUID = "aaaaaaaa-0000-4000-8000-000000000050"
@@ -47,6 +48,8 @@ class ScriptedSystem:
         if tool == "hmc_run_command":
             command = kwargs["cmd"]
             if command.startswith("lssyscfg"):
+                if self.fault == "unavailable":
+                    return "FAIL", None
                 names = ["existing-R1"]
                 if self.name and not self.deleted:
                     names.append(self.name)
@@ -199,7 +202,7 @@ async def run_arm(monkeypatch, system, group="lpar-memory-quantities"):
         return system.answer(tool, kwargs)
 
     monkeypatch.setattr(memory_quantities, "HMCClient", client_context)
-    monkeypatch.setattr(memory_quantities, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(lpar_config, "create_and_stamp_lpar", create)
     monkeypatch.setattr(runner.RunState, "call", call)
     monkeypatch.setattr(lpar_config, "_ABSENCE_REREAD_DELAY_S", 0)
     monkeypatch.setattr(lpar_config, "_COMPARE_REREAD_DELAY_S", 0)
@@ -293,8 +296,9 @@ async def test_arm_is_opt_in_without_calls_outside_its_group(monkeypatch, group)
 
 
 @pytest.mark.asyncio
-async def test_stranded_fixture_prevents_new_creation(monkeypatch):
-    system = ScriptedSystem(fault="stranded")
+@pytest.mark.parametrize("fault", ["stranded", "unavailable"])
+async def test_invalid_baseline_prevents_new_creation(monkeypatch, fault):
+    system = ScriptedSystem(fault=fault)
     state = await run_arm(monkeypatch, system)
     assert not system.creations
     assert not state.observations
@@ -365,7 +369,8 @@ async def test_overmax_oracle_through_actual_mcp_memory_admission(
     monkeypatch,
     quantity_boundary,  # noqa: F811 -- imported pytest boundary fixture
 ):
-    from hmcpctl.operations.lpar import memory, ownership
+    from hmcpctl.operations.lpar import ownership
+    from hmcpctl.operations.lpar.memory import current as memory
     from hmcpctl.server_tools.lpar import lifecycle
 
     boundary = quantity_boundary

@@ -12,7 +12,7 @@ from fastmcp import Client
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
-from hmcpctl.operations.lpar.configuration import synchronize_lpar_profile
+from hmcpctl.operations.lpar.profiles.sync import synchronize_lpar_profile
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar.profiles import (
     hmc_backup_lpar_profiles,
@@ -216,7 +216,9 @@ def test_sync_lpar_profile_runs_correct_command(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SYNC_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_sync_lpar_profile(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_sync_lpar_profile(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     expected_cmd = (
         f"chsyscfg -r lpar -m {SYSTEM_NAME} -i name={LPAR_NAME},sync_curr_profile=1"
@@ -233,7 +235,9 @@ def test_sync_lpar_profile_returns_cli_output(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(RAW_OUTPUT)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_sync_lpar_profile(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_sync_lpar_profile(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     assert result == RAW_OUTPUT
 
@@ -248,7 +252,9 @@ def test_sync_mode_renders_setting_value(monkeypatch, mock_hmc, mode, value):
     conn_mock = _make_ssh_mock("")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        hmc_sync_lpar_profile(SYSTEM_UUID, LPAR_UUID, mode=mode)
+        hmc_sync_lpar_profile(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID, mode=mode
+        )
 
     expected_cmd = (
         f"chsyscfg -r lpar -m {SYSTEM_NAME} "
@@ -278,7 +284,7 @@ def test_synchronize_refuses_an_unknown_mode_before_any_hmc_call():
 
     with (
         patch(
-            "hmcpctl.operations.lpar.configuration.resolve_and_authorize_lpar_names",
+            "hmcpctl.operations.lpar.profiles.sync.resolve_and_authorize_lpar_names",
             new=AsyncMock(side_effect=AssertionError("names were resolved")),
         ),
         pytest.raises(ValueError, match="enable, disable or suspend"),

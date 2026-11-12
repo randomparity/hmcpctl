@@ -9,6 +9,14 @@ from dataclasses import replace
 from typing import Any, Literal
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
+from hmcpctl.operations.lpar.memory.creation import (
+    _raise_creation_memory_failure,
+)
+from hmcpctl.operations.partition_creation import (
+    _CreationFeatureCoordinator,
+    _CreationFeatureInputs,
+)
 from hmcpctl.operations.partition_state import PARTITION_STATES, PartitionState
 from hmcpctl.operations.systems.fleet import (
     FleetListing,
@@ -29,6 +37,7 @@ from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ...documents.lpar_start import LparStartSettings
 from ...documents.lpar_vtpm import LparVtpmSettings
+from ...documents.native_records import build_filter
 from ...errors import HMCError
 from ...jobs import (
     DEFAULT_JOB_POLL_INTERVAL,
@@ -42,45 +51,17 @@ from ...resource_identity import (
     resolve_system_uuid,
     resolve_vios_uuid,
 )
-from ...ssh.commands import HMC_NO_RESULTS, build_filter
+from ...ssh.commands import HMC_NO_RESULTS
 from ...ssh.lpar import (
     _CreationMemorySubmissionError,
     complete_create_resources,
     create_lpar_via_cli,
     resolve_system_cli_name,
 )
-from ...ssh.lpar_memory_layout import admit_memory_layout, get_lpar_memory_layout
-from ...ssh.lpar_vtpm import get_lpar_vtpm_state
 from ...ssh.transport import run_hmc_cli
 from ...xmlutil import render_mtms
-from ..lpar.affinity_group import created_affinity_group_step
-from ..lpar.creation_memory import (
-    _raise_creation_memory_failure,
-    admit_creation_memory,
-    confirm_creation_memory_identity,
-    creation_memory_step,
-)
-from ..lpar.hardware_memory import admit_hardware_memory, created_hardware_memory_step
-from ..lpar.linux_roles import read_creation_authority, read_role_capabilities
-from ..lpar.memory_bound import require_memory_within_system
+from ..lpar.creation.start import recheck_start_controllers
 from ..lpar.ownership import _resolve_system_name
-from ..lpar.security_policy import (
-    admit_security_policy,
-    read_lpar_security_policy,
-    read_security_policy_capabilities,
-)
-from ..lpar.serial import (
-    admit_serial_creation,
-    confirm_serial_created,
-    serial_creation_step,
-)
-from ..lpar.start import (
-    admit_start_creation,
-    confirm_start_created,
-    created_start_step,
-    recheck_start_controllers,
-)
-from ..lpar.vtpm import admit_vtpm, read_vtpm_capabilities
 
 
 async def list_vios(
@@ -167,12 +148,10 @@ async def create_vios(
         raise TypeError("start_settings must be LparStartSettings")
     if start_settings is not None:
         start_settings.validate_creation("Virtual IO Server")
-    start_requested = start_settings is not None and start_settings.requested()
     if creation_memory is not None and not isinstance(
         creation_memory, LparCreationMemory
     ):
         raise TypeError("creation_memory must be LparCreationMemory")
-    memory_requested = creation_memory is not None and bool(creation_memory.pairs())
     shared_memory = creation_memory is not None and creation_memory.mem_mode == "shared"
     if shared_memory:
         completed = complete_create_resources(resources)
@@ -180,52 +159,62 @@ async def create_vios(
             raise ValueError("Shared memory requires known shared processor resources")
     reject_update_weight_on_create(resources)
     validate_serial_input(virtual_serial_adapters, max_virtual_slots)
-    serial_requested = bool(virtual_serial_adapters)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
         memory_layout.validate_creation("Virtual IO Server")
-    layout_requested = memory_layout is not None and bool(memory_layout.pairs())
-    affinity_requested = validate_affinity_group_id(affinity_group_id) is not None
-    hardware_requested = bool(
-        hardware_memory_pairs(hardware_mem_encryption, hardware_mem_expansion)
-    )
+    validate_affinity_group_id(affinity_group_id)
+    hardware_memory_pairs(hardware_mem_encryption, hardware_mem_expansion)
     if security_policy is not None and not isinstance(
         security_policy, LparSecurityPolicy
     ):
         raise TypeError("security_policy must be LparSecurityPolicy")
-    policy_requested = security_policy is not None and bool(security_policy.pairs())
     if security_policy is not None:
         security_policy.validate_creation("Virtual IO Server")
     if vtpm_settings is not None and not isinstance(vtpm_settings, LparVtpmSettings):
         raise TypeError("vtpm_settings must be LparVtpmSettings")
-    vtpm_requested = vtpm_settings is not None and bool(vtpm_settings.pairs())
-    if (
-        vtpm_requested
-        or policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-    ):
+    inputs = _CreationFeatureInputs(
+        name,
+        "Virtual IO Server",
+        resources,
+        max_virtual_slots=max_virtual_slots,
+        virtual_serial_adapters=virtual_serial_adapters,
+        creation_memory=creation_memory or LparCreationMemory(),
+        start_settings=start_settings or LparStartSettings(),
+        memory_layout=memory_layout or LparMemoryLayout(),
+        vtpm_settings=vtpm_settings or LparVtpmSettings(),
+        security_policy=security_policy or LparSecurityPolicy(),
+        hardware_mem_encryption=hardware_mem_encryption,
+        hardware_mem_expansion=hardware_mem_expansion,
+        affinity_group_id=affinity_group_id,
+    )
+    strict_cli_name_required = (
+        inputs.layout_requested
+        or inputs.serial_requested
+        or inputs.memory_requested
+        or inputs.start_requested
+    )
+    native_resources_required = (
+        inputs.policy_requested or inputs.hardware_requested or strict_cli_name_required
+    )
+    strict_identity_required = (
+        inputs.policy_requested or inputs.native_features_requested
+    )
+    complete_resources_required = inputs.vtpm_requested or native_resources_required
+    if complete_resources_required:
         completed = complete_create_resources(resources)
         if completed is None:
+            creation_kind = "native" if native_resources_required else "vTPM"
             raise ValueError(
-                f"VIOS {'native' if policy_requested or hardware_requested or layout_requested or serial_requested or memory_requested or start_requested else 'vTPM'} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
+                f"VIOS {creation_kind} creation requires explicit memory/processor resource values; implicit all_resources allocation is not supported"
             )
         resources = completed
+        inputs = replace(inputs, resources=completed)
     system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    if not (
-        vtpm_requested
-        or policy_requested
-        or hardware_requested
-        or layout_requested
-        or serial_requested
-        or memory_requested
-        or start_requested
-        or affinity_requested
-    ):
+    features = _CreationFeatureCoordinator(
+        hmc, system_uuid, system_name_or_uuid, inputs
+    )
+    if not (features.inputs.vtpm_requested or strict_identity_required):
         return await hmc.create_vios(
             system_uuid,
             build_vios_document(
@@ -240,85 +229,36 @@ async def create_vios(
         )
     if not shared_memory:
         await require_memory_within_system(hmc, system_uuid, resources)
-    if vtpm_settings is not None and vtpm_requested:
-        admit_vtpm(vtpm_settings, await read_vtpm_capabilities(hmc, system_uuid))
-    if security_policy is not None and policy_requested:
-        admit_security_policy(
-            security_policy,
-            await read_security_policy_capabilities(hmc, system_uuid),
-            environment="Virtual IO Server",
-        )
-    await admit_hardware_memory(
-        hmc, system_uuid, hardware_mem_encryption, hardware_mem_expansion
-    )
+    await features.admit_host_features()
     system = (
         await resolve_system_cli_name(hmc.config, system_uuid)
-        if layout_requested or serial_requested or memory_requested or start_requested
+        if strict_cli_name_required
         else await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
     )
-    controller_mode = False
-    if layout_requested or affinity_requested:
-        _, controller_mode = await read_creation_authority(
-            hmc,
-            system_uuid,
-            need_management=False,
-            context="Affinity group" if affinity_requested else "Memory layout",
-        )
-    elif serial_requested or memory_requested or start_requested:
-        controller_mode = (
-            await read_role_capabilities(
-                hmc, system_uuid, need_kvm=False, need_management=False
-            )
-        ).controller_mode
-    if layout_requested:
-        await admit_memory_layout(hmc.config, system, memory_layout)
-    serial_admission = (
-        await admit_serial_creation(
-            hmc,
-            system_uuid,
-            name=name,
-            partition_id=None,
-            maximum=max_virtual_slots,
-            adapters=virtual_serial_adapters,
-            kind="VirtualIOServer",
-        )
-        if serial_requested
-        else None
-    )
-    memory_admission = (
-        await admit_creation_memory(
-            hmc,
-            system_uuid,
-            system,
-            creation_memory,
-            resources,
-            kind="VirtualIOServer",
-            environment="Virtual IO Server",
-            name=name,
-        )
-        if memory_requested
-        else None
-    )
-    start_admission = (
-        await admit_start_creation(hmc, system_uuid, system, start_settings)
-        if start_requested and start_settings is not None
-        else None
-    )
+    await features.discover_mode(cli_system=system)
+    controller_mode = features.controller_mode
+    await features.admit_partition_features()
+    serial_admission = features.serial_admission
+    memory_admission = features.memory_admission
+    start_admission = features.start_admission
     native_options: dict[str, Any] = {}
-    if memory_requested:
+    if features.inputs.memory_requested:
         native_options["creation_memory"] = creation_memory
     if max_virtual_slots is not None:
         native_options["max_virtual_slots"] = max_virtual_slots
-    if serial_requested:
+    if features.inputs.serial_requested:
         native_options["virtual_serial_adapters"] = virtual_serial_adapters
-    if layout_requested:
+    if features.inputs.layout_requested:
         native_options["memory_layout"] = memory_layout
     if controller_mode:
         native_options["profile_name"] = None
     if start_admission is not None:
         await recheck_start_controllers(hmc, start_admission)
         native_options["start_settings"] = start_admission.settings
-    native_failed = False
+    unknown_outcome = (
+        "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. "
+        "No second create or rollback performed"
+    )
     try:
         await create_lpar_via_cli(
             hmc.config,
@@ -337,210 +277,49 @@ async def create_vios(
         assert memory_admission is not None
         await _raise_creation_memory_failure(hmc, memory_admission, error)
     except Exception as error:
-        if (
-            not serial_requested
-            and not memory_requested
-            and not start_requested
-            and not isinstance(error, HMCError)
-        ):
-            raise
-        if (
-            hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        ):
-            native_failed = True
-        elif not policy_requested:
-            raise
-        else:
-            raise HMCError(
-                "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
-            ) from error
-    if native_failed:
-        raise HMCError(
-            "VIOS exists or may exist; creation outcome unknown. Inspect before retrying. No second create or rollback performed"
+        may_need_outcome_report = (
+            features.inputs.serial_requested
+            or features.inputs.memory_requested
+            or features.inputs.start_requested
+            or isinstance(error, HMCError)
         )
-    verification_failed = False
-    try:
-        try:
-            entry = await hmc.find_vios_by_name(name, system_uuid=system_uuid)
-        except Exception:
-            if not (
-                hardware_requested
-                or layout_requested
-                or serial_requested
-                or memory_requested
-                or start_requested
-                or affinity_requested
-            ):
+        if not may_need_outcome_report:
+            raise
+        if not features.inputs.native_features_requested:
+            if not features.inputs.policy_requested:
                 raise
-            # Native creation succeeded; discard unavailable lookup diagnostics.
-            entry = None
-        if (
-            entry is None
-            or (layout_requested and not isinstance(entry, dict))
-            or not entry.get("UUID")
+            raise HMCError(unknown_outcome) from error
+    else:
+        await features.observe_before_followup()
+        entry = features.entry
+        assert entry is not None
+        await features.observe_start(entry)
+        observations = features.snapshot().observations
+        start_step = observations.start_step.step
+        affinity_step = observations.affinity_group_step.step
+        if affinity_step is not None:
+            entry = {**entry, "affinity_verification": affinity_step.result}
+        metadata: dict[str, Any] = {}
+        for admission, step, key in (
+            (start_admission, start_step, "start_verification"),
+            (
+                serial_admission,
+                observations.serial_step.step,
+                "serial_verification",
+            ),
+            (
+                memory_admission,
+                observations.creation_memory_step.step,
+                "creation_memory_verification",
+            ),
         ):
-            raise ValueError("Created VIOS identity was not confirmed")
-        if (
-            policy_requested
-            or hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        ) and (
-            not isinstance(entry.get("UUID"), str)
-            or not is_uuid(entry["UUID"])
-            or not isinstance(entry.get("Resource"), dict)
-            or entry["Resource"].get("PartitionName") != name
-        ):
-            raise ValueError("Created VIOS identity unconfirmed")
-        if start_admission is not None:
-            entry = await confirm_start_created(
-                hmc, start_admission, entry, name, "Virtual IO Server"
-            )
-        if memory_admission is not None:
-            entry = await confirm_creation_memory_identity(hmc, memory_admission, entry)
-            memory_step = await creation_memory_step(
-                hmc, memory_admission, entry, controller_mode=controller_mode
-            )
-            if memory_step.status != "ok":
-                raise ValueError("Creation memory observation incomplete")
-        if serial_admission is not None:
-            entry = await confirm_serial_created(hmc, serial_admission, entry)
-            serial_step = await serial_creation_step(
-                hmc, serial_admission, entry, controller_mode=controller_mode
-            )
-            if serial_step.status != "ok":
-                raise ValueError("Serial creation observation incomplete")
-        if layout_requested:
-            if controller_mode:
-                raise ValueError(
-                    "Controller current ratio mappings unavailable; no named profile was read"
-                )
-            observed_layout = await get_lpar_memory_layout(hmc.config, system, name)
-            if any(
-                getattr(observed_layout, field) != value
-                for field, value in memory_layout.pairs()
-            ):
-                raise ValueError("Created VIOS memory ratios unavailable or mismatched")
-        if vtpm_settings is not None and vtpm_requested:
-            observed = await get_lpar_vtpm_state(hmc.config, system, name, vios=True)
-            if any(
-                getattr(observed.settings, field) != getattr(vtpm_settings, field)
-                for field, _ in vtpm_settings.pairs()
-            ):
-                raise ValueError(
-                    "Created VIOS vTPM readback differs from the requested fields"
-                )
-        if security_policy is not None and policy_requested:
-            policy = await read_lpar_security_policy(
-                hmc, entry["UUID"], system_name_or_uuid=system_uuid, vios=True
-            )
-            if any(
-                getattr(policy.settings, field) != getattr(security_policy, field)
-                for field, _ in security_policy.pairs()
-            ):
-                raise ValueError(
-                    "Created VIOS policy readback differs from requested fields"
-                )
-    except Exception as error:
-        if (
-            not serial_requested
-            and not memory_requested
-            and not start_requested
-            and not isinstance(error, (HMCError, ValueError, PermissionError))
-        ):
-            raise
-        if (
-            hardware_requested
-            or layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            or affinity_requested
-        ):
-            verification_failed = True
-        elif policy_requested:
-            raise HMCError(
-                "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
-            ) from error
-        else:
-            raise HMCError(
-                f"VIOS creation returned, but verification is unavailable or mismatched: {error}. The VIOS exists or may exist; inspect before retrying. No second create or rollback performed"
-            ) from error
-    if verification_failed:
-        raise HMCError(
-            "VIOS exists or may exist; creation verification unavailable or mismatched. Inspect before retrying. No second create or rollback performed"
-            if layout_requested
-            or serial_requested
-            or memory_requested
-            or start_requested
-            else f"VIOS exists or may exist; {'affinity group' if affinity_requested else 'hardware memory access'} readback-unavailable. Inspect before retrying. No second create or rollback performed"
-        )
-    assert (
-        entry is not None
-    )  # Successful identity verification above requires an entry.
-    hardware_step = await created_hardware_memory_step(
-        hmc,
-        system_uuid,
-        entry,
-        name,
-        "Virtual IO Server",
-        hardware_mem_encryption,
-        hardware_mem_expansion,
-        vios=True,
-    )
-    if hardware_step is not None and hardware_step.status != "ok":
-        raise HMCError(
-            f"VIOS exists or may exist; hardware memory access {hardware_step.result['status']}. "
-            "Inspect before retrying. No second create or rollback performed"
-        )
-    affinity_step = await created_affinity_group_step(
-        hmc,
-        system_uuid,
-        entry,
-        name,
-        "Virtual IO Server",
-        affinity_group_id,
-        controller_mode=controller_mode,
-        vios=True,
-    )
-    if affinity_step is not None:
-        if affinity_step.status != "ok":
-            raise HMCError(
-                f"VIOS exists or may exist; affinity group {affinity_step.result['status']}. "
-                f"Observed {affinity_step.result['observed']}; "
-                f"observation status {affinity_step.result['observation_status']}. "
-                "Inspect before retrying. No second create or rollback performed"
-            ) from None
-        entry = {**entry, "affinity_verification": affinity_step.result}
-    metadata: dict[str, Any] = {}
-    if start_admission is not None:
-        start_step = await created_start_step(
-            hmc,
-            start_admission,
-            entry,
-            name,
-            "Virtual IO Server",
-            controller_mode=controller_mode,
-        )
-        if start_step.status != "ok":
-            raise HMCError(
-                "VIOS exists or may exist; start configuration unverified. Inspect before retrying; no rollback performed"
-            )
-        metadata["start_verification"] = start_step.result
+            if admission is not None:
+                assert step is not None
+                metadata[key] = step.result
+        return {**entry, **metadata} if metadata else entry
 
-    if serial_admission is not None:
-        metadata["serial_verification"] = serial_step.result
-    if memory_admission is not None:
-        metadata["creation_memory_verification"] = memory_step.result
-    return {**entry, **metadata} if metadata else entry
+    # Keep selected native outcomes free of the provider's cause and context.
+    raise HMCError(unknown_outcome)
 
 
 async def delete_vios(
@@ -638,15 +417,12 @@ async def _resolve_vios_backup_selectors(
     system_name_or_uuid = selector
     system_name = system_name_or_uuid
     vios_uuid = vios_name_or_uuid
-    if is_uuid(system_name_or_uuid) or not is_uuid(vios_name_or_uuid):
-        if is_uuid(system_name_or_uuid):
-            system_name = await _resolve_vios_backup_system_name(
-                hmc, system_name_or_uuid
-            )
-        if not is_uuid(vios_name_or_uuid):
-            vios_uuid = await resolve_vios_uuid(
-                hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-            )
+    if is_uuid(system_name_or_uuid):
+        system_name = await _resolve_vios_backup_system_name(hmc, system_name_or_uuid)
+    if not is_uuid(vios_name_or_uuid):
+        vios_uuid = await resolve_vios_uuid(
+            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        )
     return system_name, vios_uuid
 
 
@@ -658,7 +434,7 @@ async def list_vios_backups(
 ) -> list[dict[str, str]]:
     """Return the validated backup catalog for one VIOS."""
     vios_uuid = vios_name_or_uuid
-    if not is_uuid(vios_name_or_uuid):
+    if not is_uuid(vios_name_or_uuid) or system_name_or_uuid is not None:
         vios_uuid = await resolve_vios_uuid(
             hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
         )

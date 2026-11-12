@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
-from live_test import system_profile_source as source
+from live_test.arms import system_profile_source as source
 
 S = "00000001-0000-4000-8000-000000000001"
 L = ["00000002-0000-4000-8000-000000000002", "00000003-0000-4000-8000-000000000003"]
@@ -584,7 +584,7 @@ def test_capture_output_cannot_put_private_native_results_in_checkout(
                 "--references-approved",
                 "--exclusive-writer-window",
                 "--output",
-                str(Path(source.__file__).resolve().parents[2] / "raw"),
+                str(Path(source.__file__).resolve().parents[3] / "raw"),
             ]
         )
         == 2
@@ -769,7 +769,7 @@ def test_provenance_uses_checkout_and_existing_renderer_clean_field(monkeypatch)
     monkeypatch.setattr(source.subprocess, "check_output", command)
     assert source._revision() == ("a" * 40, True)
     assert all(
-        c[1].get("cwd") == Path(source.__file__).resolve().parents[2] for c in calls
+        c[1].get("cwd") == Path(source.__file__).resolve().parents[3] for c in calls
     )
 
 

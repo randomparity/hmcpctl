@@ -4,7 +4,7 @@
 
 `save_current_partition_profile(overwrite=True)` first writes a recovery copy of the
 destination profile (ADR 0242). The copy's name is `"hmcprec-" + secrets.token_hex(12)`
-(`src/hmcpctl/operations/lpar/profiles.py`), which is 32 characters long. A live capture on
+(`src/hmcpctl/operations/lpar/profiles/core.py`), which is 32 characters long. A live capture on
 2026-11-03 (V10R3 SP1060, POWER9, one owned scratch partition) recorded the clone PUT
 answered with HTTP 500. The answer was `REST0142` wrapping `HSCL059F The user-defined name
 "hmcprec-…" is too long. The user-defined name cannot be longer than 31 characters.` In the
@@ -25,7 +25,7 @@ say that no overwrite was submitted.
 
 1. Generate the recovery name as `"hmcprec-" + secrets.token_hex(8)`: 24 characters, 64
    random bits. The `hmcprec-` prefix is unchanged, so the live arm's namespace check
-   (`scripts/live_test/partition_profiles.py`) still matches it.
+   (`scripts/live_test/arms/partition_profiles.py`) still matches it.
 2. `write_native_profile` passes only the HMC's `<Message>` text (or nothing) to `HMCError`,
    never the raw body: that body echoes the session cookie and `X-API-Session` in
    `<RequestHeaders>`, and `HMCError` would otherwise keep 4096 bytes of it in `.body` and fall

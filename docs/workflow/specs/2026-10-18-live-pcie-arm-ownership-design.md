@@ -6,8 +6,8 @@ and dedicated-slot fixture lifecycles. The operator approved separating these
 existing arms and migrating direct consumers while preserving their behavior.
 
 ## Scope
-Move the SR-IOV section unchanged into live_test/sriov.py and the dedicated-slot
-section unchanged into live_test/dedicated_pcie.py. Their current function,
+Move the SR-IOV section unchanged into live_test/arms/sriov.py and the dedicated-slot
+section unchanged into live_test/arms/dedicated_pcie.py. Their current function,
 constant, and dataclass definitions have no cross-section references. Keep the
 existing dedicated inventory read scenarios with their dedicated-arm orchestrator,
 including its SR-IOV inventory observations. Keep fixture and io_slots grammar

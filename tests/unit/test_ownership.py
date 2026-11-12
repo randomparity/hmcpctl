@@ -15,8 +15,10 @@ import pytest
 from hmcpctl.audit import records as audit
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.config import AGENT_ID_FORBIDDEN, validate_agent_id
+from hmcpctl.errors import HMCTLSFingerprintError
 from hmcpctl.operations.lpar import core as operations_lpar
 from hmcpctl.operations.lpar import ownership as lpar_ownership
+from hmcpctl.operations.lpar.creation import core as creation_core
 from hmcpctl.operations.lpar.ownership import (
     authorize_decommission_lpar_ownership_snapshot,
     authorize_lpar_mutation,
@@ -441,9 +443,10 @@ def test_the_override_record_is_bounded_and_escaped(caplog):
     assert len(record["system"]) == audit.MAX_VALUE_LENGTH
 
 
-def test_operations_lpar_does_not_resolve_the_audit_logger():
+@pytest.mark.parametrize("owner", [operations_lpar, creation_core])
+def test_operations_lpar_does_not_resolve_the_audit_logger(owner):
     """Spec 26c. `audit` is the only module that names the reserved logger."""
-    source = Path(operations_lpar.__file__).read_text()
+    source = Path(owner.__file__).read_text()
     assert audit_sink.AUDIT_LOGGER_NAME not in source
 
 
@@ -1289,10 +1292,7 @@ def test_set_description_refuses_a_malformed_current_stamp():
 
 from hmcpctl.documents.lpar import LparResources  # noqa: E402
 from hmcpctl.errors import HMCError  # noqa: E402
-from hmcpctl.operations.lpar.core import (  # noqa: E402
-    LparCreation,
-    create_and_stamp_lpar,
-)
+from hmcpctl.operations.lpar.creation.core import LparCreation, create_and_stamp_lpar  # noqa: E402
 from hmcpctl.ssh.transport import HMCCLIError  # noqa: E402
 
 _STAMP_FAILURES = [
@@ -1339,7 +1339,7 @@ def _run_create(hmc, creation, *, set_description=None):
     with (
         patch("hmcpctl.ssh.lpar.set_lpar_description", new=set_description),
         patch.object(
-            operations_lpar,
+            creation_core,
             "resolve_system_uuid",
             new=AsyncMock(return_value="sys-uuid"),
         ),
@@ -1402,7 +1402,7 @@ def test_required_skips_raise_when_system_name_unresolved():
     hmc = _create_hmc()
     with (
         patch.object(
-            operations_lpar,
+            creation_core,
             "resolve_system_uuid",
             new=AsyncMock(return_value="sys-uuid"),
         ),
@@ -1425,7 +1425,7 @@ def test_best_effort_skip_warning_unchanged_when_system_name_unresolved():
     hmc = _create_hmc()
     with (
         patch.object(
-            operations_lpar,
+            creation_core,
             "resolve_system_uuid",
             new=AsyncMock(return_value="sys-uuid"),
         ),
@@ -1507,3 +1507,65 @@ def test_ownership_output_limit_override_keeps_audit(caplog):
         )
     run.assert_not_awaited()
     assert "ownership-override" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_system_name_pin_mismatch_never_falls_back_to_ssh(monkeypatch):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    ssh = AsyncMock(return_value="system")
+    monkeypatch.setattr(
+        lpar_ownership, "system_name_from_uuid", AsyncMock(side_effect=failure)
+    )
+    monkeypatch.setattr(lpar_ownership, "resolve_system_cli_name", ssh)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._resolve_system_name(
+            AsyncMock(), "system-uuid", "fallback"
+        )
+    assert caught.value is failure
+    ssh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fleet_pin_mismatch_never_reads_the_next_system():
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = AsyncMock()
+    hmc.list_system_summaries.return_value = [
+        {"UUID": "11111111-1111-4111-8111-111111111111", "SystemName": "first"},
+        {"UUID": "22222222-2222-4222-8222-222222222222", "SystemName": "second"},
+    ]
+    hmc.list_logical_partitions.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._search_fleet_for_partition(
+            hmc, "partition-uuid", "partition", lpar_ownership._SkippedFrames()
+        )
+    assert caught.value is failure
+    assert hmc.list_logical_partitions.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fleet_inventory_preserves_pin_mismatch_identity():
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = AsyncMock()
+    hmc.list_system_summaries.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._fleet_inventory(hmc, "partition")
+    assert caught.value is failure
+
+
+@pytest.mark.asyncio
+async def test_profile_restore_inventory_preserves_pin_mismatch(monkeypatch):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    monkeypatch.setattr(
+        lpar_ownership, "resolve_system_uuid", AsyncMock(return_value="system-uuid")
+    )
+    monkeypatch.setattr(
+        lpar_ownership, "_resolve_system_name", AsyncMock(return_value="system")
+    )
+    monkeypatch.setattr(
+        lpar_ownership, "list_lpar_ownership", AsyncMock(side_effect=failure)
+    )
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await lpar_ownership._authorize_system_lpar_profile_restore(
+            AsyncMock(), "system"
+        )
+    assert caught.value is failure

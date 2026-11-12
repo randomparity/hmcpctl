@@ -335,9 +335,9 @@ Prove bounded-stream overflow refuses, stricter cap preserved and no authenticat
    - Runtime bootability/automatic restart execution is not proved by stored configuration; no implicit power action.
    - Controller or missing-field readback may be unavailable; this blocks success/follow-ups, not an exclusion.
 4. **Covered elsewhere**
-   - Profile CRUD/preservation: #1724 and operations/lpar/profiles.py.
+   - Profile CRUD/preservation: #1724 and operations/lpar/profiles/core.py.
    - Immediate activation: operations/lpar/activation.py; transport/session auth: existing HMC client.
-   - C11 serial eligibility/reciprocal semantics: operations/lpar/serial.py; C09 preserves its barriers.
+   - C11 serial eligibility/reciprocal semantics: operations/lpar/creation/serial.py; C09 preserves its barriers.
 
 ## Threat model
 

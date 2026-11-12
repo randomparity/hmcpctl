@@ -20,7 +20,7 @@ from hmcpctl.documents.lpar_hardware_memory import (
     hardware_memory_pairs,
 )
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.hardware_memory import (
+from hmcpctl.operations.lpar.memory.hardware import (
     admit_hardware_memory,
     created_hardware_memory_step,
 )
@@ -257,7 +257,7 @@ async def test_hardware_native_tuple_admission(target, values, numeric):
     if values == (True, False, False):
         await admit_hardware_memory(hmc, SYSTEM, False, False)
     else:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="requires supported selected-system"):
             await admit_hardware_memory(hmc, SYSTEM, False, False)
     hmc._get.assert_awaited_once_with(
         f"/rest/api/uom/ManagedSystem/{SYSTEM}",
@@ -717,9 +717,12 @@ async def test_actual_transport_unavailable_detail_never_falls_back(mock_hmc, st
     )
     config = make_config(port=443, schema_version="V1_0")
     async with HMCClient(config) as hmc:
-        with pytest.raises(ValueError) as caught:
+        with pytest.raises(
+            ValueError, match="Could not read selected-system"
+        ) as caught:
             await admit_hardware_memory(hmc, SYSTEM, False, None)
     assert PRIVATE not in str(caught.value)
+    assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert route.call_count == 1
     assert len([call for call in mock_hmc.calls if call.request.method == "GET"]) == 1

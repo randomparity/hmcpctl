@@ -19,12 +19,9 @@ from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
-from live_test import (  # noqa: E402
-    evidence,
-    lpar_config,
-    runner,
-)
-from live_test.observation import CallFailure  # noqa: E402
+from live_test import evidence, runner  # noqa: E402
+from live_test.arms import lpar_config  # noqa: E402
+from live_test.observation import CallFailure, plain_data  # noqa: E402
 
 SYSTEM = "sys-A"
 OTHER = "lpar-A"
@@ -575,7 +572,8 @@ class DedicatedHMC(FakeHMC):
 
 async def _run_dedicated(monkeypatch, hmc, *, system=SYSTEM, drc="21010020"):
     async def scripted(_state, _client, tool, **kwargs):
-        return hmc.answer(tool, kwargs)
+        status, data = hmc.answer(tool, kwargs)
+        return status, plain_data(data) if status == "PASS" else data
 
     monkeypatch.setattr(runner.RunState, "call", scripted)
     state = runner.RunState(
@@ -839,7 +837,7 @@ async def test_settings_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
     from dataclasses import asdict
 
     from hmcpctl.documents.lpar import LparSettings
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
 
     hmc = FakeHMC(foreign_token=fault == "foreign")
     settings = asdict(LparSettings(False, 0, False, False, False))
@@ -937,7 +935,7 @@ async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
     from dataclasses import asdict
 
     from hmcpctl.documents.lpar import LparReportingSettings
-    from hmcpctl.operations.lpar.core import LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreationResult
 
     hmc = FakeHMC(foreign_token=fault == "foreign")
     settings = asdict(LparReportingSettings("a", False, "none", False))
@@ -1023,3 +1021,49 @@ async def test_reporting_arm_is_inactive_owned_and_recovers(monkeypatch, fault):
         assert not any(
             row["observation"]["result"] == "passed" for row in state.observations
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("group", "subtask", "exercise"),
+    [
+        ("lpar-settings", 47, lpar_config.exercise_lpar_settings),
+        ("lpar-reporting", 48, lpar_config.exercise_lpar_reporting),
+    ],
+)
+@pytest.mark.parametrize("fault", ["unavailable", "stranded"])
+async def test_settings_baseline_refusal_precedes_creation(
+    monkeypatch, group, subtask, exercise, fault
+):
+    hmc = FakeHMC(existing_scratch=fault == "stranded")
+    creates = []
+
+    async def create(*args, **kwargs):
+        creates.append((args, kwargs))
+        raise AssertionError("baseline refusal reached creation")
+
+    async def call(_state, _client, tool, **kwargs):
+        if (
+            fault == "unavailable"
+            and tool == "hmc_run_command"
+            and kwargs["cmd"].startswith("lssyscfg")
+        ):
+            return "FAIL", _failure("baseline unavailable")
+        return hmc.answer(tool, kwargs)
+
+    monkeypatch.setattr(lpar_config, "create_and_stamp_lpar", create)
+    monkeypatch.setattr(runner.RunState, "call", call)
+    state = runner.RunState(
+        config=live_config.LiveTestConfig(system_name=SYSTEM),
+        group=group,
+        hmc_config=HMCConfig.from_mapping({}),
+    )
+    await exercise(object(), state)
+
+    assert creates == []
+    assert not state.observations
+    assert not any(tool in MUTATIONS for tool, _ in hmc.calls)
+    skipped = [row for row in state.results if row["status"] == "SKIP"]
+    assert len(skipped) == 1
+    assert (skipped[0]["subtask"], skipped[0]["tool"]) == (subtask, group)
+    assert "run recovery" in str(skipped[0])

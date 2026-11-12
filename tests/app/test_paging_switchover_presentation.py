@@ -25,7 +25,7 @@ from hmcpctl.authorization.access_policy import (
 )
 from hmcpctl.cli import app
 from hmcpctl.cli_commands.lpar import memory as cli
-from hmcpctl.operations.lpar.paging import reduce_paging_attempt
+from hmcpctl.operations.lpar.memory.paging import reduce_paging_attempt
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar import lifecycle as tools
 

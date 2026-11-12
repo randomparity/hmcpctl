@@ -18,6 +18,7 @@ from hmcpctl.documents.common import UOM_NS
 from hmcpctl.xmlutil import ATOM_NS
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test import artifacts as live_artifacts
 from live_test import config, runner
 
 
@@ -53,7 +54,7 @@ def armed(case="shared-lpar", **kwargs):
     ],
 )
 def test_fixed_cases(case, kind, pairs):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     actual_kind, memory = arm.configured(armed(case))
     assert actual_kind == kind
@@ -76,14 +77,14 @@ def test_fixed_cases(case, kind, pairs):
     ],
 )
 def test_invalid_configuration_refuses(changes):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     with pytest.raises((ValueError, TypeError)):
         arm.configured(replace(armed(), **changes))
 
 
 def test_redundant_is_explicit_and_decimal_json_is_number():
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     _, memory = arm.configured(
         armed("redundant-lpar", creation_memory_secondary_vios_name="paging-b")
@@ -97,7 +98,7 @@ def test_redundant_is_explicit_and_decimal_json_is_number():
 
 @pytest.mark.asyncio
 async def test_unarmed_skip_before_effects():
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     from hmcpctl.config import HMCConfig
 
@@ -135,7 +136,7 @@ def feed(rows):
 
 @pytest.fixture
 def native_target(monkeypatch):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     state = runner.RunState(
         group=arm.GROUP,
@@ -265,12 +266,12 @@ def native_target(monkeypatch):
 
     monkeypatch.setattr("hmcpctl.operations.lpar.linux_roles.run_hmc_command", mode)
 
-    async def inventory(hmc, system, parent, *, partition_type):
-        assert system == SYSTEM and parent == FRESH
+    async def inventory(hmc, lpar_name_or_uuid, *, system_name_or_uuid, partition_type):
+        assert system_name_or_uuid == SYSTEM and lpar_name_or_uuid == FRESH
         selected = SimpleNamespace(uuid=PROFILE, name="default_profile")
         return SimpleNamespace(
-            system_uuid=system,
-            partition_uuid=parent,
+            system_uuid=system_name_or_uuid,
+            partition_uuid=lpar_name_or_uuid,
             partition_type=partition_type,
             profiles=(selected, selected)
             if env.fault == "ambiguous-profile"
@@ -326,7 +327,7 @@ def native_target(monkeypatch):
     def checkpoint():
         j = state.artifacts.creation_memory
         env.checkpoints.append(deepcopy(j))
-        config.decode_artifacts(asdict(state.artifacts))
+        live_artifacts.decode_artifacts(asdict(state.artifacts))
         if env.fault == "checkpoint" or env.fault == "checkpoint-" + j["phase"]:
             raise OSError("checkpoint fault")
 
@@ -472,10 +473,10 @@ async def test_one_fixed_case_independent_oracle_cleanup_and_no_runtime(
         assert deletes[0][1]["vios_name_or_uuid"] == FRESH
     assert len(e.state.observations) == 1
     assert e.state.observations[0]["observation"]["cleanup"] == "passed"
-    import check_capability_inventory as inventory
     import promote_live_observations as promotion
+    from capability_evidence import registry as capability_registry
 
-    sites = inventory.discover_observation_sites()
+    sites = capability_registry.discover_observation_sites()
     assert sites[(operation, row)] == scenario
     assert e.state.results[-1]["subtask"] == row
     assert runner.SUBTASK_GROUPS[e.arm.GROUP] == [65]
@@ -794,7 +795,7 @@ async def test_direct_native_provider_href_is_independently_resolved(native_targ
 @pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
 @pytest.mark.parametrize("fault", [None, "partition", "system", "parent", "origin"])
 async def test_saved_oracle_preserves_verified_uuid_spelling(monkeypatch, kind, fault):
-    from live_test import creation_memory as arm
+    from live_test.arms import creation_memory as arm
 
     parent = "abcdefab-abcd-4abc-8abc-abcdefabcdef"
     system = "fedcbafe-fedc-4fed-8fed-fedcbafedcba"

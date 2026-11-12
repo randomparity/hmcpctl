@@ -12,6 +12,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.errors import HMCError
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.vios import core
 from hmcpctl.ssh.transport import HMCCLIError
 
@@ -47,7 +48,9 @@ def boundary(monkeypatch):
         core, "resolve_system_cli_name", AsyncMock(return_value="sys-R1"), raising=False
     )
     mode = AsyncMock(return_value=({}, False))
-    monkeypatch.setattr(core, "read_creation_authority", mode, raising=False)
+    monkeypatch.setattr(
+        partition_creation, "read_creation_authority", mode, raising=False
+    )
     write = AsyncMock(return_value="")
     monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", write)
     state = SimpleNamespace(
@@ -231,12 +234,12 @@ async def test_vios_ratios_compose_existing_security_and_vtpm(
     policy = LparSecurityPolicy(secure_boot=0)
     vtpm = LparVtpmSettings(vtpm_enabled=False)
     monkeypatch.setattr(
-        core,
+        partition_creation,
         "read_vtpm_capabilities",
         AsyncMock(return_value=VtpmCapabilities(("1.2",), (), False)),
     )
     monkeypatch.setattr(
-        core,
+        partition_creation,
         "read_security_policy_capabilities",
         AsyncMock(
             return_value=SecurityPolicyCapabilities(
@@ -254,8 +257,8 @@ async def test_vios_ratios_compose_existing_security_and_vtpm(
         (vtpm_read if failed == "vtpm" else policy_read).side_effect = HMCError(
             "private-provider-marker"
         )
-    monkeypatch.setattr(core, "get_lpar_vtpm_state", vtpm_read)
-    monkeypatch.setattr(core, "read_lpar_security_policy", policy_read)
+    monkeypatch.setattr(partition_creation, "get_lpar_vtpm_state", vtpm_read)
+    monkeypatch.setattr(partition_creation, "read_lpar_security_policy", policy_read)
     args = (boundary.hmc, "selector", "vios-R1", RESOURCES)
     if failed:
         with pytest.raises(HMCError) as caught:

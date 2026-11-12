@@ -18,7 +18,8 @@ only for the CLI and MCP server. Configure the
 
 `hmcpctl.api` has exactly six stable names: `HMCClient`, `HMCConfig`,
 `ConfigError`, `HMCError`, `HMCTransportError`, and
-`TLSVerificationDisabledWarning`. Construct the client through this boundary:
+`TLSVerificationDisabledWarning`. Entering the client’s async context authenticates
+automatically, and exiting it logs off and closes the transport.
 
 ```python
 import asyncio
@@ -28,7 +29,7 @@ from hmcpctl.api import HMCClient, HMCConfig
 
 async def main() -> None:
     async with HMCClient(HMCConfig()) as hmc:
-        await hmc.logon()
+        assert hmc.is_logged_on
 
 
 asyncio.run(main())

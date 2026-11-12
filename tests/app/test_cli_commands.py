@@ -17,6 +17,7 @@ import asyncio
 import inspect
 import json
 import textwrap
+import threading
 import xml.etree.ElementTree as ET  # nosec B405 - parses a literal test partition
 from dataclasses import asdict
 from typing import Self
@@ -60,11 +61,12 @@ from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.lpar import ownership as lpar_ownership
 from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 from hmcpctl.operations.lpar.migration import LpmResult
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.lpar.provision import AttachDiskResult, ProvisionResult
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+from hmcpctl.operations.lpar.provisioning.core import AttachDiskResult, ProvisionResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+from hmcpctl.operations.storage.iso_upload import StorageUploadResult
+from hmcpctl.operations.storage.optical import OpticalMedia, StorageOpticalResult
 from hmcpctl.operations.storage.resources import (
-    OpticalMedia,
     StorageMapping,
     StorageMutationResult,
     VolumeGroup,
@@ -1614,6 +1616,48 @@ _PROVISIONED = ProvisionResult(
 )
 
 
+@pytest.mark.parametrize("operation", ["provision", "decommission"])
+def test_lpar_cli_renders_completion_after_running_snapshot(
+    operation, monkeypatch, fake_hmc
+):
+    if operation == "provision":
+        _fake_provision(monkeypatch, _PROVISIONED)
+        args = _PROVISION_ARGS
+        message = "provisioned successfully"
+    else:
+        fake_hmc.lpar["Resource"]["PartitionState"] = "not activated"
+        args = ["lpars", "decommission", LPAR_NAME, "--system", SYSTEM_UUID, "--yes"]
+        message = "decommissioned successfully"
+
+    submit = engine.submit
+    snapshots = []
+
+    def submit_running(request, body, **options):
+        release = threading.Event()
+
+        async def held_body(context):
+            if not await asyncio.to_thread(release.wait, 10):
+                raise TimeoutError("test did not release the worker")
+            return await body(context)
+
+        try:
+            record = submit(request, held_body, **(options | {"wait_seconds": 0}))
+            snapshots.append(record)
+            return record
+        finally:
+            release.set()
+
+    monkeypatch.setattr(engine, "submit", submit_running)
+    try:
+        result = RUNNER.invoke(cli.app, [*args, "--request-id", "r1"])
+        assert [record.state for record in snapshots] == ["running"]
+        assert result.exit_code == 0, result.output
+        assert message in result.output
+    finally:
+        for record in snapshots:
+            engine.join(record.operation_id, 10)
+
+
 def test_lpars_provision_requires_a_request_id(fake_hmc):
     result = RUNNER.invoke(cli.app, _PROVISION_ARGS)
     assert result.exit_code == 2
@@ -2926,7 +2970,7 @@ def _storage_app() -> typer.Typer:
         (
             ["detach-mapping", VIOS_UUID, "vhost0/vtscsi0", "--yes"],
             "detach_storage_mapping",
-            StorageMutationResult.from_raw(asdict(UNSYNCED), change_location=UNSYNCED),
+            StorageMutationResult.from_raw(None, change_location=UNSYNCED),
         ),
         (
             [
@@ -2939,8 +2983,9 @@ def _storage_app() -> typer.Typer:
                 "https://images.test/aix.iso",
             ],
             "upload_iso",
-            StorageMutationResult.from_raw(
-                {"status": "uploaded", "media_name": "aix.iso"}
+            StorageUploadResult(
+                raw={"status": "uploaded", "media_name": "aix.iso"},
+                status="uploaded",
             ),
         ),
     ],
@@ -3219,11 +3264,7 @@ def test_storage_delete_media_declined_confirmation_aborts(fake_hmc, monkeypatch
 def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
     mount = AsyncMock(
         return_value=StorageMutationResult.from_raw(
-            {
-                "lpar_uuid": LPAR_UUID,
-                "resource": {"UUID": "mapping-1", "MediaName": "install.iso"},
-                "change_location": asdict(UNSYNCED),
-            },
+            {"UUID": "mapping-1", "MediaName": "install.iso"},
             lpar_uuid=LPAR_UUID,
             change_location=UNSYNCED,
         )
@@ -3270,9 +3311,7 @@ def test_storage_mount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
 
 def test_storage_unmount_optical_media_forwards_selectors(fake_hmc, monkeypatch):
     unmount = AsyncMock(
-        return_value=StorageMutationResult.from_raw(
-            asdict(UNSYNCED), change_location=UNSYNCED
-        )
+        return_value=StorageMutationResult.from_raw(None, change_location=UNSYNCED)
     )
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.unmount_optical_media", unmount
@@ -3333,7 +3372,9 @@ def test_storage_optical_load_commands_forward_selectors(
         "release": True,
     }
     call = AsyncMock(
-        return_value=StorageMutationResult.from_raw(raw, lpar_uuid=LPAR_UUID)
+        return_value=StorageOpticalResult(
+            raw=raw, lpar_uuid=LPAR_UUID, target_device="vtopt1"
+        )
     )
     monkeypatch.setattr(f"hmcpctl.cli_commands.storage.resources.{operation}", call)
 
@@ -3663,9 +3704,7 @@ def test_storage_detach_mapping_deletes_when_confirmed(fake_hmc, monkeypatch):
             mapping_id=mapping_id,
             ownership_override=ownership_override,
         )
-        return StorageMutationResult.from_raw(
-            asdict(UNSYNCED), change_location=UNSYNCED
-        )
+        return StorageMutationResult.from_raw(None, change_location=UNSYNCED)
 
     monkeypatch.setattr(
         "hmcpctl.cli_commands.storage.resources.detach_storage_mapping", fake_detach
@@ -3758,14 +3797,17 @@ def test_storage_upload_iso_reports_uploaded_media(fake_hmc, monkeypatch):
         assert (vios, vg, media_name) == (VIOS_UUID, VG_UUID, "aix.iso")
         assert iso_source == "https://images.test/aix.iso"
         assert system_name_or_uuid is None
-        return StorageMutationResult.from_raw(
-            {
+        return StorageUploadResult(
+            raw={
                 "status": "uploaded",
                 "media_name": "aix.iso",
                 "media_size_bytes": 1048576,
                 "source_sha256": "abc123",
                 "media": {"MediaName": "aix.iso"},
-            }
+            },
+            status="uploaded",
+            media_size_bytes=1048576,
+            source_sha256="abc123",
         )
 
     monkeypatch.setattr(
@@ -3797,8 +3839,9 @@ def test_storage_upload_iso_json(fake_hmc, monkeypatch):
         _hmc, _vios, _vg, _media_name, _iso_source, *, system_name_or_uuid
     ):
         assert system_name_or_uuid is None
-        return StorageMutationResult.from_raw(
-            {"status": "uploaded", "media_name": "aix.iso"}
+        return StorageUploadResult(
+            raw={"status": "uploaded", "media_name": "aix.iso"},
+            status="uploaded",
         )
 
     monkeypatch.setattr(

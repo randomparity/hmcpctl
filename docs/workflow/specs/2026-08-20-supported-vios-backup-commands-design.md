@@ -26,6 +26,10 @@ IBM's command references and the issue's live-HMC evidence govern the exact shap
 
 Keep `hmc_list_vios_backups(vios_name_or_uuid, profile=None)` unchanged.
 
+> **Later change (#1947):** `hmc_list_vios_backups` has since gained an optional keyword-only
+> `system_name_or_uuid`, declared as a `managed_system` target selector, so its signature is
+> now `hmc_list_vios_backups(vios_name_or_uuid, profile=None, *, system_name_or_uuid=None)`.
+
 Replace the other signatures with:
 
 ```python

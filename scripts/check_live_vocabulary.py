@@ -33,9 +33,10 @@ import argparse
 import ast
 import itertools
 import json
+import os
 import re
 import shlex
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -472,13 +473,18 @@ def command_is_captured(template: str, commands: Sequence[str]) -> bool:
 
 
 def tracked_files(root: Path) -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "src", "tests"],
+    # Fixed Git inventory query; paths are NUL-delimited data, never commands.
+    proc = subprocess.run(  # nosec B603, B607
+        ["git", "-C", str(root), "ls-files", "-z", "src", "tests"],
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
         capture_output=True,
-        text=True,
         check=True,
     )
-    return proc.stdout.split()
+    return [os.fsdecode(path) for path in proc.stdout.split(b"\0") if path]
 
 
 def _file_violations(file: str, text: str, evidence: Evidence) -> list[Violation]:

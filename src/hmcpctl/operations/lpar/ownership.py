@@ -15,9 +15,10 @@ from hmcpctl.discovery_limits import (
     MAX_PARENT_DISCOVERY_SYSTEMS,
     PARENT_DISCOVERY_TIMEOUT_SECONDS,
 )
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.systems.fleet import FleetListing, read_fleet
 from hmcpctl.resource_identity import (
+    ResourceNotFoundError,
     _hosts_partition,
     is_uuid,
     lpar_name_from_uuid,
@@ -102,6 +103,8 @@ async def _fleet_inventory(hmc: HMCClient, lpar_label: str) -> list[Any]:
     """
     try:
         return await hmc.list_system_summaries()
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         raise ValueError(
             f"Cannot identify the managed system owning LPAR {lpar_label!r}: "
@@ -124,6 +127,8 @@ async def _search_fleet_for_partition(
         system_uuid, system_name = candidate
         try:
             partitions = await hmc.list_logical_partitions(system_uuid)
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             _logger.warning(
                 "Owning-system discovery could not read managed system %s: %s",
@@ -442,6 +447,8 @@ async def _authorize_system_lpar_profile_restore(
 
     try:
         rows = (await list_lpar_ownership(hmc, system_uuid)).entries
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         raise ValueError(
             "LPAR ownership inventory is unavailable; retry after the managed-system "
@@ -570,6 +577,8 @@ async def _resolve_system_name(hmc: HMCClient, system_uuid: str, fallback: str) 
         name = await system_name_from_uuid(hmc, system_uuid)
         if name is not None:
             return name
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         _logger.debug(
             "REST system-name lookup failed for %s: %s",
@@ -710,3 +719,44 @@ def _keep_ownership_prefix(current: str, description: str) -> str:
     if stamp is None or parse_lpar_ownership_owner(description) is not None:
         return description
     return f"{stamp.group(0)} {description}" if description else stamp.group(0)
+
+
+async def _resolve_and_authorize_vios_names(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    vios_name_or_uuid: str,
+    *,
+    ownership_override: bool,
+) -> tuple[str, str]:
+    """Resolve a VIOS the selected system hosts, authorize it, and return CLI names.
+
+    ADR 0092 §1: ``msp`` is valid only on a Virtual I/O Server, so its target
+    crosses the same description-stamp rule as an LPAR. The system's own
+    ``VirtualIOServer`` feed establishes containment and supplies the name.
+    """
+    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+    entries = await hmc.list_vios(system_uuid)
+    if is_uuid(vios_name_or_uuid):
+        matches = [e for e in entries if _hosts_partition([e], vios_name_or_uuid)]
+    else:
+        matches = [
+            e
+            for e in entries
+            if (e.get("Resource") or {}).get("PartitionName") == vios_name_or_uuid
+        ]
+    vios_name = (
+        (matches[0].get("Resource") or {}).get("PartitionName") if matches else None
+    )
+    if not isinstance(vios_name, str) or not vios_name.strip():
+        raise ResourceNotFoundError(
+            "VIOS",
+            vios_name_or_uuid,
+            f"No Virtual I/O Server (lpar_env=vioserver) {vios_name_or_uuid!r} on "
+            f"managed system {system_uuid}. Use hmc_list_vios to list its VIOS "
+            "partitions.",
+        )
+    system_name = await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
+    await authorize_lpar_mutation(
+        hmc, system_name, vios_name, ownership_override=ownership_override
+    )
+    return system_name, vios_name

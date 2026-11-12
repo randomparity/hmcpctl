@@ -190,7 +190,8 @@ def test_main_writes_output(tmp_path, capsys):
 
 
 def test_typed_processor_move_keeps_its_named_hand_written_scenario(generated):
-    from live_test import processor_move, runner
+    from live_test import runner
+    from live_test.arms import processor_move
 
     document, hand_written = generated
     assert not any(

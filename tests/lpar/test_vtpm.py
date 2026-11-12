@@ -541,7 +541,10 @@ async def test_creation_real_encoder_admission_and_verification_composition(
         LparResources,
         LparSettings,
     )
-    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreation,
+        create_and_stamp_lpar,
+    )
 
     system_id = "00000001-abcd-4ef0-8abc-000000000001"
     entry = {"UUID": "created", "Resource": {"PartitionName": "p"}}
@@ -572,7 +575,7 @@ async def test_creation_real_encoder_admission_and_verification_composition(
         ("resolve_system_cli_name", AsyncMock(return_value="sys-R1")),
         ("stamp_created_lpar_ownership", AsyncMock(return_value=(True, ()))),
     ]:
-        monkeypatch.setattr("hmcpctl.operations.lpar.core." + name, mock)
+        monkeypatch.setattr("hmcpctl.operations.lpar.creation.core." + name, mock)
     native = []
 
     async def original_transport(config, command):
@@ -642,7 +645,10 @@ async def test_creation_real_encoder_admission_and_verification_composition(
 @pytest.mark.parametrize("kind", ["ibmi", "keylock", "wrong-model", "unsupported"])
 async def test_creation_vtpm_rejection_precedes_all_effects(monkeypatch, kind):
     from hmcpctl.documents.lpar import LparResources
-    from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreation,
+        create_and_stamp_lpar,
+    )
 
     hmc = SimpleNamespace(
         config=CONFIG, find_partition_by_name=AsyncMock(return_value=None)
@@ -658,11 +664,13 @@ async def test_creation_vtpm_rejection_precedes_all_effects(monkeypatch, kind):
             }
         )
         monkeypatch.setattr(
-            "hmcpctl.operations.lpar.core.resolve_system_uuid",
+            "hmcpctl.operations.lpar.creation.core.resolve_system_uuid",
             AsyncMock(return_value="00000001-abcd-4ef0-8abc-000000000001"),
         )
     create = AsyncMock()
-    monkeypatch.setattr("hmcpctl.operations.lpar.core.create_lpar_via_cli", create)
+    monkeypatch.setattr(
+        "hmcpctl.operations.lpar.creation.core.create_lpar_via_cli", create
+    )
     with pytest.raises((ValueError, TypeError)):
         await create_and_stamp_lpar(
             hmc,
@@ -683,13 +691,13 @@ async def test_creation_vtpm_rejection_precedes_all_effects(monkeypatch, kind):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("step", ["error", "missing"])
 async def test_requested_vtpm_missing_or_failed_step_stops_assignment_consumer(
-    monkeypatch, step
+    monkeypatch, step, creation_mock
 ):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.core import LparCreation, LparCreationResult
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
-    from hmcpctl.operations.lpar.workflows import create_lpar
 
     # Construct a malformed/unverified producer result to test the downstream barrier.
     result = LparCreationResult(
@@ -702,16 +710,16 @@ async def test_requested_vtpm_missing_or_failed_step_stops_assignment_consumer(
         else None,
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.workflows.prevalidate_lpar_pcie_assignments",
+        "hmcpctl.operations.lpar.creation.workflow.prevalidate_lpar_pcie_assignments",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.workflows.create_and_stamp_lpar",
-        AsyncMock(return_value=result),
+        "hmcpctl.operations.lpar.creation.workflow._create_and_stamp_lpar",
+        creation_mock(result),
     )
     assign = AsyncMock()
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.workflows.apply_validated_lpar_pcie_assignments",
+        "hmcpctl.operations.lpar.creation.workflow.apply_validated_lpar_pcie_assignments",
         assign,
     )
     actual = await create_lpar(

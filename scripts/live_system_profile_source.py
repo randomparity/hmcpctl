@@ -5,7 +5,7 @@ First run live_test_preflight.py --group system-profile-source with --packet and
 --packet-sha256 and --results. Capture requires a separate exact native grant.
 """
 
-from live_test.system_profile_source import main
+from live_test.arms.system_profile_source import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

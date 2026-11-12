@@ -1,5 +1,6 @@
 """End-to-end operation contracts over a stateful native transport boundary."""
 
+import inspect
 import xml.etree.ElementTree as ET
 from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock
@@ -12,8 +13,8 @@ from lpar.test_partition_profiles import A, field, profile
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.partition_profile import N, ProfilePatch, compare_profiles
-from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.profiles import (
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar.profiles.core import (
     delete_partition_profile,
     list_partition_profiles,
     read_partition_profile,
@@ -228,7 +229,7 @@ class NativeService:
 def service(monkeypatch):
     state = NativeService()
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.run_hmc_command",
+        "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
         AsyncMock(return_value="No results were found.\n"),
     )
     return state
@@ -236,9 +237,16 @@ def service(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_and_exact_read_cover_names_and_preserve_saved_fields(service):
-    result = await list_partition_profiles(service.hmc, S, P)
+    result = await list_partition_profiles(
+        hmc=service.hmc, system_name_or_uuid=S, lpar_name_or_uuid=P
+    )
     assert {r.name for r in result.profiles} == {"source", "other"}
-    record = await read_partition_profile(service.hmc, S, P, "source")
+    record = await read_partition_profile(
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+    )
     assert record.uuid == F and record.etag == "e1"
     assert record.fields["ProfileMemory"]["DesiredMemory"] == "768"
 
@@ -248,12 +256,12 @@ async def test_list_and_exact_read_cover_names_and_preserve_saved_fields(service
 async def test_patch_requested_change_and_preservation_are_independent(service, drift):
     service.add_field = drift
     result = await update_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
-        "e1",
-        ProfilePatch(desired_memory=1024),
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        expected_etag="e1",
+        patch=ProfilePatch(desired_memory=1024),
         exclusive_writer_window=True,
     )
     assert result.execution == "completed" and result.requested_change == "verified"
@@ -270,12 +278,12 @@ async def test_patch_requested_change_and_preservation_are_independent(service, 
 async def test_http_error_after_possible_effect_never_claims_rejection(service):
     service.post_status = 500
     result = await update_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
-        "e1",
-        ProfilePatch(desired_memory=1024),
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        expected_etag="e1",
+        patch=ProfilePatch(desired_memory=1024),
         exclusive_writer_window=True,
     )
     assert result.execution == "unknown" and result.requested_change == "unverified"
@@ -286,12 +294,12 @@ async def test_http_error_after_possible_effect_never_claims_rejection(service):
 async def test_412_is_known_rejection_without_retry(service):
     service.post_status = 412
     result = await update_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
-        "e1",
-        ProfilePatch(desired_memory=1024),
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        expected_etag="e1",
+        patch=ProfilePatch(desired_memory=1024),
         exclusive_writer_window=True,
     )
     assert result.execution == "rejected"
@@ -302,12 +310,12 @@ async def test_412_is_known_rejection_without_retry(service):
 async def test_successful_write_with_unavailable_readback_is_not_applied(service):
     service.readback_error = True
     result = await update_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
-        "e1",
-        ProfilePatch(desired_memory=1024),
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        expected_etag="e1",
+        patch=ProfilePatch(desired_memory=1024),
         exclusive_writer_window=True,
     )
     assert (
@@ -321,16 +329,21 @@ async def test_successful_write_with_unavailable_readback_is_not_applied(service
 async def test_prewrite_etag_and_exclusive_window_refuse_before_effect(service):
     with pytest.raises(PermissionError):
         await update_partition_profile(
-            service.hmc, S, P, "source", "e1", ProfilePatch(name="new")
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            profile_selector="source",
+            expected_etag="e1",
+            patch=ProfilePatch(name="new"),
         )
     with pytest.raises(ValueError):
         await update_partition_profile(
-            service.hmc,
-            S,
-            P,
-            "source",
-            "wrong",
-            ProfilePatch(name="new"),
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            profile_selector="source",
+            expected_etag="wrong",
+            patch=ProfilePatch(name="new"),
             exclusive_writer_window=True,
         )
     assert not [c for c in service.calls if c[0] != "GET"]
@@ -341,12 +354,12 @@ async def test_foreign_ownership_is_checked_before_any_profile_write(service):
     service.parent["Description"] = "[hmcpctl owner:another-agent created:2026-08-14]"
     with pytest.raises(PermissionError):
         await update_partition_profile(
-            service.hmc,
-            S,
-            P,
-            "source",
-            "e1",
-            ProfilePatch(name="new"),
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            profile_selector="source",
+            expected_etag="e1",
+            patch=ProfilePatch(name="new"),
             exclusive_writer_window=True,
         )
     assert not [c for c in service.calls if c[0] != "GET"]
@@ -355,7 +368,11 @@ async def test_foreign_ownership_is_checked_before_any_profile_write(service):
 @pytest.mark.asyncio
 async def test_default_job_and_readback_use_selected_profile_name(service):
     result = await set_default_partition_profile(
-        service.hmc, S, P, "source", exclusive_writer_window=True
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        exclusive_writer_window=True,
     )
     assert result.execution == "completed" and result.requested_change == "verified"
     assert service.parent["DefaultProfileName"] == "source"
@@ -365,9 +382,44 @@ async def test_default_job_and_readback_use_selected_profile_name(service):
 
 
 @pytest.mark.asyncio
+async def test_default_readback_fingerprint_failure_is_marked_and_stops(
+    service, monkeypatch
+):
+    from hmcpctl.operations.lpar.profiles import core as profiles
+
+    target = profiles._target
+    stopped_calls = None
+
+    async def read_target(*args, **kwargs):
+        nonlocal stopped_calls
+        if service.hmc.submit_job.called:
+            stopped_calls = len(service.calls)
+            raise HMCTLSFingerprintError("private-pin")
+        return await target(*args, **kwargs)
+
+    monkeypatch.setattr(profiles, "_target", read_target)
+    result = await set_default_partition_profile(
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        exclusive_writer_window=True,
+    )
+    assert result.diagnostics == ("tls-identity-verification-failed",)
+    assert "private-pin" not in result.error
+    assert result.execution == "completed"
+    assert result.requested_change == "unverified"
+    assert stopped_calls is not None and len(service.calls) == stopped_calls
+
+
+@pytest.mark.asyncio
 async def test_new_profile_save_does_not_require_overwrite_or_recovery(service):
     result = await save_current_partition_profile(
-        service.hmc, S, P, "new", exclusive_writer_window=True
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="new",
+        exclusive_writer_window=True,
     )
     assert (
         result.execution == "completed"
@@ -380,11 +432,20 @@ async def test_new_profile_save_does_not_require_overwrite_or_recovery(service):
 async def test_existing_save_requires_explicit_overwrite_and_etag(service):
     with pytest.raises(ValueError):
         await save_current_partition_profile(
-            service.hmc, S, P, "source", exclusive_writer_window=True
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            name="source",
+            exclusive_writer_window=True,
         )
     with pytest.raises(ValueError):
         await save_current_partition_profile(
-            service.hmc, S, P, "source", overwrite=True, exclusive_writer_window=True
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            name="source",
+            overwrite=True,
+            exclusive_writer_window=True,
         )
     assert not [c for c in service.calls if c[0] != "GET"]
 
@@ -393,10 +454,10 @@ async def test_existing_save_requires_explicit_overwrite_and_etag(service):
 async def test_force_save_has_verified_retained_copy_before_job(service):
     baseline = deepcopy(service.docs[F])
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         exclusive_writer_window=True,
@@ -414,10 +475,10 @@ async def test_force_save_has_verified_retained_copy_before_job(service):
 async def test_drifted_recovery_copy_prevents_force_job_and_retains_copy(service):
     service.copy_drift = True
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         exclusive_writer_window=True,
@@ -434,10 +495,10 @@ async def test_failed_native_overwrite_retains_verified_recovery_and_uncertain_d
 ):
     service.job_error = True
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         exclusive_writer_window=True,
@@ -453,13 +514,13 @@ async def test_refused_recovery_copy_is_classified_and_never_force_saves(
 ):
     # The pre-#1868 32-character name, so the HMC answers with the captured refusal.
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.secrets.token_hex", lambda n: "ab" * 12
+        "hmcpctl.operations.lpar.profiles.core.secrets.token_hex", lambda n: "ab" * 12
     )
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         exclusive_writer_window=True,
@@ -492,12 +553,17 @@ async def test_delete_refuses_each_protected_case(service, monkeypatch, protecte
         del service.docs[G]
     if protected == "system-profile":
         monkeypatch.setattr(
-            "hmcpctl.operations.lpar.profiles.run_hmc_command",
+            "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
             AsyncMock(return_value="name\nexisting\n"),
         )
     with pytest.raises((ValueError, PermissionError)):
         await delete_partition_profile(
-            service.hmc, S, P, "source", "e1", exclusive_writer_window=True
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            profile_selector="source",
+            expected_etag="e1",
+            exclusive_writer_window=True,
         )
     service.hmc.delete_child.assert_not_called()
 
@@ -505,7 +571,12 @@ async def test_delete_refuses_each_protected_case(service, monkeypatch, protecte
 @pytest.mark.asyncio
 async def test_delete_confirms_absence_and_preserves_other_profiles(service):
     result = await delete_partition_profile(
-        service.hmc, S, P, "source", "e1", exclusive_writer_window=True
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        expected_etag="e1",
+        exclusive_writer_window=True,
     )
     assert result.execution == "completed" and result.requested_change == "verified"
     assert set(service.docs) == {G}
@@ -515,10 +586,10 @@ async def test_delete_confirms_absence_and_preserves_other_profiles(service):
 async def test_vios_paths_and_jobs_are_not_lpar_aliases(monkeypatch):
     state = NativeService("VirtualIOServer")
     result = await set_default_partition_profile(
-        state.hmc,
-        S,
-        P,
-        "source",
+        hmc=state.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
         partition_type="VirtualIOServer",
         exclusive_writer_window=True,
     )
@@ -539,10 +610,10 @@ async def test_staleness_after_copy_keeps_its_identity_in_outcome(service):
 
     service.hmc.get_uom.side_effect = parent_read
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         exclusive_writer_window=True,
@@ -567,10 +638,10 @@ async def test_cancelled_copy_reports_retained_recovery_name(service):
     service.hmc._request_with_uuid_path_arguments.side_effect = cancel_after_put
     with pytest.raises(asyncio.CancelledError) as caught:
         await save_current_partition_profile(
-            service.hmc,
-            S,
-            P,
-            "source",
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            name="source",
             overwrite=True,
             expected_etag="e1",
             exclusive_writer_window=True,
@@ -621,7 +692,11 @@ async def test_job_normalization_does_not_promote_malformed_or_partial_results(
 
     service.hmc.wait_for_job_entry.side_effect = terminal
     result = await set_default_partition_profile(
-        service.hmc, S, P, "source", exclusive_writer_window=True
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        exclusive_writer_window=True,
     )
     assert result.execution == "unknown" and result.requested_change == "unverified"
     assert service.hmc.submit_job.call_count == 1
@@ -643,12 +718,12 @@ async def test_stale_parent_snapshot_before_patch_refuses_write(service):
     service.hmc.get_uom.side_effect = parent
     with pytest.raises(ValueError):
         await update_partition_profile(
-            service.hmc,
-            S,
-            P,
-            "source",
-            "e1",
-            ProfilePatch(name="new"),
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            profile_selector="source",
+            expected_etag="e1",
+            patch=ProfilePatch(name="new"),
             exclusive_writer_window=True,
         )
     assert not [c for c in service.calls if c[0] != "GET"]
@@ -659,10 +734,10 @@ async def test_save_full_system_profile_refuses_before_copy_or_force(service):
     field(service.docs[F], "ProfileType").text = "FULL_SYSTEM_LPAR_PROFILE_TYPE"
     with pytest.raises(ValueError):
         await save_current_partition_profile(
-            service.hmc,
-            S,
-            P,
-            "source",
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            name="source",
             overwrite=True,
             expected_etag="e1",
             exclusive_writer_window=True,
@@ -683,10 +758,10 @@ async def test_existing_recovery_copy_is_revalidated_and_reused(service):
     service.docs["55555555-5555-4555-8555-555555555555"] = recovery
     service.etags["55555555-5555-4555-8555-555555555555"] = "copy"
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         recovery_profile_selector="retained",
@@ -704,10 +779,10 @@ async def test_overwrite_identity_drift_is_not_verified_save(service):
 
     service.hmc.wait_for_job_entry.side_effect = terminal
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         exclusive_writer_window=True,
@@ -725,7 +800,11 @@ async def test_top_level_job_error_data_prevents_verified_completion(service):
 
     service.hmc.wait_for_job_entry.side_effect = terminal
     result = await set_default_partition_profile(
-        service.hmc, S, P, "source", exclusive_writer_window=True
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        exclusive_writer_window=True,
     )
     assert result.execution == "unknown" and result.requested_change == "unverified"
 
@@ -744,11 +823,17 @@ async def test_empty_or_malformed_system_profile_read_never_proves_absence(
     service, monkeypatch, raw
 ):
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.run_hmc_command", AsyncMock(return_value=raw)
+        "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
+        AsyncMock(return_value=raw),
     )
     with pytest.raises(ValueError):
         await delete_partition_profile(
-            service.hmc, S, P, "source", "e1", exclusive_writer_window=True
+            hmc=service.hmc,
+            system_name_or_uuid=S,
+            lpar_name_or_uuid=P,
+            profile_selector="source",
+            expected_etag="e1",
+            exclusive_writer_window=True,
         )
     service.hmc.delete_child.assert_not_called()
 
@@ -762,41 +847,64 @@ async def test_vios_lifecycle_retains_its_own_containment_and_native_paths(
 ):
     state = NativeService("VirtualIOServer")
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.profiles.run_hmc_command",
+        "hmcpctl.operations.lpar.profiles.core.run_hmc_command",
         AsyncMock(return_value="No results were found.\n"),
     )
     kwargs = {"partition_type": "VirtualIOServer"}
     if action == "list":
-        result = await list_partition_profiles(state.hmc, S, P, **kwargs)
+        result = await list_partition_profiles(
+            hmc=state.hmc, system_name_or_uuid=S, lpar_name_or_uuid=P, **kwargs
+        )
         assert {r.name for r in result.profiles} == {"source", "other"}
     elif action == "read":
         assert (
-            await read_partition_profile(state.hmc, S, P, "source", **kwargs)
+            await read_partition_profile(
+                hmc=state.hmc,
+                system_name_or_uuid=S,
+                lpar_name_or_uuid=P,
+                profile_selector="source",
+                **kwargs,
+            )
         ).uuid == F
     else:
         kwargs["exclusive_writer_window"] = True
         if action == "update":
             result = await update_partition_profile(
-                state.hmc,
-                S,
-                P,
-                "source",
-                "e1",
-                ProfilePatch(desired_memory=1024),
+                hmc=state.hmc,
+                system_name_or_uuid=S,
+                lpar_name_or_uuid=P,
+                profile_selector="source",
+                expected_etag="e1",
+                patch=ProfilePatch(desired_memory=1024),
                 **kwargs,
             )
         elif action == "new-save":
             result = await save_current_partition_profile(
-                state.hmc, S, P, "new", **kwargs
+                hmc=state.hmc,
+                system_name_or_uuid=S,
+                lpar_name_or_uuid=P,
+                name="new",
+                **kwargs,
             )
         elif action == "overwrite-save":
             result = await save_current_partition_profile(
-                state.hmc, S, P, "source", overwrite=True, expected_etag="e1", **kwargs
+                hmc=state.hmc,
+                system_name_or_uuid=S,
+                lpar_name_or_uuid=P,
+                name="source",
+                overwrite=True,
+                expected_etag="e1",
+                **kwargs,
             )
             assert result.recovery_verified
         else:
             result = await delete_partition_profile(
-                state.hmc, S, P, "source", "e1", **kwargs
+                hmc=state.hmc,
+                system_name_or_uuid=S,
+                lpar_name_or_uuid=P,
+                profile_selector="source",
+                expected_etag="e1",
+                **kwargs,
             )
         assert result.execution == "completed" and result.requested_change == "verified"
     state.hmc.list_logical_partitions.assert_not_called()
@@ -817,10 +925,10 @@ async def test_async_recovery_creation_never_admits_force_save(service):
 
     service.hmc._request_with_uuid_path_arguments.side_effect = asynchronous
     result = await save_current_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
         overwrite=True,
         expected_etag="e1",
         exclusive_writer_window=True,
@@ -834,7 +942,12 @@ async def test_async_recovery_creation_never_admits_force_save(service):
 async def test_async_delete_confirmation_is_not_terminal_completion(service):
     service.delete_status = 202
     result = await delete_partition_profile(
-        service.hmc, S, P, "source", "e1", exclusive_writer_window=True
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        expected_etag="e1",
+        exclusive_writer_window=True,
     )
     assert result.execution == "unknown"
     assert result.requested_change == "verified"
@@ -848,13 +961,137 @@ async def test_async_patch_with_visible_changes_does_not_claim_completed_applica
     service.post_status = 202
     service.add_field = True
     result = await update_partition_profile(
-        service.hmc,
-        S,
-        P,
-        "source",
-        "e1",
-        ProfilePatch(desired_memory=1024),
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        profile_selector="source",
+        expected_etag="e1",
+        patch=ProfilePatch(desired_memory=1024),
         exclusive_writer_window=True,
     )
     assert result.execution == "unknown" and result.requested_change == "verified"
     assert not result.diagnostics
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["recovery", "job", "readback"])
+async def test_save_fingerprint_failure_retains_known_state_without_more_requests(
+    service, monkeypatch, stage
+):
+    from hmcpctl.operations.lpar.profiles import core as profiles
+
+    failure = HMCTLSFingerprintError("private-pin")
+    inventory = profiles._inventory
+    stopped_calls = None
+
+    async def fail(*args, **kwargs):
+        nonlocal stopped_calls
+        stopped_calls = len(service.calls)
+        raise failure
+
+    async def read_inventory(*args, **kwargs):
+        if service.hmc.submit_job.called:
+            return await fail()
+        return await inventory(*args, **kwargs)
+
+    if stage == "recovery":
+        monkeypatch.setattr(profiles, "write_native_profile", fail)
+    elif stage == "job":
+        monkeypatch.setattr(profiles, "wait_for_submitted_job", fail)
+    else:
+        monkeypatch.setattr(profiles, "_inventory", read_inventory)
+    result = await save_current_partition_profile(
+        hmc=service.hmc,
+        system_name_or_uuid=S,
+        lpar_name_or_uuid=P,
+        name="source",
+        overwrite=True,
+        expected_etag="e1",
+        exclusive_writer_window=True,
+    )
+    assert result.diagnostics == ("tls-identity-verification-failed",)
+    assert "private-pin" not in result.error
+    assert result.recovery_profile is not None
+    assert result.recovery_verified is (stage != "recovery")
+    assert (result.job is not None) is (stage != "recovery")
+    assert result.requested_change == "unverified"
+    assert stopped_calls is not None and len(service.calls) == stopped_calls
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        list_partition_profiles,
+        read_partition_profile,
+        update_partition_profile,
+        set_default_partition_profile,
+        save_current_partition_profile,
+        delete_partition_profile,
+    ],
+)
+def test_profile_operations_use_partition_first_selectors(operation):
+    parameters = inspect.signature(operation).parameters
+    assert list(parameters)[:2] == ["hmc", "lpar_name_or_uuid"]
+    assert parameters["system_name_or_uuid"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("action", ["update", "delete"])
+@pytest.mark.parametrize(
+    "stage,status", [("submission", 200), ("readback", 200), ("readback", 202)]
+)
+async def test_profile_mutation_tls_failure_retains_execution_and_stops(
+    service, kind, action, stage, status
+):
+    state = NativeService(kind)
+    state.post_status = status
+    state.delete_status = status
+    native_request = state.request
+    dispatched = False
+    stopped_calls = None
+    writes = []
+
+    def request(method, path, **kwargs):
+        nonlocal dispatched, stopped_calls
+        if method in {"POST", "DELETE"}:
+            dispatched = True
+            writes.append(method)
+        if dispatched and (
+            stage == "submission"
+            and method in {"POST", "DELETE"}
+            or stage == "readback"
+            and method == "GET"
+        ):
+            stopped_calls = len(state.hmc.mock_calls)
+            raise HMCTLSFingerprintError("private-pin")
+        return native_request(method, path, **kwargs)
+
+    state.hmc._request_with_uuid_path_arguments.side_effect = request
+    arguments = {
+        "hmc": state.hmc,
+        "system_name_or_uuid": S,
+        "lpar_name_or_uuid": P,
+        "profile_selector": "source",
+        "expected_etag": "e1",
+        "partition_type": kind,
+        "exclusive_writer_window": True,
+    }
+    if action == "update":
+        result = await update_partition_profile(
+            **arguments, patch=ProfilePatch(desired_memory=1024)
+        )
+    else:
+        result = await delete_partition_profile(**arguments)
+    assert result.diagnostics == ("tls-identity-verification-failed",)
+    assert "private-pin" not in result.error
+    assert "Reconcile known profile and job state before retrying" in result.error
+    assert result.execution == (
+        "completed" if stage == "readback" and status == 200 else "unknown"
+    )
+    assert result.requested_change == result.preservation == "unverified"
+    assert result.before_etag == "e1" and result.after_etag is None
+    assert result.profile_uuid == F and result.partition_type == kind
+    assert writes == ["POST" if action == "update" else "DELETE"]
+    assert stopped_calls is not None and len(state.hmc.mock_calls) == stopped_calls
+    state.hmc.submit_job.assert_not_awaited()

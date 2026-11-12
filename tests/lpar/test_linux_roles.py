@@ -14,6 +14,7 @@ import pytest
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources, LparSettings
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
+from hmcpctl.operations import partition_creation
 from hmcpctl.operations.lpar import configuration as operation
 from hmcpctl.operations.lpar import linux_roles as roles
 from hmcpctl.ssh.lpar import (
@@ -258,7 +259,7 @@ async def test_captured_console_fix_level(source_boundary):
 async def test_source_fix_level_admission(
     source_boundary, maintenance, minor, selected
 ):
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     b = source_boundary
     b.console["VersionInfo"].update(Maintenance=maintenance, Minor=minor)
@@ -694,7 +695,8 @@ async def test_combined_roles_submit_once(role_boundary, management, kvm):
 
 @pytest.fixture
 def creation_boundary(monkeypatch):
-    from hmcpctl.operations.lpar import core, workflows
+    from hmcpctl.operations.lpar.creation import core
+    from hmcpctl.operations.lpar.creation import workflow as workflows
 
     entry = {"UUID": PARTITION, "Resource": {"PartitionName": "owned"}}
     resource = eligible_resource()
@@ -724,7 +726,13 @@ def creation_boundary(monkeypatch):
         ("require_memory_within_system", memory),
         ("created_io_step", AsyncMock(return_value=None)),
     ):
-        monkeypatch.setattr(core, name, mock, raising=False)
+        monkeypatch.setattr(
+            partition_creation if name == "read_role_capabilities" else core,
+            name,
+            mock,
+            raising=False,
+        )
+    monkeypatch.setattr(partition_creation, "require_memory_within_system", memory)
     prevalidate = AsyncMock()
     assign = AsyncMock(return_value=SimpleNamespace(workflow_completed=True, steps=()))
     monkeypatch.setattr(workflows, "prevalidate_lpar_pcie_assignments", prevalidate)
@@ -766,7 +774,7 @@ def creation_boundary(monkeypatch):
 )
 @pytest.mark.asyncio
 async def test_creation_does_not_rewrite_cpus(creation_boundary, resources):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     b = creation_boundary
     with pytest.raises((ValueError, HMCError)):
@@ -786,7 +794,7 @@ async def test_creation_does_not_rewrite_cpus(creation_boundary, resources):
 async def test_controller_apply_rejected_and_classic_preserved(
     creation_boundary, controller, value
 ):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     b = creation_boundary
     b.caps.return_value = replace(CAPS, controller_mode=controller)
@@ -822,10 +830,9 @@ async def test_controller_apply_rejected_and_classic_preserved(
 async def test_profile_io_admission_before_effects(creation_boundary, kind):
     from decimal import Decimal
 
-    from hmcpctl.documents.lpar_io import LparPhysicalIO
+    from hmcpctl.documents.lpar_io import LparPhysicalIO, SriovLogicalPortAssignment
     from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
-    from hmcpctl.operations.lpar.assignments import SriovLogicalPortAssignment
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     b = creation_boundary
     b.caps.return_value = replace(CAPS, controller_mode=True)
@@ -853,12 +860,12 @@ async def test_profile_io_admission_before_effects(creation_boundary, kind):
 async def test_profile_assignment_rejected_before_create(creation_boundary, kind):
     from decimal import Decimal
 
+    from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
     from hmcpctl.operations.lpar.assignments import (
         DedicatedPcieAssignment,
         LparPcieAssignments,
-        SriovLogicalPortAssignment,
     )
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
 
     b = creation_boundary
     b.caps.return_value = replace(CAPS, controller_mode=True)
@@ -885,7 +892,7 @@ async def test_profile_assignment_rejected_before_create(creation_boundary, kind
 async def test_companion_mismatch_is_failed_settings_step(
     creation_boundary, controller, mode
 ):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     b = creation_boundary
     b.caps.return_value = replace(CAPS, controller_mode=controller)
@@ -926,14 +933,14 @@ async def test_role_failed_creation_stops_assignments(
     creation_boundary, failure, monkeypatch
 ):
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
 
     b = creation_boundary
     if failure == "role-malformed":
         b.resource["KvmCapable"] = MARKER
     elif failure == "settings-read":
         monkeypatch.setattr(
-            "hmcpctl.operations.lpar.core.get_lpar_settings",
+            "hmcpctl.operations.lpar.creation.core.get_lpar_settings",
             AsyncMock(side_effect=HMCError(MARKER)),
         )
     elif failure == "resource":
@@ -973,7 +980,7 @@ async def test_role_failed_creation_stops_assignments(
 async def test_role_native_creation_error_is_uncertain_and_safe(
     creation_boundary, selected
 ):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     b = creation_boundary
     b.create.side_effect = HMCError(MARKER)
@@ -998,7 +1005,7 @@ async def test_no_role_native_creation_error_chain_is_unchanged(
 ):
     from hmcpctl.documents.lpar_io import LparPhysicalIO
     from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
     from hmcpctl.operations.lpar.security_policy import SecurityPolicyCapabilities
 
     b = creation_boundary
@@ -1008,7 +1015,7 @@ async def test_no_role_native_creation_error_chain_is_unchanged(
     if domain == "policy":
         creation = replace(creation, security_policy=LparSecurityPolicy(secure_boot=0))
         monkeypatch.setattr(
-            core,
+            partition_creation,
             "read_security_policy_capabilities",
             AsyncMock(
                 return_value=SecurityPolicyCapabilities(
@@ -1036,7 +1043,7 @@ async def test_no_role_native_creation_error_chain_is_unchanged(
 @pytest.mark.asyncio
 async def test_classic_role_physical_io_is_preserved(creation_boundary, monkeypatch):
     from hmcpctl.documents.lpar_io import LparPhysicalIO
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
     from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
     b = creation_boundary
@@ -1071,7 +1078,7 @@ async def test_classic_role_physical_io_is_preserved(creation_boundary, monkeypa
 async def test_creation_selected_false_and_management_need_no_companion(
     creation_boundary, name, value
 ):
-    from hmcpctl.operations.lpar.core import create_and_stamp_lpar
+    from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     b = creation_boundary
     b.resource[roles.ROLE_FIELDS[name]] = str(value).lower()
@@ -1096,7 +1103,7 @@ async def test_controller_vnic_not_blanket_rejected(creation_boundary):
     from decimal import Decimal
 
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments, VnicAssignment
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
     from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
 
     b = creation_boundary
@@ -1114,7 +1121,7 @@ async def test_role_creation_verifies_reporting_before_apply(
     creation_boundary, monkeypatch
 ):
     from hmcpctl.documents.lpar import LparReportingSettings
-    from hmcpctl.operations.lpar import core
+    from hmcpctl.operations.lpar.creation import core
 
     b = creation_boundary
     reporting = LparReportingSettings(work_group_id=0)
@@ -1142,7 +1149,7 @@ async def test_role_creation_verifies_reporting_before_apply(
     ],
 )
 def test_creation_capability_prerequisites(changes):
-    from hmcpctl.operations.lpar.core import LparCreation
+    from hmcpctl.operations.lpar.creation.core import LparCreation
 
     creation = LparCreation(
         "owned",
@@ -1173,7 +1180,7 @@ async def test_mixed_creation_remote_errors_are_safe_for_roles(
     from hmcpctl.documents.lpar import LparReportingSettings
     from hmcpctl.documents.lpar_io import LparPhysicalIO
     from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
-    from hmcpctl.operations.lpar import core, physical_io
+    from hmcpctl.operations.lpar.creation import core, physical_io
     from hmcpctl.operations.lpar.vtpm import VtpmCapabilities
 
     b = creation_boundary
@@ -1188,12 +1195,14 @@ async def test_mixed_creation_remote_errors_are_safe_for_roles(
     elif domain == "vtpm":
         changes["vtpm_settings"] = LparVtpmSettings(False)
         monkeypatch.setattr(
-            core,
+            partition_creation,
             "read_vtpm_capabilities",
             AsyncMock(return_value=VtpmCapabilities(("1.2",), (), False)),
         )
         monkeypatch.setattr(
-            core, "get_lpar_vtpm_state", AsyncMock(side_effect=HMCError(MARKER))
+            partition_creation,
+            "get_lpar_vtpm_state",
+            AsyncMock(side_effect=HMCError(MARKER)),
         )
     elif domain == "physical_io":
         changes["physical_io"] = LparPhysicalIO(console_slot="hmc")
@@ -1253,6 +1262,7 @@ async def test_role_preflight_error_preserves_type_and_status(
     assert "no changes were submitted" in str(caught.value)
     assert MARKER in str(original)
     assert original.body is not None
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1265,7 +1275,7 @@ async def test_requested_role_apply_withheld_stops_workflow(
     from decimal import Decimal
 
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments, VnicAssignment
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
     from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
 
     b = creation_boundary
@@ -1299,7 +1309,7 @@ async def test_intentional_role_no_apply_preserves_completion(
     creation_boundary, stamped, apply, controller, selected
 ):
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
 
     b = creation_boundary
     b.stamp.return_value = (stamped, ("ownership stamp unavailable",))
@@ -1324,7 +1334,7 @@ async def test_no_role_best_effort_stamp_behavior_is_unchanged(
     creation_boundary, stamped, native
 ):
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
 
     b = creation_boundary
     b.stamp.return_value = (stamped, ("ownership stamp unavailable",))
@@ -1372,6 +1382,7 @@ async def test_configuration_role_preflight_error_type(
     )
     assert MARKER in str(failure)
     b.write.assert_not_awaited()
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1394,9 +1405,12 @@ async def test_no_role_preflight_error_is_unchanged(role_boundary, error_type):
 @pytest.mark.parametrize(
     "stage", ["system", "partition", "authorization", "containment", "capabilities"]
 )
-async def test_role_preflight_sibling_read_diagnostics(role_boundary, stage):
+@pytest.mark.parametrize("error_type", [HMCError, HMCTLSFingerprintError])
+async def test_role_preflight_sibling_read_diagnostics(
+    role_boundary, stage, error_type
+):
     b = role_boundary
-    failure = HMCError(MARKER, 503, f"<Message>{MARKER}</Message>")
+    failure = error_type(MARKER, 503, f"<Message>{MARKER}</Message>")
     boundary = {
         "system": b.system,
         "partition": b.partition,
@@ -1417,6 +1431,7 @@ async def test_role_preflight_sibling_read_diagnostics(role_boundary, stage):
         caught.value
     )
     b.write.assert_not_awaited()
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1488,6 +1503,7 @@ async def test_native_controller_error_is_private(source_boundary, error_type):
     assert caught.value.body is None
     assert "no changes were submitted" in str(caught.value)
     assert MARKER not in "".join(traceback.format_exception(caught.value))
+    _assert_role_error_guidance(caught.value, error_type)
 
 
 @pytest.mark.asyncio
@@ -1527,3 +1543,53 @@ async def test_shared_creation_authority_has_no_role_prerequisites(
     b.status.assert_awaited_once()
     b.hmc.get_console_info.assert_not_awaited()
     b.modes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["native", "rest"])
+async def test_role_readback_preserves_tls_identity_failure(role_boundary, stage):
+    b = role_boundary
+    failure = HMCTLSFingerprintError("Certificate fingerprint differs")
+    if stage == "native":
+        b.read.side_effect = [BASE, failure]
+    else:
+        entry = {"UUID": PARTITION, "Resource": b.resource}
+        b.hmc.get_logical_partition.side_effect = [entry, failure]
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await operation.configure_lpar_settings(
+            b.hmc, "owned", LparSettings(kvm_capable=True), system_name_or_uuid="system"
+        )
+    assert caught.value is failure
+    b.write.assert_awaited_once()
+    assert b.read.await_count == 2
+    assert b.hmc.get_logical_partition.await_count == (1 if stage == "native" else 2)
+
+
+def _assert_role_error_guidance(error, error_type):
+    message = str(error)
+    assert MARKER not in "".join(traceback.format_exception(error))
+    if error_type is HMCTLSFingerprintError:
+        assert "TLS certificate identity verification failed" in message
+        assert "trusted channel" in message
+        assert "HMC_CERT_FINGERPRINT" in message
+        assert "Check connectivity" not in message
+    else:
+        assert "Check connectivity and read permissions" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("context", ["Affinity group", "Memory layout"])
+async def test_shared_creation_preflight_keeps_private_tls_guidance(
+    source_boundary, context
+):
+    b = source_boundary
+    b.hmc.get_managed_system.side_effect = HMCTLSFingerprintError(MARKER, 503, MARKER)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await roles.read_creation_authority(
+            b.hmc, SYSTEM, need_management=False, context=context
+        )
+    assert f"{context} preflight" in str(caught.value)
+    assert "no changes were submitted" in str(caught.value)
+    assert caught.value.body is None and caught.value.status_code == 503
+    _assert_role_error_guidance(caught.value, HMCTLSFingerprintError)
+    b.status.assert_not_awaited()

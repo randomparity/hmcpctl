@@ -17,6 +17,7 @@ from lpar.test_paging_observation import (
     paging_boundary,  # noqa: F401 - pytest discovers imported fixtures
 )
 
+from hmcpctl.errors import HMCTLSFingerprintError
 from hmcpctl.operations.lpar import ownership
 from hmcpctl.ssh import memory as native
 from hmcpctl.ssh import transport
@@ -24,7 +25,7 @@ from hmcpctl.ssh.transport import HMCCLIError, _process_error
 
 
 def subject():
-    name = "hmcpctl.operations.lpar.paging"
+    name = "hmcpctl.operations.lpar.memory.paging"
     assert importlib.util.find_spec(name), "one-attempt owner is missing"
     return __import__(name, fromlist=["switch_lpar_paging_vios"])
 
@@ -622,3 +623,35 @@ async def test_known_member_prewrite_guard_stays_closed(attempt, changed, missin
         await run(attempt)
     attempt.submit.assert_not_awaited()
     attempt.description.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault_at", [1, 3])
+async def test_postwrite_fatal_tls_retains_attempt_and_stops_observation(
+    attempt, fault_at
+):
+    b = attempt
+    original = b.hmc._get.side_effect
+    reads = 0
+    at_failure = None
+
+    async def get(*args, **kwargs):
+        nonlocal reads, at_failure
+        if b.submit.await_count:
+            reads += 1
+            if reads == fault_at:
+                at_failure = (b.current.await_count, b.devices.await_count)
+                raise HMCTLSFingerprintError("private-pin")
+        return await original(*args, **kwargs)
+
+    b.hmc._get.side_effect = get
+    result = await run(b)
+    assert at_failure is not None
+    assert reads == fault_at
+    assert (b.current.await_count, b.devices.await_count) == at_failure
+    b.submit.assert_awaited_once()
+    assert result.submission == "acknowledged"
+    assert result.before is not None and result.after is None
+    assert result.outcome == "unverified" and not result.workflow_completed
+    assert "tls-identity-verification-failed" in result.diagnostics
+    assert "private-pin" not in repr(result)

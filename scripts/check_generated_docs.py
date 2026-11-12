@@ -52,7 +52,7 @@ import re
 import shlex
 import shutil
 import signal
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 from collections import defaultdict
@@ -155,10 +155,15 @@ def _query(command: list[str], root: Path) -> str:
     """Run a read-only command in *root* and return its stdout, or raise."""
     printable = " ".join(command)
     try:
-        # fixed argv, no shell
-        result = subprocess.run(
+        # Only fixed Git inventory and just recipe-list queries reach this helper.
+        result = subprocess.run(  # nosec B603
             command,
             cwd=root,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
             capture_output=True,
             text=True,
             errors="replace",
@@ -280,8 +285,8 @@ def regenerate(command: str, workspace: Path) -> None:
     descendants silently and discards the output.)
     """
     try:
-        # argv from a matched banner, no shell
-        process = subprocess.Popen(
+        # Matched banners select declared *-docs recipes, not arbitrary command text.
+        process = subprocess.Popen(  # nosec B603
             shlex.split(command),
             cwd=workspace,
             stdout=subprocess.PIPE,

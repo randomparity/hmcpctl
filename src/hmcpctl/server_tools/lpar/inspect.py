@@ -78,8 +78,9 @@ def inspect_handler(
 
     def hmc_inspect_lpar(
         lpar_name_or_uuid: str,
-        system_name_or_uuid: str,
         include: list[Section] | None = None,
+        *,
+        system_name_or_uuid: str,
         profile: str | None = None,
     ) -> LparInspection:
         """Inspect one LPAR: state, RMC, resources, reference codes and next actions.

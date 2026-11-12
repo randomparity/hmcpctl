@@ -20,8 +20,8 @@ from hmcpctl.cli import app as cli_app
 from hmcpctl.cli_commands.lpar import lifecycle as cli_lpars
 from hmcpctl.config import HMCConfig
 from hmcpctl.operations.lpar import activation as lpar_activation
-from hmcpctl.operations.lpar import provision as operations_provision
 from hmcpctl.operations.lpar.activation import power_off_lpar, submit_power_on_lpar
+from hmcpctl.operations.lpar.provisioning import core as operations_provision
 from hmcpctl.server_tools.lpar import lifecycle as server_lpars
 from hmcpctl.ssh.transport import HMCCLIError
 

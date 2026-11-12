@@ -124,7 +124,12 @@ def test_boot_raw_validation_precedes_client(monkeypatch):
             module, "with_client", lambda *a, opened=opened, **k: opened.append(True)
         )
         with pytest.raises(ValueError):
-            getattr(module, name)("sys-R1", "target-R1", boot_string="\n")
+            kind = "lpar" if module is lifecycle_boot else "vios"
+            getattr(module, name)(
+                system_name_or_uuid="sys-R1",
+                boot_string="\n",
+                **{f"{kind}_name_or_uuid": "target-R1"},
+            )
         assert opened == []
 
 

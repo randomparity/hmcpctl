@@ -6,30 +6,26 @@ from dataclasses import dataclass, fields, replace
 from typing import Literal
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.linux_roles import (
     admit_role_update,
     read_role_capabilities,
+    role_preflight_error,
     roles_requested,
     with_role_evidence,
 )
 from hmcpctl.operations.lpar.ownership import (
-    _authorize_system_lpar_profile_restore,
+    _resolve_and_authorize_vios_names,
     _resolve_contained_lpar_names,
-    _resolve_system_name,
-    authorize_lpar_mutation,
     resolve_and_authorize_lpar_names,
 )
 from hmcpctl.resource_identity import (
-    ResourceNotFoundError,
-    _hosts_partition,
-    is_uuid,
     resolve_lpar_uuid,
     resolve_system_uuid,
 )
 
 from ...documents.lpar import LparReportingSettings, LparSettings
-from ...ssh.commands import build_attribute_record
+from ...documents.native_records import build_attribute_record
 from ...ssh.lpar import (
     get_lpar_reporting_settings,
     get_lpar_settings,
@@ -37,13 +33,8 @@ from ...ssh.lpar import (
     set_lpar_settings,
 )
 from ...ssh.profiles import (
-    ProfileRestoreType,
-    ProfileSyncMode,
-    restore_lpar_profiles,
     set_lpar_msp,
     set_lpar_proc_compat,
-    sync_lpar_profile,
-    validate_profile_sync_mode,
 )
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import leaf_text
@@ -80,45 +71,6 @@ PROCESSOR_COMPATIBILITY_MODES: frozenset[ProcessorCompatibilityMode] = frozenset
 )
 
 
-async def restore_system_lpar_profiles(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    file_path: str,
-    restore_type: ProfileRestoreType,
-    *,
-    ownership_override: bool = False,
-    force_keystore: bool = False,
-) -> str:
-    """Authorize and restore every LPAR profile on one managed system."""
-    system_name = await _authorize_system_lpar_profile_restore(
-        hmc,
-        system_name_or_uuid,
-        ownership_override=ownership_override,
-    )
-    return await restore_lpar_profiles(
-        hmc.config, system_name, file_path, restore_type, force_keystore=force_keystore
-    )
-
-
-async def synchronize_lpar_profile(
-    hmc: HMCClient,
-    lpar_name_or_uuid: str,
-    *,
-    system_name_or_uuid: str,
-    ownership_override: bool = False,
-    mode: ProfileSyncMode = "enable",
-) -> str:
-    """Authorize and set an LPAR's ``sync_curr_profile`` setting (ADR 0201)."""
-    validate_profile_sync_mode(mode)
-    system_name, lpar_name = await resolve_and_authorize_lpar_names(
-        hmc,
-        lpar_name_or_uuid,
-        ownership_override=ownership_override,
-        system_name_or_uuid=system_name_or_uuid,
-    )
-    return await sync_lpar_profile(hmc.config, system_name, lpar_name, mode)
-
-
 async def configure_lpar_msp(
     hmc: HMCClient,
     lpar_name_or_uuid: str,
@@ -135,47 +87,6 @@ async def configure_lpar_msp(
         ownership_override=ownership_override,
     )
     return await set_lpar_msp(hmc.config, system_name, vios_name, enabled)
-
-
-async def _resolve_and_authorize_vios_names(
-    hmc: HMCClient,
-    system_name_or_uuid: str,
-    vios_name_or_uuid: str,
-    *,
-    ownership_override: bool,
-) -> tuple[str, str]:
-    """Resolve a VIOS the selected system hosts, authorize it, and return CLI names.
-
-    ADR 0092 §1: ``msp`` is valid only on a Virtual I/O Server, so its target
-    crosses the same description-stamp rule as an LPAR. The system's own
-    ``VirtualIOServer`` feed establishes containment and supplies the name.
-    """
-    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
-    entries = await hmc.list_vios(system_uuid)
-    if is_uuid(vios_name_or_uuid):
-        matches = [e for e in entries if _hosts_partition([e], vios_name_or_uuid)]
-    else:
-        matches = [
-            e
-            for e in entries
-            if (e.get("Resource") or {}).get("PartitionName") == vios_name_or_uuid
-        ]
-    vios_name = (
-        (matches[0].get("Resource") or {}).get("PartitionName") if matches else None
-    )
-    if not isinstance(vios_name, str) or not vios_name.strip():
-        raise ResourceNotFoundError(
-            "VIOS",
-            vios_name_or_uuid,
-            f"No Virtual I/O Server (lpar_env=vioserver) {vios_name_or_uuid!r} on "
-            f"managed system {system_uuid}. Use hmc_list_vios to list its VIOS "
-            "partitions.",
-        )
-    system_name = await _resolve_system_name(hmc, system_uuid, system_name_or_uuid)
-    await authorize_lpar_mutation(
-        hmc, system_name, vios_name, ownership_override=ownership_override
-    )
-    return system_name, vios_name
 
 
 async def configure_lpar_processor_compatibility(
@@ -294,11 +205,7 @@ async def configure_lpar_settings(
     except HMCError as error:
         if not role_selection:
             raise
-        raise type(error)(
-            "Linux role preflight could not read required configuration evidence; "
-            "no changes were submitted. Check connectivity and read permissions, then retry.",
-            status_code=error.status_code,
-        ) from None
+        raise role_preflight_error(error, "required configuration evidence") from None
     if resource is not None:
         before = with_role_evidence(before, resource, LparSettings())
     expected = replace(
@@ -325,6 +232,8 @@ async def configure_lpar_settings(
             after = with_role_evidence(
                 after, await _role_resource(hmc, uuid, name), expected
             )
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError) as error:
         if not role_selection and not isinstance(error, HMCCLIError):
             raise

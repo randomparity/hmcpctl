@@ -29,7 +29,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.common import UOM_NS
 from hmcpctl.documents.lpar import LparResources, build_lpar_document
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.core import LparCreation, create_and_stamp_lpar
+from hmcpctl.operations.lpar.creation.core import LparCreation, create_and_stamp_lpar
 from hmcpctl.operations.lpar.ownership import _resolve_system_name as _system_name
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 from hmcpctl.server_tools.lpar.lifecycle import (
@@ -216,14 +216,17 @@ def _create_via_406(apply: AsyncMock, order: list[str] | None = None, **kwargs):
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_system_cli_name",
+            "hmcpctl.operations.lpar.creation.core.resolve_system_cli_name",
             new=AsyncMock(return_value="sys1"),
         ),
         patch(
-            "hmcpctl.operations.lpar.core.create_lpar_via_cli",
+            "hmcpctl.operations.lpar.creation.core.create_lpar_via_cli",
             new=AsyncMock(side_effect=_mksyscfg),
         ) as create_via_cli,
-        patch("hmcpctl.operations.lpar.core.apply_lpar_profile_via_cli", new=apply),
+        patch(
+            "hmcpctl.operations.lpar.creation.core.apply_lpar_profile_via_cli",
+            new=apply,
+        ),
         patch(
             "hmcpctl.operations.lpar.ownership.stamp_lpar_ownership",
             new=AsyncMock(return_value="tok"),
@@ -280,7 +283,9 @@ def test_create_lpar_rest0001_schema_rejection_falls_back_to_cli(
     )
     apply = AsyncMock(return_value="")
 
-    with caplog.at_level(logging.WARNING, logger="hmcpctl.operations.lpar.core"):
+    with caplog.at_level(
+        logging.WARNING, logger="hmcpctl.operations.lpar.creation.core"
+    ):
         result, create_via_cli = _create_via_406(apply, order)
 
     create_via_cli.assert_awaited_once()
@@ -349,7 +354,9 @@ def test_create_lpar_rest_success_reports_skipped_apply(
     )
     apply = AsyncMock(return_value="")
 
-    with patch("hmcpctl.operations.lpar.core.apply_lpar_profile_via_cli", new=apply):
+    with patch(
+        "hmcpctl.operations.lpar.creation.core.apply_lpar_profile_via_cli", new=apply
+    ):
         result = hmc_create_lpar(
             system_name_or_uuid=SYSTEM_UUID,
             name="new-lpar",
@@ -415,14 +422,16 @@ def test_required_stamp_policy_raises_on_readback_error_after_mksyscfg():
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_system_uuid",
+            "hmcpctl.operations.lpar.creation.core.resolve_system_uuid",
             new=AsyncMock(return_value=SYSTEM_UUID),
         ),
         patch(
-            "hmcpctl.operations.lpar.core.resolve_system_cli_name",
+            "hmcpctl.operations.lpar.creation.core.resolve_system_cli_name",
             new=AsyncMock(return_value="sys1"),
         ),
-        patch("hmcpctl.operations.lpar.core.create_lpar_via_cli", new=AsyncMock()),
+        patch(
+            "hmcpctl.operations.lpar.creation.core.create_lpar_via_cli", new=AsyncMock()
+        ),
         pytest.raises(HMCError) as exc_info,
     ):
         asyncio.run(create_and_stamp_lpar(hmc, SYSTEM_UUID, creation))
@@ -450,16 +459,18 @@ def test_required_stamp_policy_readback_error_includes_apply_warning():
 
     with (
         patch(
-            "hmcpctl.operations.lpar.core.resolve_system_uuid",
+            "hmcpctl.operations.lpar.creation.core.resolve_system_uuid",
             new=AsyncMock(return_value=SYSTEM_UUID),
         ),
         patch(
-            "hmcpctl.operations.lpar.core.resolve_system_cli_name",
+            "hmcpctl.operations.lpar.creation.core.resolve_system_cli_name",
             new=AsyncMock(return_value="sys1"),
         ),
-        patch("hmcpctl.operations.lpar.core.create_lpar_via_cli", new=AsyncMock()),
         patch(
-            "hmcpctl.operations.lpar.core.apply_lpar_profile_via_cli",
+            "hmcpctl.operations.lpar.creation.core.create_lpar_via_cli", new=AsyncMock()
+        ),
+        patch(
+            "hmcpctl.operations.lpar.creation.core.apply_lpar_profile_via_cli",
             new=AsyncMock(side_effect=HMCCLIError("HSCL boom")),
         ),
         pytest.raises(HMCError) as exc_info,
@@ -915,7 +926,7 @@ def _rest_create_body(mock_hmc, **kwargs) -> ET.Element:
     put = mock_hmc.put(
         f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/LogicalPartition"
     ).mock(return_value=httpx.Response(200, text=LPAR_ENTRY))
-    with patch("hmcpctl.operations.lpar.core.create_lpar_via_cli") as via_cli:
+    with patch("hmcpctl.operations.lpar.creation.core.create_lpar_via_cli") as via_cli:
         hmc_create_lpar(system_name_or_uuid=SYSTEM_UUID, name="new-lpar", **kwargs)
     via_cli.assert_not_called()
     return DET.fromstring(put.calls.last.request.content)
@@ -1132,7 +1143,7 @@ def test_create_tool_passes_its_options_to_the_creation():
 @pytest.mark.asyncio
 async def test_create_workflow_refuses_a_vios_type_before_prevalidation():
     from hmcpctl.operations.lpar.assignments import LparPcieAssignments
-    from hmcpctl.operations.lpar.workflows import create_lpar
+    from hmcpctl.operations.lpar.creation.workflow import create_lpar
 
     hmc = AsyncMock()
     creation = LparCreation(
@@ -1140,7 +1151,7 @@ async def test_create_workflow_refuses_a_vios_type_before_prevalidation():
     )  # type: ignore[arg-type]
     with (
         patch(
-            "hmcpctl.operations.lpar.workflows.prevalidate_lpar_pcie_assignments"
+            "hmcpctl.operations.lpar.creation.workflow.prevalidate_lpar_pcie_assignments"
         ) as prevalidate,
         pytest.raises(ValueError, match="hmc_create_vios"),
     ):

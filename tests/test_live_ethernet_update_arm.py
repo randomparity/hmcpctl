@@ -17,9 +17,9 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 def require_arm():
     global arm
     assert (
-        Path(__file__).parents[1] / "scripts/live_test/ethernet_update.py"
+        Path(__file__).parents[1] / "scripts/live_test/arms/ethernet_update.py"
     ).exists(), "ST69 arm absent"
-    arm = importlib.import_module("live_test.ethernet_update")
+    arm = importlib.import_module("live_test.arms.ethernet_update")
 
 
 UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -158,7 +158,7 @@ def live_boundary(tmp_path, monkeypatch):
     state = SimpleNamespace(
         writes=[], reads=[], rows=rows, packet=value_packet, root=tmp_path
     )
-    monkeypatch.setattr(arm.files, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     monkeypatch.setattr(arm, "load_profile", lambda _: config)
 
     async def transport(self, method, path, **kwargs):
@@ -213,7 +213,7 @@ def live_boundary(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         HMCClient,
-        "_network_adapter_creation_feed",
+        "list_adapters",
         api("ClientNetworkAdapter", lambda: state.rows),
     )
 

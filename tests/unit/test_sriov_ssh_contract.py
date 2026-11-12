@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.ssh.commands import build_filter
+from hmcpctl.documents.native_records import build_filter
 from hmcpctl.ssh.sriov import (
     assign_sriov_logical_port_dynamic,
     list_sriov_adapter_rows,

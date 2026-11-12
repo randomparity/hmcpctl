@@ -19,18 +19,14 @@ SCRIPTS_ROOT = Path(__file__).parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 from fastmcp.utilities.json_schema_type import json_schema_to_type  # noqa: E402
 from live_test import config as live_config  # noqa: E402
-from live_test import (  # noqa: E402
-    dedicated_pcie,
-    lpar_config,
-    lpar_power,
-    runner,
-)
+from live_test import runner  # noqa: E402
+from live_test.arms import dedicated_pcie, lpar_config, lpar_power  # noqa: E402
 from pydantic import TypeAdapter  # noqa: E402
 
 from hmcpctl.errors import HMCError  # noqa: E402
 from hmcpctl.operations.logical.models import OperationRecord  # noqa: E402
 from hmcpctl.operations.lpar.assignments import LparPcieAssignments  # noqa: E402
-from hmcpctl.operations.lpar.provision import (  # noqa: E402
+from hmcpctl.operations.lpar.provisioning.core import (  # noqa: E402
     validate_provision_assignments,
 )
 from hmcpctl.ssh.profiles import profile_io_slot_rows_command  # noqa: E402

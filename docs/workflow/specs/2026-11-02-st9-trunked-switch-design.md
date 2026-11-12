@@ -2,7 +2,7 @@
 
 ## Problem
 
-`vlan_baseline` (`scripts/live_test/network.py`) took the first listed `SwitchID`, an
+`vlan_baseline` (`scripts/live_test/arms/network.py`) took the first listed `SwitchID`, an
 untrunked one on 2026-11-02, where the adapter add failed; its `_Stop` then skipped
 `delete_run_networks`, stranding the run's network.
 

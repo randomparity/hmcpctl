@@ -11,10 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical.engine import EffectNotApplied
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar import profile_persist
+from hmcpctl.operations.lpar.profiles import persist as profile_persist
 
 SYS = "0000000a-0000-4000-8000-000000000000"
 LPAR = "0000000a-0000-4000-b000-000000000000"
@@ -68,11 +68,15 @@ def hmc(monkeypatch):
     fake = FakeHMC()
     fake.saves = []
 
-    async def read(_hmc, system, lpar, name):
-        assert (system, lpar, name) == (SYS, LPAR, "default")
+    async def read(hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid):
+        assert (system_name_or_uuid, lpar_name_or_uuid, profile_selector) == (
+            SYS,
+            LPAR,
+            "default",
+        )
         return SimpleNamespace(etag="E7")
 
-    async def save(_hmc, system, lpar, name, **kwargs):
+    async def save(hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **kwargs):
         fake.saves.append(kwargs)
         if fake.save_lands:
             fake.profiles[0] = _profile("default", *fake.current)
@@ -85,6 +89,7 @@ def hmc(monkeypatch):
         recovery_verified=True,
         recovery_profile=SimpleNamespace(name="hmcprec-00ff"),
         error=None,
+        diagnostics=(),
     )
     monkeypatch.setattr(profile_persist, "SETTLE_SECONDS", 0)
     monkeypatch.setattr(profile_persist, "POLL_SECONDS", 0)
@@ -126,11 +131,12 @@ async def test_a_verified_completion_decides_without_the_readback(hmc):
 
 
 @pytest.mark.asyncio
-async def test_a_save_never_submitted_is_not_applied_and_names_the_copy(hmc):
+async def test_a_missing_save_handle_is_uncertain_and_names_the_copy(hmc):
     hmc.save_lands = False
     hmc.outcome.job = None
-    with pytest.raises(EffectNotApplied, match="hmcprec-00ff"):
+    with pytest.raises(profile_persist.SaveUnconfirmed, match="hmcprec-00ff"):
         await _save(hmc)
+    assert len(hmc.saves) == 1
 
 
 @pytest.mark.asyncio
@@ -262,12 +268,12 @@ async def test_a_missing_profile_is_an_error(hmc):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("saved", "status"), [(("2", "3"), "applied"), (("2",), "not_applied")]
+    ("saved", "status"), [(("2", "3"), "applied"), (("2",), "needs_attention")]
 )
 async def test_classifier_reads_the_profile_back(saved, status):
     fake = FakeHMC(saved=saved)
-    classify = profile_persist.profile_save_classifier(lambda _connection: fake)
-    ctx = SimpleNamespace(connection="<default>")
+    classify = profile_persist.profile_save_classifier(lambda _connection, _host: fake)
+    ctx = SimpleNamespace(host="hmc.test", connection="<default>")
     effect = EffectRecord(
         "profile_save",
         profile_persist.KIND,
@@ -361,10 +367,67 @@ async def test_classifier_applies_the_operations_readback_options():
         "uncertain",
         None,
     )
-    ctx = SimpleNamespace(connection="<default>")
-    plain = profile_persist.profile_save_classifier(lambda _connection: fake)
+    ctx = SimpleNamespace(host="hmc.test", connection="<default>")
+    plain = profile_persist.profile_save_classifier(lambda _connection, _host: fake)
     removal = profile_persist.profile_save_classifier(
-        lambda _connection: fake, lambda _ctx: (("5",), False)
+        lambda _connection, _host: fake, lambda _ctx: (("5",), False)
     )
     assert (await plain(ctx, effect)).status == "applied"
-    assert (await removal(ctx, effect)).status == "not_applied"
+    assert (await removal(ctx, effect)).status == "needs_attention"
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_failure_from_save_stops_independent_readback(
+    hmc, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    failure = HMCTLSFingerprintError("private-pin")
+    save = AsyncMock(side_effect=failure)
+    readback = AsyncMock()
+    monkeypatch.setattr(profile_persist, "save_current_partition_profile", save)
+    monkeypatch.setattr(profile_persist, "persisted", readback)
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await _save(hmc)
+    assert caught.value is failure
+    readback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_outcome_retains_recovery_and_stops_readback(
+    hmc, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    hmc.outcome.diagnostics = ("tls-identity-verification-failed",)
+    readback = AsyncMock()
+    monkeypatch.setattr(profile_persist, "persisted", readback)
+    with pytest.raises(profile_persist.SaveUnconfirmed) as caught:
+        await _save(hmc)
+    assert "TLS" in str(caught.value)
+    assert "hmcprec-00ff" in str(caught.value)
+    assert "job=submitted" in str(caught.value)
+    readback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["initial", "verified_readback"])
+async def test_profile_save_does_not_hide_fingerprint_failure(hmc, monkeypatch, stage):
+    from unittest.mock import AsyncMock
+
+    failure = HMCTLSFingerprintError("private-pin")
+    if stage == "initial":
+        monkeypatch.setattr(
+            profile_persist, "read_partition_profile", AsyncMock(side_effect=failure)
+        )
+    else:
+        hmc.outcome.execution = "completed"
+        hmc.outcome.requested_change = "verified"
+        monkeypatch.setattr(
+            profile_persist, "persisted", AsyncMock(side_effect=failure)
+        )
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await _save(hmc)
+    assert caught.value is failure
+    if stage == "initial":
+        assert hmc.saves == []

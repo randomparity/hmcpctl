@@ -335,7 +335,9 @@ def test_hmc_get_lpar_memopt_score_resolves_uuids(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SCORE_ROW)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_memopt_score(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_get_lpar_memopt_score(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     expected_cmd = (
         f"lsmemopt -m {SYSTEM_NAME} -r lpar -o currscore "
@@ -356,7 +358,9 @@ def test_hmc_get_lpar_memopt_score_preserves_none_score(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(NONE_ROW)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_memopt_score("p9da10", "dalpar2rrd1t")
+        result = hmc_get_lpar_memopt_score(
+            system_name_or_uuid="p9da10", lpar_name_or_uuid="dalpar2rrd1t"
+        )
 
     assert result["curr_lpar_score"] == "none"
 
@@ -376,7 +380,9 @@ def test_hmc_get_lpar_memopt_score_unknown_lpar(monkeypatch, mock_hmc):
         patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock),
         pytest.raises(HMCCLIError, match="doesnotexist"),
     ):
-        hmc_get_lpar_memopt_score("p9da10", "doesnotexist")
+        hmc_get_lpar_memopt_score(
+            system_name_or_uuid="p9da10", lpar_name_or_uuid="doesnotexist"
+        )
 
 
 def test_hmc_list_lpar_memopt_scores_all_lpars(monkeypatch, mock_hmc):
@@ -386,7 +392,7 @@ def test_hmc_list_lpar_memopt_scores_all_lpars(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(MULTI_ROW)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_lpar_memopt_scores(SYSTEM_UUID)
+        result = hmc_list_lpar_memopt_scores(system_name_or_uuid=SYSTEM_UUID)
 
     expected_cmd = f"lsmemopt -m {SYSTEM_NAME} -r lpar -o currscore"
     conn_mock.run.assert_called_once_with(expected_cmd, check=True, timeout=300.0)
@@ -400,7 +406,9 @@ def test_hmc_list_lpar_memopt_scores_filtered_by_uuid(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock(SCORE_ROW)
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_lpar_memopt_scores(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_list_lpar_memopt_scores(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     expected_cmd = (
         f"lsmemopt -m {SYSTEM_NAME} -r lpar -o currscore "
@@ -417,7 +425,7 @@ def test_hmc_list_lpar_memopt_scores_empty(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock("")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_list_lpar_memopt_scores(SYSTEM_UUID)
+        result = hmc_list_lpar_memopt_scores(system_name_or_uuid=SYSTEM_UUID)
 
     assert result == []
 

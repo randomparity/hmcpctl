@@ -7,15 +7,16 @@ from typing import Literal
 
 import typer
 
+from hmcpctl.operations.lpar.memory.current import change_lpar_memory
+from hmcpctl.operations.lpar.memory.move import move_lpar_memory
+from hmcpctl.operations.lpar.memory.paging import switch_lpar_paging_vios
+from hmcpctl.operations.lpar.memory.statistics import reset_lpar_memory_statistics
+
 from ...documents.lpar_memory import (
     LparMemoryChange,
     LparMemoryMove,
     LparMemoryStatisticsReset,
 )
-from ...operations.lpar.memory import change_lpar_memory
-from ...operations.lpar.memory_move import move_lpar_memory
-from ...operations.lpar.memory_statistics import reset_lpar_memory_statistics
-from ...operations.lpar.paging import switch_lpar_paging_vios
 from ..output import print_json, terminal_field, usage_error
 from ..runtime import with_client
 

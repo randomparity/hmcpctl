@@ -1,11 +1,15 @@
 """Transport-layer tests for optical mapping inventory and operations."""
 
+from unittest.mock import AsyncMock
+
 import httpx
 import pytest
 from conftest import make_config
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+from hmcpctl.operations.storage import optical
 
 UOM_NS = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
 VIOS_UUID = "00000000-0000-0000-0000-000000000003"
@@ -136,7 +140,11 @@ async def test_list_optical_mappings_propagates_bad_request(mock_hmc):
 
 
 @pytest.mark.asyncio
-async def test_create_optical_mapping_submits_document(mock_hmc):
+@pytest.mark.parametrize("response", [CREATE_MAPPING_RESPONSE, ""])
+@pytest.mark.parametrize("consumer", ["client", "operation"])
+async def test_create_optical_mapping_submits_document(
+    mock_hmc, monkeypatch, consumer, response
+):
     """create_optical_mapping submits a focused document to the VIOS endpoint."""
     mock_hmc.get(VIOS_PATH).mock(
         return_value=httpx.Response(
@@ -151,17 +159,35 @@ async def test_create_optical_mapping_submits_document(mock_hmc):
         )
     )
     post_route = mock_hmc.post(VIOS_PATH).mock(
-        return_value=httpx.Response(200, text=CREATE_MAPPING_RESPONSE)
+        return_value=httpx.Response(200, text=response)
     )
 
     config = make_config()
     async with HMCClient(config) as hmc:
-        result = await hmc.create_optical_mapping(
-            VIOS_UUID,
-            "test.iso",
-            LPAR_UUID,
-            target_device="cd1",
-        )
+        if consumer == "client":
+            result = await hmc.create_optical_mapping(
+                VIOS_UUID, "test.iso", LPAR_UUID, target_device="cd1"
+            )
+            if result is not None:
+                assert result["ResourceType"] == "VirtualSCSIMapping"
+            resource = result["Resource"] if result is not None else None
+        else:
+            location = ChangeLocation("Disabled", "current-configuration")
+            monkeypatch.setattr(
+                optical,
+                "resolve_and_authorize_lpar_mutation",
+                AsyncMock(return_value=LPAR_UUID),
+            )
+            monkeypatch.setattr(
+                optical, "read_change_location", AsyncMock(return_value=location)
+            )
+            result = await optical.mount_optical_media(
+                hmc, VIOS_UUID, LPAR_UUID, media_name="test.iso", target_device="cd1"
+            )
+            assert result.change_location == location
+            assert result.lpar_uuid == LPAR_UUID
+            resource = result.raw
+            assert resource is None or "Resource" not in resource
 
     assert post_route.called
     req_body = post_route.calls.last.request.content.decode()
@@ -170,6 +196,8 @@ async def test_create_optical_mapping_submits_document(mock_hmc):
     assert LPAR_UUID in req_body
     assert "<TargetDevice" in req_body
     assert '<TargetName kb="CUR" kxe="false">cd1</TargetName>' in req_body
-    assert result is not None
-    assert result["UUID"] == "mapping-uuid-new-001"
-    assert result["Storage"]["VirtualOpticalMedia"]["MediaName"] == "test.iso"
+    if not response:
+        assert resource is None
+        return
+    assert resource["UUID"] == "mapping-uuid-new-001"
+    assert resource["Storage"]["VirtualOpticalMedia"]["MediaName"] == "test.iso"

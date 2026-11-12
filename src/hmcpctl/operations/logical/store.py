@@ -861,6 +861,19 @@ def ledger_entries(
     ]
 
 
+def ledgered_elsewhere(
+    kind: str, system_uuid: str, match: Mapping[str, Any], *, exclude_operation_id: str
+) -> bool:
+    """Whether another operation's ledger already owns the resource *match* names."""
+    with read_session() as conn:
+        entries = [] if conn is None else ledger_entries(conn, kind, system_uuid)
+    return any(
+        operation_id != exclude_operation_id
+        and all(identity.get(key) == value for key, value in match.items())
+        for operation_id, _partition, identity in entries
+    )
+
+
 def ledger_request(
     conn: sqlite3.Connection, kind: str, system_uuid: str, partition_uuid: str
 ) -> tuple[str, str | None, str | None, dict[str, Any] | None] | None:

@@ -920,8 +920,8 @@ def test_capture_tool_resolves_identity_and_forwards_bounds(
         patch.object(lpar_console, "capture_lpar_console", capture),
     ):
         result = server_console.hmc_capture_lpar_console(
-            lpar_selector,
-            system_selector,
+            lpar_name_or_uuid=lpar_selector,
+            system_name_or_uuid=system_selector,
             duration_seconds=12.5,
             max_bytes=4096,
             idle_timeout_seconds=3.5,

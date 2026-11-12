@@ -171,7 +171,7 @@ The public result cannot claim running serial traffic, boot or console success.
    current-invocation grant/window assertions. Private bounded files, digest binding, durable
    pending intent and candidate/connection/expiry checks constrain create/stamp effects and
    conditional fresh-UUID deletion. Retained files restore no authority; recovery is read-only
-   and never resumes effects. See the existing controls in `scripts/live_test/lpar_serial_adapter.py`
+   and never resumes effects. See the existing controls in `scripts/live_test/arms/lpar_serial_adapter.py`
    and the standalone ST63 procedure in `docs/live-testing.md`.
 5. Outside this change: credential issuance and transport compromise remain with existing
    security owners; guest traffic/boot proof and cross-resource atomicity are not promised.

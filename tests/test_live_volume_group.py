@@ -15,9 +15,11 @@ from fastmcp import Client
 from hmcpctl.config import HMCConfig
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from live_test import artifacts as live_artifacts
 from live_test import config as live_config
 from live_test import runner
-from live_test import storage_volume_group as vg
+from live_test.arms import storage_volume_group as vg
+from live_test.config import hmc_identity
 
 PV = "hdisk9"
 PVID = "0000000000000009"
@@ -328,10 +330,12 @@ def test_optin_registry_and_legacy_documents():
     old_config.pop("scratch_pv_name")
     old_config.pop("scratch_vg_name")
     assert live_config.decode_saved_config(old_config) == live_config.LiveTestConfig()
-    artifacts = asdict(live_config.LiveTestArtifacts(storage_volume_group_name=GROUP))
-    assert live_config.decode_artifacts(artifacts).storage_volume_group_name == GROUP
+    artifacts = asdict(
+        live_artifacts.LiveTestArtifacts(storage_volume_group_name=GROUP)
+    )
+    assert live_artifacts.decode_artifacts(artifacts).storage_volume_group_name == GROUP
     artifacts.pop("storage_volume_group_name")
-    assert live_config.decode_artifacts(artifacts).storage_volume_group_name is None
+    assert live_artifacts.decode_artifacts(artifacts).storage_volume_group_name is None
 
 
 @pytest.mark.parametrize("kind", ["config", "artifact"])
@@ -342,12 +346,12 @@ def test_new_saved_fields_remain_strict(kind):
     data = (
         json.loads(json.dumps(asdict(live_config.LiveTestConfig())))
         if kind == "config"
-        else asdict(live_config.LiveTestArtifacts())
+        else asdict(live_artifacts.LiveTestArtifacts())
     )
     decode = (
         live_config.decode_saved_config
         if kind == "config"
-        else live_config.decode_artifacts
+        else live_artifacts.decode_artifacts
     )
     field = "scratch_pv_name" if kind == "config" else "storage_volume_group_name"
     data[field] = 123
@@ -432,9 +436,9 @@ async def test_registered_runner_native_wire_contract(monkeypatch, tmp_path, fau
         json.dumps(
             {
                 "config": asdict(config),
-                "hmc": runner._hmc_identity(hmc),
+                "hmc": hmc_identity(hmc),
                 "artifacts": asdict(
-                    live_config.LiveTestArtifacts(
+                    live_artifacts.LiveTestArtifacts(
                         vios_uuid="vios-A", vios_partition_id=1
                     )
                 ),
@@ -557,7 +561,7 @@ class FakeHMC:
         ]
 
     async def _get_vg_raw_xml(self, vios, vg_uuid):
-        return '"current"', ("element", vg_uuid)
+        return '"current"', ("element", vg_uuid), "unused raw document"
 
     async def _post_vg_xml(self, vios, vg_uuid, element, *, operation, etag):
         self.posts.append((vg_uuid, element, etag))

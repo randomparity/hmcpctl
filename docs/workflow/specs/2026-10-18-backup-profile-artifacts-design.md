@@ -13,7 +13,7 @@ The approved additional exclusion-owner map is empty. No hardware mutations gran
 
 Extend the existing profile domain/presentation boundary; no facade exports,
 transport wrapper for parity, arbitrary command, generic proxy or dependency.
-The new domain owner is `operations/lpar/profile_artifacts.py`; existing restore
+The new domain owner is `operations/lpar/profiles/artifacts.py`; existing restore
 option forwarding stays in `ssh/profiles.py` and `operations/lpar/configuration.py`.
 
 1. `list_backup_profile_artifacts(hmc, system_name_or_uuid)` resolves one system,

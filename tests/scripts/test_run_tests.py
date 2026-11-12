@@ -655,6 +655,72 @@ def test_timing_cli_retains_successful_output(tmp_path: Path) -> None:
     assert "configured coverage gate passed" in result.stdout
 
 
+@pytest.mark.skipif(not hasattr(signal, "SIGCHLD"), reason="POSIX child-exit signals")
+@pytest.mark.parametrize("ignored", [False, True])
+def test_cli_preserves_failure_or_refuses_ignored_child_statuses(
+    tmp_path: Path, ignored: bool
+) -> None:
+    tmp_path.joinpath("pytest.py").write_text(
+        "from pathlib import Path\n"
+        "Path('pytest-started').write_text('started')\n"
+        "print('deliberate child failure')\n"
+        "raise SystemExit(7)\n"
+    )
+    launcher = (
+        "import os, signal, sys\n"
+        f"signal.signal(signal.SIGCHLD, {'signal.SIG_IGN' if ignored else 'signal.SIG_DFL'})\n"
+        "os.execv(sys.executable, [sys.executable, sys.argv[1], '--serial'])\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", launcher, str(MODULE_PATH)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == (1 if ignored else 7)
+    assert "test: passed" not in result.stdout
+    assert tmp_path.joinpath("pytest-started").exists() is not ignored
+    if ignored:
+        assert "SIGCHLD" in result.stderr and "launcher" in result.stderr
+    else:
+        assert "deliberate child failure" in result.stderr
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGCHLD"), reason="POSIX child-exit signals")
+@pytest.mark.parametrize("coverage", [False, True])
+def test_ignored_child_statuses_refuse_before_pytest_or_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    coverage: bool,
+) -> None:
+    original_getsignal = signal.getsignal
+    original_handler = original_getsignal(signal.SIGCHLD)
+    monkeypatch.setattr(
+        signal,
+        "getsignal",
+        lambda sig: (
+            signal.SIG_IGN if sig == signal.SIGCHLD else original_getsignal(sig)
+        ),
+    )
+    monkeypatch.setattr(
+        run_tests, "COMBINE", ("3.11", str(tmp_path)) if coverage else None
+    )
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("verification child launched without waitable exit status")
+
+    monkeypatch.setattr(run_tests.subprocess, "Popen", forbidden)
+    assert run_tests.main() == 1
+    captured = capsys.readouterr()
+    assert "SIGCHLD" in captured.err and "launcher" in captured.err
+    assert "passed" not in captured.out
+    assert original_getsignal(signal.SIGCHLD) == original_handler
+
+
 def test_signal_return_code_maps_to_shell_status() -> None:
     assert run_tests._exit_status(-signal.SIGTERM) == 128 + signal.SIGTERM
 

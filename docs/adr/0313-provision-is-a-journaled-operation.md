@@ -2,6 +2,8 @@
 
 ## Status
 
+> **Partially superseded by [0346](0346-conservative-name-addressed-profile-save-recovery.md)** (2026-11-10): name-addressed profile-save absence and replay.
+
 > **Partially superseded by [0319](0319-provision-mounts-installer-media-before-the-profile-save.md)** (2026-11-03)
 
 Accepted (2026-11-02), issues #1839 and #1840 (pieces 1 and 2 of #1225, one PR by operator

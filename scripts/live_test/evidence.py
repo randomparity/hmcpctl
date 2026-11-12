@@ -5,14 +5,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import check_capability_inventory
+from capability_evidence import closure as capability_closure
+from capability_evidence import registry as capability_registry
+from capability_evidence import schema as capability_schema
+from capability_evidence import verification as capability_verification
 
 from live_test import config as live_config
 from live_test.capture import destination_is_ignored
@@ -84,7 +87,7 @@ def read_environment(path: Path | None = None) -> tuple[str, str] | None:
             (
                 ENVIRONMENT_KEYS[1],
                 family,
-                check_capability_inventory.HARDWARE_FAMILY,
+                capability_schema.HARDWARE_FAMILY,
                 "POWER<n>, e.g. POWER10",
             ),
         )
@@ -96,11 +99,17 @@ def read_environment(path: Path | None = None) -> tuple[str, str] | None:
 
 
 def _git(repo_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    # Callers pass fixed read-only Git queries; inherited routing is removed.
+    return subprocess.run(  # nosec B603, B607
         ["git", "-C", str(repo_root), *arguments],
         capture_output=True,
         text=True,
         check=False,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
     )
 
 
@@ -202,7 +211,7 @@ def emit_observations(
     if environment is None:
         print("no LIVE_TEST_ENV_* settings — observations not written")
         return False
-    if not check_capability_inventory.SCHEMA_VERSION.fullmatch(schema_version):
+    if not capability_schema.SCHEMA_VERSION.fullmatch(schema_version):
         print(
             "HMC_SCHEMA_VERSION is not V<n>_<n>[_<n>...] or unset — observations not written"
         )
@@ -225,8 +234,7 @@ def emit_observations(
         print("cannot resolve HEAD — observations not written")
         return False
     handlers = {
-        tool.operation: tool.handler
-        for tool in check_capability_inventory.discover_registry()
+        tool.operation: tool.handler for tool in capability_registry.discover_registry()
     }
     document: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -251,10 +259,8 @@ def emit_observations(
         observation["tested_commit"] = head.stdout.strip()
         observation["hmc_release"], observation["hardware_family"] = environment
         observation["schema_version"] = schema_version
-        observation["closure_fingerprint"] = (
-            check_capability_inventory.closure_fingerprint(
-                repo_root, handler.rsplit(".", 1)[0]
-            )
+        observation["closure_fingerprint"] = capability_closure.closure_fingerprint(
+            repo_root, handler.rsplit(".", 1)[0]
         )
         document.append(
             {"operation": recorded["operation"], "observation": observation}
@@ -270,7 +276,7 @@ def emit_observations(
             "tested_commit": head.stdout.strip(),
             "hmc_release": environment[0],
             "hardware_family": environment[1],
-            "closure_fingerprint": check_capability_inventory.closure_fingerprint(
+            "closure_fingerprint": capability_closure.closure_fingerprint(
                 repo_root, handler.rsplit(".", 1)[0]
             ),
         }
@@ -288,11 +294,11 @@ def load_known_gaps(
     repo_root: Path,
     catalog_path: Path | None = None,
 ) -> set[tuple[str, str]]:
-    document = check_capability_inventory.load_json(
+    document = capability_schema.load_json(
         catalog_path or repo_root / "docs/capabilities/maturity.json"
     )
     errors: list[str] = []
-    check_capability_inventory._exact_keys(
+    capability_schema.exact_keys(
         document,
         {"format_version", "admission_policy", "operations"},
         "maturity.json",
@@ -300,21 +306,19 @@ def load_known_gaps(
     )
     if (
         type(document.get("format_version")) is not int
-        or document.get("format_version")
-        != check_capability_inventory.MATURITY_FORMAT_VERSION
+        or document.get("format_version") != capability_schema.MATURITY_FORMAT_VERSION
         or document.get("admission_policy") != "existing-runtime-guards"
     ):
         errors.append("maturity.json: invalid format version or admission policy")
-    records = check_capability_inventory._objects(
-        check_capability_inventory._array(document, "operations", errors),
+    records = capability_schema.objects(
+        capability_schema.array(document, "operations", errors),
         "maturity operations",
         errors,
     )
     handlers = {
-        tool.operation: tool.handler
-        for tool in check_capability_inventory.discover_registry()
+        tool.operation: tool.handler for tool in capability_registry.discover_registry()
     }
-    check_capability_inventory._validate_maturity(records, set(handlers), errors)
+    capability_schema.validate_maturity(records, set(handlers), errors)
     if errors:
         raise ValueError("invalid gap catalog: " + "; ".join(errors))
     known: set[tuple[str, str]] = set()
@@ -325,10 +329,10 @@ def load_known_gaps(
             for scope in implementation["missing_scope"]:
                 if "confirmation" not in scope:
                     continue
-                fingerprint = check_capability_inventory.closure_fingerprint(
+                fingerprint = capability_closure.closure_fingerprint(
                     repo_root, handlers[operation].rsplit(".", 1)[0]
                 )
-                if check_capability_inventory.gap_is_current(
+                if capability_verification.gap_is_current(
                     scope["confirmation"], environment, fingerprint
                 ):
                     known.add((operation, scope["variant"]))

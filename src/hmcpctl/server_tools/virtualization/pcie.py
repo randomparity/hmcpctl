@@ -213,7 +213,6 @@ def hmc_set_sriov_adapter_mode(
 
 @tool(effect="mutate", operation="sriov.assign_logical_port", target_kind="lpar")
 def hmc_assign_sriov_logical_port(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     adapter_id: str,
     physical_port_id: str,
@@ -221,6 +220,8 @@ def hmc_assign_sriov_logical_port(
     capacity_percent: float,
     profile_name: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> SriovLogicalPortChangeResult:
     """Assign an evidence-backed Ethernet SR-IOV logical port.
@@ -256,13 +257,14 @@ def hmc_assign_sriov_logical_port(
 
 @tool(effect="mutate", operation="sriov.unassign_logical_port", target_kind="lpar")
 def hmc_unassign_sriov_logical_port(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     adapter_id: str,
     physical_port_id: str,
     logical_port_id: str,
     profile_name: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> SriovLogicalPortChangeResult:
     """Unassign a profile logical port on a Not Activated LPAR.

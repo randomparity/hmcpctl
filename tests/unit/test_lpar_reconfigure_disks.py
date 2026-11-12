@@ -8,6 +8,7 @@ planned mapping. The fake HMC models one VIOS with one volume group.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -15,10 +16,13 @@ from unit.test_lpar_reconfigure import ARGS, LPAR, OTHER, SYS, FakeHMC, _effects
 from unit.test_lpar_reconfigure import hmc as base_hmc  # noqa: F401 - a fixture
 
 from hmcpctl.errors import HMCError
+from hmcpctl.jobs import job_outcome
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import OperationRequest
-from hmcpctl.operations.lpar import profile_persist, reconfigure
-from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
+from hmcpctl.operations.lpar.profiles import persist as profile_persist
+from hmcpctl.operations.lpar.profiles.core import PartitionProfileOutcome
+from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
+from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch
 
 VIOS = "0000000c-0000-4000-8000-000000000000"
 VG = "0000000c-0000-4000-9000-000000000000"
@@ -125,19 +129,33 @@ def hmc(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
     fake.storage()
     fake.saves = []
 
-    async def read(_hmc, system, lpar, name):
-        assert (system, lpar, name) == (SYS, LPAR, "default")
+    async def read(hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid):
+        assert (system_name_or_uuid, lpar_name_or_uuid, profile_selector) == (
+            SYS,
+            LPAR,
+            "default",
+        )
         return SimpleNamespace(etag=f"E{fake.etag}")
 
-    async def save(_hmc, system, lpar, name, **kwargs):
+    async def save(hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **kwargs):
         fake.calls.append("save")
         fake.saves.append(kwargs)
         fake.recovery.append(f"hmcprec-{len(fake.recovery):016x}")
-        fake.saved_slots = {slot for _, lpar, _, slot in fake.maps if lpar == LPAR}
-        return SimpleNamespace(
+        fake.saved_slots = {
+            slot
+            for _, lpar_name_or_uuid, _, slot in fake.maps
+            if lpar_name_or_uuid == LPAR
+        }
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
             execution="unknown",
             requested_change="unverified",
-            job=object(),
+            job=job_outcome("save-job", {"Resource": {"Status": "RUNNING"}}),
             recovery_verified=True,
             error=None,
         )
@@ -349,7 +367,13 @@ def test_a_failed_save_pauses_with_the_disk_owned_and_warns(hmc, monkeypatch):
     hmc.state = "not activated"
 
     async def refused(*_args, **_kwargs):
-        return SimpleNamespace(
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
             execution="rejected",
             requested_change="unverified",
             job=None,
@@ -362,7 +386,36 @@ def test_a_failed_save_pauses_with_the_disk_owned_and_warns(hmc, monkeypatch):
     assert record.outcome == "needs_attention"
     assert _effects(record)[-1] == ("profile_save", "lpar.profile_save", "not_applied")
     assert len(_ledger()) == 1
-    assert any("current configuration only" in w for w in record.result["warnings"])
+    [warning] = [w for w in record.result["warnings"] if "configuration only" in w]
+    assert "resume to save" not in warning
+    assert "hmc_save_current_partition_profile" in warning
+
+
+def test_resume_after_a_refused_save_never_submits_the_save_again(hmc, monkeypatch):
+    hmc.state = "not activated"
+    saves = []
+
+    async def refused(*_args, **_kwargs):
+        saves.append("save")
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
+            execution="rejected",
+            requested_change="unverified",
+            job=None,
+            recovery_verified=False,
+            error="refused",
+        )
+
+    monkeypatch.setattr(profile_persist, "save_current_partition_profile", refused)
+    assert _run({"disks": {"add": [ADD]}}).outcome == "needs_attention"
+    resumed = _run({"disks": {"add": [ADD]}}, continuation="resume")
+    assert resumed.outcome == "needs_attention"
+    assert saves == ["save"]
 
 
 def test_resume_after_an_uncertain_disk_classifies_ledgers_and_saves(hmc):
@@ -408,6 +461,7 @@ async def _classify(kind, effect_key, plan, ctx_partition=(SYS, LPAR)):
     effect = SimpleNamespace(key=effect_key, kind=kind, target="", status="uncertain")
     ctx = SimpleNamespace(
         connection="<default>",
+        host="hmc.test",
         partition=ctx_partition,
         operation_id="op-1",
         recorded=lambda key: SimpleNamespace(status="applied", identity=plan),
@@ -539,3 +593,52 @@ def test_a_mapping_changed_since_planning_is_not_detached(hmc, monkeypatch):
     assert record.outcome == "failed"
     assert "no longer maps the planned disk" in record.warnings[0]
     assert _writes(hmc) == []
+
+
+@pytest.mark.parametrize("has_handle", [False, True])
+@pytest.mark.parametrize("legacy_record", [False, True])
+@pytest.mark.parametrize("matches", [False, True])
+def test_pending_force_save_is_only_reconciled_on_resume(
+    hmc, monkeypatch, has_handle, legacy_record, matches
+):
+    hmc.state = "not activated"
+    original_save = profile_persist.save_current_partition_profile
+
+    async def pending(*args, **kwargs):
+        before = set(hmc.saved_slots)
+        outcome = await original_save(*args, **kwargs)
+        hmc.saved_slots = before
+        return replace(outcome, job=outcome.job if has_handle else None)
+
+    monkeypatch.setattr(profile_persist, "save_current_partition_profile", pending)
+    patch = {"disks": {"add": [ADD]}}
+    first = _run(patch)
+    assert first.outcome == "needs_attention"
+    assert _effects(first)[-1] == ("profile_save", profile_persist.KIND, "uncertain")
+    assert len(hmc.saves) == 1
+    if legacy_record:
+        with store.session() as conn, store.write_transaction(conn):
+            store.record_outcome(
+                conn, first.operation_id, "profile_save", "not_applied", None
+            )
+    if matches:
+        hmc.saved_slots = {
+            slot for _, partition, _, slot in hmc.maps if partition == LPAR
+        }
+    resumed = _run(patch, continuation="resume")
+    assert len(hmc.saves) == 1
+    assert len(hmc.recovery) == 1
+    if matches:
+        assert resumed.outcome == "completed", resumed.warnings
+        assert _effects(resumed)[-1] == (
+            "profile_save",
+            profile_persist.KIND,
+            "applied",
+        )
+    else:
+        assert resumed.outcome == "needs_attention"
+        assert _effects(resumed)[-1] == (
+            "profile_save",
+            profile_persist.KIND,
+            "uncertain",
+        )

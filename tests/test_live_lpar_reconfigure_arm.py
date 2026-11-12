@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_config
-from live_test import lpar_reconfigure as arm
+from live_test.arms import lpar_config
+from live_test.arms import lpar_reconfigure as arm
 
 
 class Surface:

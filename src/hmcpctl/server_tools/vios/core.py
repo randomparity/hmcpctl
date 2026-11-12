@@ -292,7 +292,10 @@ def hmc_install_vios(
 
 @tool(effect="read", operation="vios.list_backups", target_kind="vios")
 def hmc_list_vios_backups(
-    vios_name_or_uuid: str, profile: str | None = None
+    vios_name_or_uuid: str,
+    profile: str | None = None,
+    *,
+    system_name_or_uuid: str | None = None,
 ) -> list[dict[str, str]]:
     """List a VIOS backup catalog with the supported ``lsviosbk`` command.
 
@@ -302,6 +305,7 @@ def hmc_list_vios_backups(
 
     Args:
         vios_name_or_uuid: VIOS partition name or UUID.
+        system_name_or_uuid: Optional managed-system name or UUID to scope VIOS lookup.
         profile: Optional HMC connection profile, distinct from a logical-partition
             profile; uses environment defaults when omitted.
 
@@ -310,7 +314,9 @@ def hmc_list_vios_backups(
     """
 
     return with_client(
-        lambda hmc: list_vios_backups(hmc, vios_name_or_uuid),
+        lambda hmc: list_vios_backups(
+            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+        ),
         profile=profile,
     )
 
@@ -429,6 +435,8 @@ def hmc_power_on_vios(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
     profile: str | None = None,
+    *,
+    system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
     """Power on a VIOS, optionally waiting for a normalized job outcome.
 
@@ -437,6 +445,7 @@ def hmc_power_on_vios(
         wait: Wait for the power job's terminal outcome when true.
         timeout_seconds: Maximum client-side wait in seconds.
         poll_interval: Seconds between job-status requests while waiting.
+        system_name_or_uuid: Optional managed-system name or UUID to scope VIOS lookup.
         profile: Optional HMC connection profile, distinct from a logical-partition
             profile; uses environment defaults when omitted.
     """
@@ -445,7 +454,7 @@ def hmc_power_on_vios(
         lambda hmc: power_vios(
             hmc,
             vios_name_or_uuid,
-            system_name_or_uuid=None,
+            system_name_or_uuid=system_name_or_uuid,
             power_on=True,
             wait=wait,
             timeout_seconds=timeout_seconds,
@@ -624,11 +633,13 @@ def hmc_read_vios_boot_order(
         vios_name_or_uuid: Name or UUID of the VirtualIOServer on that system.
         profile: Configured HMC profile, or the default when omitted.
     """
-    return with_client(
-        lambda hmc: read_vios_boot_order(
-            hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
-        ),
-        profile=profile,
+    return dict(
+        with_client(
+            lambda hmc: read_vios_boot_order(
+                hmc, vios_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+            ),
+            profile=profile,
+        )
     )
 
 
@@ -657,14 +668,16 @@ def hmc_set_vios_boot_order(
         boot_string: Exact printable raw text with a non-whitespace character, at most 16384 UTF-8 bytes; preserved without normalization, mutually exclusive with devices.
     """
     select_boot_string(devices, boot_string)
-    return with_client(
-        lambda hmc: set_vios_boot_order(
-            hmc,
-            vios_name_or_uuid,
-            devices,
-            system_name_or_uuid=system_name_or_uuid,
-            ownership_override=ownership_override,
-            boot_string=boot_string,
-        ),
-        profile=profile,
+    return dict(
+        with_client(
+            lambda hmc: set_vios_boot_order(
+                hmc,
+                vios_name_or_uuid,
+                devices,
+                system_name_or_uuid=system_name_or_uuid,
+                ownership_override=ownership_override,
+                boot_string=boot_string,
+            ),
+            profile=profile,
+        )
     )

@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.profile_sync import (
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar.profiles.sync import (
     ChangeLocation,
     adapters_missing_from_profile,
     profile_adapter_warnings,
@@ -232,6 +232,7 @@ UNSYNCED = ChangeLocation("Disabled", "current-configuration")
 
 
 def _operations():
+    from hmcpctl.operations.storage import optical
     from hmcpctl.operations.storage import resources as storage
     from hmcpctl.operations.virtualization import adapters
 
@@ -268,7 +269,7 @@ def _operations():
         ),
         (
             "create_optical_mapping",
-            lambda h: storage.mount_optical_media(
+            lambda h: optical.mount_optical_media(
                 h, VIOS_UUID, LPAR_UUID, media_name="m"
             ),
         ),
@@ -278,7 +279,7 @@ def _operations():
         ),
         (
             "delete_storage_mapping",
-            lambda h: storage.unmount_optical_media(
+            lambda h: optical.unmount_optical_media(
                 h, VIOS_UUID, LPAR_UUID, media_name="m"
             ),
         ),
@@ -304,7 +305,7 @@ async def test_each_operation_reads_the_location_before_its_write(
     monkeypatch, write, operation
 ):
     authorize = AsyncMock(return_value=LPAR_UUID)
-    for module in ("virtualization.adapters", "storage.resources"):
+    for module in ("virtualization.adapters", "storage.resources", "storage.optical"):
         monkeypatch.setattr(
             f"hmcpctl.operations.{module}.resolve_and_authorize_lpar_mutation",
             authorize,
@@ -314,7 +315,15 @@ async def test_each_operation_reads_the_location_before_its_write(
         AsyncMock(return_value=VIOS_UUID),
     )
     monkeypatch.setattr(
+        "hmcpctl.operations.storage.optical.resolve_vios_uuid",
+        AsyncMock(return_value=VIOS_UUID),
+    )
+    monkeypatch.setattr(
         "hmcpctl.operations.storage.resources.storage_mapping_id",
+        lambda _mapping: "vhost0/vtscsi0",
+    )
+    monkeypatch.setattr(
+        "hmcpctl.operations.storage.optical.storage_mapping_id",
         lambda _mapping: "vhost0/vtscsi0",
     )
     monkeypatch.setattr(
@@ -389,3 +398,14 @@ async def test_an_empty_adapter_collection_is_no_adapter_not_an_error(mock_hmc):
     async with HMCClient(make_config()) as client:
         assert await adapters_missing_from_profile(client, LPAR_UUID, profile) == []
         assert await profile_adapter_warnings(client, LPAR_UUID, profile) == ()
+
+
+@pytest.mark.asyncio
+async def test_profile_advisory_propagates_fingerprint_failure_without_more_reads():
+    hmc = AsyncMock()
+    failure = HMCTLSFingerprintError("private-pin")
+    hmc.list_child.side_effect = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await profile_adapter_warnings(hmc, LPAR_UUID, _profile())
+    assert caught.value is failure
+    assert hmc.list_child.await_count == 1

@@ -15,12 +15,12 @@ from hmcpctl.documents.partition_profile import apply_profile_patch
 from hmcpctl.operations.logical import engine
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord
-from hmcpctl.operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionRequest,
     ProvisionStorage,
 )
-from hmcpctl.operations.lpar.provision_operation import (
+from hmcpctl.operations.lpar.provisioning.operation import (
     EFFECT_KINDS,
     expected_profile,
     provision_classifiers,
@@ -94,9 +94,14 @@ def _partition(description: str | None = None, uuid: str = LPAR) -> dict:
 
 def _classify(hmc: FakeHMC, key: str, target: str, *, request=REQUEST, ctx=None):
     effect = EffectRecord(key, EFFECT_KINDS[key], target, "uncertain", None)
-    classifier = provision_classifiers(request, lambda _connection: hmc)[effect.kind]
+    classifier = provision_classifiers(request, lambda _connection, _host: hmc)[
+        effect.kind
+    ]
     context = ctx or SimpleNamespace(
-        connection="<default>", operation_id=OPERATION, partition=(SYSTEM, LPAR)
+        host="hmc.test",
+        connection="<default>",
+        operation_id=OPERATION,
+        partition=(SYSTEM, LPAR),
     )
     return asyncio.run(classifier(context, effect))
 
@@ -409,7 +414,7 @@ def test_installer_media_needs_its_vscsi_adapter_in_the_saved_profile():
 
 def test_a_running_operation_reports_no_step_for_a_write_in_flight():
     from hmcpctl.operations.logical.models import OperationRecord
-    from hmcpctl.operations.lpar.provision_operation import result_from_record
+    from hmcpctl.operations.lpar.provisioning.operation import result_from_record
 
     effects = (
         EffectRecord(
@@ -445,7 +450,7 @@ def test_a_running_operation_reports_no_step_for_a_write_in_flight():
 
 def test_a_paused_result_carries_the_engine_s_reason():
     from hmcpctl.operations.logical.models import OperationRecord
-    from hmcpctl.operations.lpar.provision_operation import result_from_record
+    from hmcpctl.operations.lpar.provisioning.operation import result_from_record
 
     effects = (
         EffectRecord(
@@ -492,3 +497,10 @@ def test_a_paused_result_carries_the_engine_s_reason():
         "Change location not read",
         "effect network: the VLAN's adapters are ambiguous",
     )
+    stale = replace(
+        record,
+        state="terminal",
+        outcome="failed",
+        result={**body_result, "workflow_completed": True},
+    )
+    assert result_from_record(stale).workflow_completed is False

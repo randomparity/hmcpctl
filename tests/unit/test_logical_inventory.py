@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from hmcpctl.errors import HMCError, HMCTransportError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from hmcpctl.operations.inventory.logical import (
     CAPACITY_TOOL,
     DELEGATED_TOOLS,
@@ -552,3 +552,18 @@ def test_page_filled_at_a_system_boundary_resumes_at_the_next_system():
     second = _read(hmc, limit=1, cursor=first.next_cursor)
     assert [p.uuid for p in second.partitions] == [_uuid(2, 1)]
     assert second.next_cursor is None
+
+
+@pytest.mark.parametrize("stage", ["enumeration", "selector", "partitions", "capacity"])
+def test_pin_mismatch_aborts_inventory_before_following_system(stage):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = FakeHMC(
+        [_system(1), _system(2)],
+        {_uuid(1): failure} if stage == "partitions" else {},
+        systems_error=failure if stage in {"enumeration", "selector"} else None,
+        entry_errors={_uuid(1): failure} if stage == "capacity" else {},
+    )
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        _read(hmc, systems=["sys1", "sys2"] if stage == "selector" else None)
+    assert caught.value is failure
+    assert all(uuid != _uuid(2) for _, uuid in hmc.calls)

@@ -1189,25 +1189,34 @@ def test_parse_feed_associated_profile_and_conflicting_references(system_profile
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["create", "activate"])
-@pytest.mark.parametrize("interruption", ["deadline", "cancel"])
+@pytest.mark.parametrize("operation", ["create", "update", "activate"])
+@pytest.mark.parametrize(
+    "interruption,site",
+    [("deadline", "wait"), ("cancel", "wait"), ("tls", "submit"), ("tls", "wait")],
+)
 async def test_public_rest_interruption_stops_reconciliation_reads(
-    system_profiles, operation, interruption
+    system_profiles, operation, interruption, site
 ):
     import asyncio
+
+    from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCTLSFingerprintError
 
     h, _, _, ssh = system_profiles
     begun = asyncio.Event()
     interrupted = False
     post_reads = []
+    counts_at_failure = []
 
     async def wait(*args, **kwargs):
         nonlocal interrupted
         begun.set()
         try:
+            if interruption == "tls":
+                raise HMCTLSFingerprintError("constructed certificate mismatch")
             await asyncio.Event().wait()
         finally:
             interrupted = True
+            counts_at_failure.extend(mock.await_count for mock in boundaries)
 
     async def command(_config, cmd, **kwargs):
         if interrupted:
@@ -1222,28 +1231,51 @@ async def test_public_rest_interruption_stops_reconciliation_reads(
         )
 
     ssh.side_effect = command
-    h.submit_job = AsyncMock(return_value=terminal("NOT_STARTED"))
+    h.submit_job = (
+        AsyncMock(side_effect=wait)
+        if site == "submit"
+        else AsyncMock(return_value=terminal("NOT_STARTED"))
+    )
     h.wait_for_job_entry = AsyncMock(side_effect=wait)
+    boundaries = (
+        h.get_console_info,
+        h.get_managed_system,
+        h.list_logical_partitions,
+        h.list_vios,
+        h.list_child,
+        ssh,
+        h.submit_job,
+        h.wait_for_job_entry,
+    )
     args = {
         "exclusive_writer_window": True,
         "timeout_seconds": 1 if interruption == "deadline" else 30,
         "poll_interval": 1,
     }
-    call = (
-        ops.create_system_profile(
+    if operation == "create":
+        call = ops.create_system_profile(
             h, S, "new", [ops.SystemProfilePair(partition=L, profile=P)], **args
         )
-        if operation == "create"
-        else ops.activate_system_profile(h, S, "scratch", **args)
-    )
+    elif operation == "update":
+        call = ops.update_system_profile(h, S, "scratch", new_name="renamed", **args)
+    else:
+        call = ops.activate_system_profile(h, S, "scratch", **args)
     task = asyncio.create_task(call)
     await asyncio.wait_for(begun.wait(), 5)
     if interruption == "cancel":
         task.cancel()
     result = await task
-    assert result.state == "uncertain" and result.job.job_id == "job-1"
-    assert result.postcondition == "unverified" and h.submit_job.await_count == 1
+    assert result.state == "uncertain" and result.postcondition == "unverified"
+    assert h.submit_job.await_count == 1
     assert interrupted and post_reads == []
+    assert [mock.await_count for mock in boundaries] == counts_at_failure
+    if site == "submit":
+        assert result.job is None
+        h.wait_for_job_entry.assert_not_awaited()
+    else:
+        assert result.job.job_id == "job-1"
+    if interruption == "tls":
+        assert result.error == TLS_OBSERVATION_ABORTED
 
 
 @pytest.mark.asyncio

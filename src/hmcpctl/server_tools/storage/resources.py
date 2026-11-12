@@ -2,7 +2,38 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
+
+from hmcpctl.operations.lpar.profiles.sync import resource_with_change_location
+from hmcpctl.operations.lpar.provisioning.core import (
+    AttachDiskResult,
+    ProvisionStorage,
+    attach_disk_to_lpar,
+)
+from hmcpctl.operations.storage.iso_upload import upload_iso
+from hmcpctl.operations.storage.optical import (
+    create_media_repository,
+    create_optical_media,
+    delete_media_repository,
+    delete_optical_media,
+    get_media_repository,
+    list_optical_mappings,
+    list_optical_media,
+    load_optical_media,
+    mount_optical_media,
+    unload_optical_media,
+    unmount_optical_media,
+)
+from hmcpctl.operations.storage.resources import (
+    create_virtual_disk,
+    create_volume_group,
+    delete_virtual_disk,
+    detach_storage_mapping,
+    list_storage_mappings,
+    list_volume_groups,
+    map_storage,
+)
 
 from ..._app import (
     run_limited_collection,
@@ -15,36 +46,9 @@ from ...jobs import (
     DeviceType,
     LuType,
 )
-from ...operations.lpar.profile_sync import resource_with_change_location
-from ...operations.lpar.provision import (
-    AttachDiskResult,
-    ProvisionStorage,
-    attach_disk_to_lpar,
-)
 from ...operations.storage.cluster import (
     create_logical_unit,
     delete_logical_unit,
-)
-from ...operations.storage.resources import (
-    create_media_repository,
-    create_optical_media,
-    create_virtual_disk,
-    create_volume_group,
-    delete_media_repository,
-    delete_optical_media,
-    delete_virtual_disk,
-    detach_storage_mapping,
-    get_media_repository,
-    list_optical_mappings,
-    list_optical_media,
-    list_storage_mappings,
-    list_volume_groups,
-    load_optical_media,
-    map_storage,
-    mount_optical_media,
-    unload_optical_media,
-    unmount_optical_media,
-    upload_iso,
 )
 from ...tool_registry import tool_module
 
@@ -132,9 +136,10 @@ def hmc_attach_disk_to_lpar(
     disk_name: str,
     capacity_mib: int,
     dry_run: bool = False,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> AttachDiskResult:
     """Create and attach a virtual disk; concurrent VolumeGroup changes can be lost.
 
@@ -268,14 +273,15 @@ def hmc_delete_virtual_disk(
 
 @tool(effect="mutate", operation="storage.map", target_kind="vios")
 def hmc_map_storage_to_lpar(
+    lpar_name_or_uuid: str,
     vios_name_or_uuid: str,
     storage_name: str,
-    lpar_name_or_uuid: str,
     storage_kind: StorageKind = "VirtualDisk",
     target_device: str | None = None,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any] | None:
     """Map backing storage to an LPAR via a Virtual SCSI mapping on a VIOS.
 
@@ -313,7 +319,12 @@ def hmc_map_storage_to_lpar(
             target=target_device,
             ownership_override=ownership_override,
         )
-        return result.raw
+        assert result.change_location is not None
+        return {
+            "lpar_uuid": result.lpar_uuid,
+            "resource": result.raw,
+            "change_location": asdict(result.change_location),
+        }
 
     return with_client(mapping, profile=profile)
 
@@ -539,8 +550,9 @@ def hmc_list_optical_media(
 
 @tool(effect="read", operation="storage.list_mappings", target_kind="vios")
 def hmc_list_storage_mappings(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
+    *,
+    vios_name_or_uuid: str,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -606,7 +618,11 @@ def hmc_detach_storage_mapping(
             system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         )
-        return {"mapping_id": mapping_id, "change_location": location.raw}
+        assert location.change_location is not None
+        return {
+            "mapping_id": mapping_id,
+            "change_location": asdict(location.change_location),
+        }
 
     return with_client(detach_mapping, profile=profile)
 
@@ -827,10 +843,11 @@ def hmc_upload_iso(
 
 @tool(effect="read", operation="media.list_mappings", target_kind="vios")
 def hmc_list_optical_mappings(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
-    profile: str | None = None,
     limit: int | None = None,
+    *,
+    vios_name_or_uuid: str,
+    profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
     """List VirtualSCSIMappings for optical media on a VIOS, optionally filtered by LPAR.
@@ -863,13 +880,14 @@ def hmc_list_optical_mappings(
 
 @tool(effect="mutate", operation="media.mount", target_kind="vios")
 def hmc_mount_optical_media(
+    lpar_name_or_uuid: str,
     vios_name_or_uuid: str,
     media_name: str,
-    lpar_name_or_uuid: str,
     target_device: str | None = None,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Create a VirtualSCSIMapping for optical media (mount ISO to LPAR).
 
@@ -906,21 +924,20 @@ def hmc_mount_optical_media(
             system_name_or_uuid=system_name_or_uuid,
         )
         assert result.change_location is not None
-        return resource_with_change_location(
-            result.raw["resource"], result.change_location
-        )
+        return resource_with_change_location(result.resource, result.change_location)
 
     return with_client(mount, profile=profile)
 
 
 @tool(effect="destructive", operation="media.unmount", target_kind="vios")
 def hmc_unmount_optical_media(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str,
+    vios_name_or_uuid: str,
     media_name: str,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> str:
     """Remove a VirtualSCSIMapping for optical media (unmount).
 
@@ -969,14 +986,15 @@ def hmc_unmount_optical_media(
 
 @tool(effect="destructive", operation="media.load", target_kind="vios")
 def hmc_load_optical_media(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str,
+    vios_name_or_uuid: str,
     media_name: str,
     target_device: str | None = None,
     release: bool = False,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Load a repository medium into an LPAR's existing virtual optical device.
 
@@ -1025,13 +1043,14 @@ def hmc_load_optical_media(
 
 @tool(effect="destructive", operation="media.unload", target_kind="vios")
 def hmc_unload_optical_media(
-    vios_name_or_uuid: str,
     lpar_name_or_uuid: str,
+    vios_name_or_uuid: str,
     target_device: str | None = None,
     release: bool = False,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Unload the medium from an LPAR's virtual optical device, keeping the mapping.
 

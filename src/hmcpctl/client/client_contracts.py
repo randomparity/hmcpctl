@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal, Protocol, get_args
+from typing import Any, Literal, Protocol, TypeVar, get_args
 
 # Element is a type contract only; client implementations parse inbound XML
 # through defusedxml.
@@ -15,6 +15,8 @@ import httpx
 from ..config import HMCConfig
 from ..errors import HMCError
 from ..resource_identity import is_uuid
+
+_DispatchResult = TypeVar("_DispatchResult")
 
 AuthenticationFilter = Literal["local", "ldap", "kerberos", "all"]
 VALID_AUTHENTICATION_FILTERS = frozenset(get_args(AuthenticationFilter))
@@ -345,10 +347,10 @@ class StorageClient(Protocol):
     async def _reconcile_storage_mutation(
         self,
         operation: str,
-        snapshot: Callable[[], Awaitable[Any]],
-        dispatch: Callable[[], Awaitable[Any]],
+        snapshot: Callable[[], Awaitable[object]],
+        dispatch: Callable[[], Awaitable[_DispatchResult]],
         note: str | Callable[[HMCError], str] = "",
-    ) -> Any: ...
+    ) -> _DispatchResult: ...
 
     async def list_volume_groups(self, vios_uuid: str) -> list[dict[str, Any]]: ...
 
@@ -362,7 +364,7 @@ class StorageClient(Protocol):
 
     async def _get_vg_raw_xml(
         self, vios_uuid: str, vg_uuid: str
-    ) -> tuple[str | None, Element]: ...
+    ) -> tuple[str | None, Element, str]: ...
 
     async def _post_vg_xml(
         self,
@@ -398,10 +400,6 @@ class AdaptersClient(Protocol):
         uuid_path_arguments: Mapping[str, str],
         **kwargs: Any,
     ) -> httpx.Response: ...
-
-    async def _network_adapter_creation_feed(
-        self, lpar_uuid: str, *, allow_empty: bool = False
-    ) -> list[dict[str, Any]]: ...
 
     async def list_child(
         self, parent_type: str, parent_uuid: str, child_type: str

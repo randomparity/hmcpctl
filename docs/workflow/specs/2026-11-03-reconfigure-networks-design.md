@@ -9,7 +9,7 @@ ADR 0315 (client Ethernet add refusals), ADR 0321 (half-applied detach without R
 
 Reconfigure cannot add a client network adapter to a partition, or remove one. The adapter
 specialists change only the current configuration, so a profile activation undoes them
-(`operations/lpar/profile_sync.py`).
+(`operations/lpar/profiles/sync.py`).
 
 ## Prerequisite
 
@@ -88,6 +88,10 @@ staleness check (`_stale`).
   add with a pinned MAC is `applied` when an adapter has that MAC and `not_applied` otherwise.
   An add without one looks at the adapters on its VLAN that are absent from the baseline: none →
   `not_applied`, one → `applied`, several → `needs_attention`.
+
+Name-addressed profile-save recovery follows ADR 0346: an unconfirmed save stays
+uncertain, and absent/mismatched readback cannot authorize a second save. Older
+not_applied save rows are reconciled read-only. UUID-addressed CAS remains unchanged.
 
 **Verification.** ADR 0314's poll also requires that every removed UUID is absent and every
 added identity's UUID is listed. The result's `observed.networks` lists the MACs the partition

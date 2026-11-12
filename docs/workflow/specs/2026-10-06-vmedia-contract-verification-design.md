@@ -100,7 +100,7 @@ ST22 teardown stay plain and never promote.
      virtualio --rsubtype scsi --level lpar --filter lpar_ids=<vios id>` and
      `lpar_names=<test partition>`, `-F slot_num,remote_lpar_name,remote_slot_num`,
      the listing the recovery script reads; its builder moves into
-     `live_test/vmedia.py` so both issue the same command).
+     `live_test/arms/vmedia.py` so both issue the same command).
    1. `hmc_create_optical_media` (1024 MiB), then list. `media.create`:
       `create-accepted`, `media-listed`, `size-matches`, `baseline-media-kept`.
       `media.list` (the baseline read): `media-entries-named`; an empty baseline is a

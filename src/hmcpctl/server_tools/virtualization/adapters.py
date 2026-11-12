@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import StrictBool, StrictInt, StrictStr
 
+from hmcpctl.operations.lpar.profiles.sync import resource_with_change_location
+
 from ..._app import run_limited_collection, with_client
 from ...client.client_contracts import AdapterType
 from ...client.core import HMCClient
@@ -14,7 +16,6 @@ from ...documents.adapters import (
     validate_network_adapter_creation_fields,
     validate_network_adapter_update_fields,
 )
-from ...operations.lpar.profile_sync import resource_with_change_location
 from ...operations.virtualization.adapters import (
     _validate_network_update_target,
     add_network_adapter,
@@ -33,8 +34,9 @@ tool, register_tools, tool_security = tool_module()
 def hmc_list_adapters(
     lpar_name_or_uuid: str,
     adapter_type: AdapterType = "ClientNetworkAdapter",
-    profile: str | None = None,
     limit: int | None = None,
+    *,
+    profile: str | None = None,
     system_name_or_uuid: str | None = None,
 ) -> list[dict[str, Any]]:
     """List one LPAR's virtual adapters of the selected adapter type.
@@ -70,10 +72,10 @@ def hmc_add_network_adapter(
     virtual_switch_id: int | None = None,
     tagged: bool = False,
     mac_address: str | None = None,
-    profile: str | None = None,
-    system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
     *,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
     addl_vlan_ids: list[StrictInt] | None = None,
     allowed_os_mac_addrs: list[StrictStr] | Literal["all", "none"] | None = None,
     qos_priority: StrictInt | Literal["none"] | None = None,
@@ -249,9 +251,10 @@ def hmc_add_vscsi_adapter(
     vios_partition_id: int,
     vios_slot: int,
     slot_number: int | None = None,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Add a virtual SCSI client adapter paired to a VIOS server slot.
 
@@ -298,9 +301,10 @@ def hmc_add_vfc_adapter(
     vios_partition_id: int,
     vios_slot: int,
     slot_number: int | None = None,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any]:
     """Add an NPIV virtual Fibre Channel client adapter to an LPAR.
 
@@ -337,9 +341,10 @@ def hmc_delete_adapter(
     lpar_name_or_uuid: str,
     adapter_type: AdapterType,
     adapter_uuid: str,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> str:
     """Remove an adapter by UUID, detaching its network or storage path.
 

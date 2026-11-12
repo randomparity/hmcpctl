@@ -10,14 +10,17 @@ import os
 import selectors
 import signal
 import stat
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 import time
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
-import check_capability_inventory as inventory
 import live_test_preflight as preflight
+from capability_evidence import registry as capability_registry
+from capability_evidence import schema as capability_schema
 from live_test import baseline, cli, runner
 from live_test import config as live_config
 
@@ -59,9 +62,15 @@ class WindowError(ValueError):
     """A safe operator-facing refusal, with no raw child or configuration output."""
 
 
-def git(root, *arguments):
-    result = subprocess.run(
+def git(root: Path, *arguments: str) -> str:
+    # Fixed repository queries inspect the physical candidate, not inherited routing.
+    result = subprocess.run(  # nosec B603, B607
         ["git", "-C", str(root), *arguments],
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
         capture_output=True,
         text=True,
         check=False,
@@ -71,8 +80,8 @@ def git(root, *arguments):
     return result.stdout.strip()
 
 
-def read_json(path, limit):
-    def unique(pairs):
+def read_json(path: Path, limit: int) -> Any:
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result = dict(pairs)
         if len(result) != len(pairs):
             raise WindowError("duplicate JSON keys are not allowed")
@@ -85,23 +94,18 @@ def read_json(path, limit):
     return json.loads(content, object_pairs_hook=unique)
 
 
-def prepare(args):
+def prepare(args: argparse.Namespace) -> dict[str, Any]:
     root = Path.cwd().resolve()
     if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
         raise WindowError("run from the candidate checkout root")
     branch = git(root, "symbolic-ref", "--short", "HEAD")
-    default = subprocess.run(
-        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if default.returncode:
+    try:
+        default = git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    except WindowError as error:
         raise WindowError(
             "origin default branch is unknown; configure origin/HEAD first"
-        )
-    protected = {"main", "master", default.stdout.strip().removeprefix("origin/")}
+        ) from error
+    protected = {"main", "master", default.removeprefix("origin/")}
     if branch in protected or git(
         root, "status", "--porcelain", "--untracked-files=all"
     ):
@@ -115,8 +119,8 @@ def prepare(args):
     if claims.parent != root / "docs/capabilities/releases" or args.claims.is_symlink():
         raise WindowError("claims must be a committed release file in this checkout")
     git(root, "ls-files", "--error-unmatch", str(claims.relative_to(root)))
-    rows = inventory.load_release_claims(
-        claims, {tool.operation for tool in inventory.discover_registry()}
+    rows = capability_registry.load_release_claims(
+        claims, {tool.operation for tool in capability_registry.discover_registry()}
     )
     selected = {row["arm"] for row in rows}
     if not selected or not selected <= ARMS.keys():
@@ -186,7 +190,9 @@ def prepare(args):
     }
 
 
-def cli_coverage(operations, documents, candidate):
+def cli_coverage(
+    operations: Iterable[str], documents: Iterable[Mapping[str, Any]], candidate: str
+) -> dict[str, str]:
     coverage = dict.fromkeys(operations, "gap: CLI not verified in this window")
     for document in documents:
         run = document.get("run", {})
@@ -218,7 +224,7 @@ def cli_coverage(operations, documents, candidate):
     return coverage
 
 
-def authorize(plan, path):
+def authorize(plan: Mapping[str, Any], path: Path | None) -> None:
     if path is None:
         raise WindowError(
             "explicit authorization file required; inspect --dry-run first"
@@ -239,7 +245,7 @@ def authorize(plan, path):
         )
 
 
-def private_directory(path, root):
+def private_directory(path: Path, root: Path) -> Path:
     if (
         path.is_symlink()
         or not path.is_dir()
@@ -256,23 +262,30 @@ def private_directory(path, root):
 class Execution:
     """Sequential subprocess ownership, bounded private output, and signal handling."""
 
-    def __init__(self, root, output):
+    def __init__(self, root: Path, output: Path) -> None:
         self.root, self.output = root, output
         self.cancelled = False
         self.safe = True
-        self.phases = []
+        self.phases: list[dict[str, Any]] = []
 
-    def interrupt(self, *_):
+    def interrupt(self, *_: object) -> None:
         self.cancelled = True
 
     @staticmethod
-    def stop(process, sig):
+    def stop(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
         try:
             os.killpg(process.pid, sig)
         except ProcessLookupError:
             pass
 
-    def run(self, label, arguments, *, recovery=False, markdown=False):
+    def run(
+        self,
+        label: str,
+        arguments: Sequence[str | Path],
+        *,
+        recovery: bool = False,
+        markdown: bool = False,
+    ) -> bool:
         if self.cancelled and not recovery:
             return False
         path = self.output / (label + (".md" if markdown else ".log"))
@@ -285,7 +298,8 @@ class Execution:
         try:
             with path.open("xb") as log:
                 operation = "spawn child"
-                process = subprocess.Popen(
+                # Fixed phase scripts and ARMS entries run under the current interpreter.
+                process = subprocess.Popen(  # nosec B603
                     [sys.executable, *map(str, arguments)],
                     cwd=self.root,
                     stdout=subprocess.PIPE,
@@ -370,7 +384,9 @@ class Execution:
         return passed
 
 
-def capture(execution, index, system, when, ids=()):
+def capture(
+    execution: Execution, index: int, system: str, when: str, ids: Iterable[int] = ()
+) -> Path:
     path = execution.output / f"baseline-{index}-{when}.json"
     argv = [
         "scripts/live_test_baseline.py",
@@ -389,7 +405,7 @@ def capture(execution, index, system, when, ids=()):
     return path
 
 
-def run_window(plan, execution):
+def run_window(plan: dict[str, Any], execution: Execution) -> bool:
     arms = plan["authorization"]["arms"]
     captures = []
     for index, system in enumerate(plan["systems"]):
@@ -472,7 +488,7 @@ def run_window(plan, execution):
     )
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claims", type=Path, required=True)
     parser.add_argument("--branch", required=True)
@@ -516,7 +532,7 @@ def main(argv=None):
             previous[sig] = signal.signal(sig, execution.interrupt)
         passed = run_window(plan, execution)
         exit_code = 0 if passed else 1
-    except (WindowError, OSError, ValueError, inventory.InventoryError):
+    except (WindowError, OSError, ValueError, capability_schema.InventoryError):
         print(
             "FAIL: release-window authorization, configuration or phase check failed; inspect --dry-run and private phase output",
             file=sys.stderr,

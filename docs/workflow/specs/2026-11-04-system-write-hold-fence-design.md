@@ -37,7 +37,7 @@ The other 17 records are classified by the resources their current code writes:
   container membership/metadata, not the contained partition profiles or running state
   (`operations/systems/profiles.py`, `_metadata`).
 - create_lpar, create_vios, deploy_partition_template create new partitions; their creation
-  paths do not rewrite an existing held partition (`operations/lpar/workflows.py`,
+  paths do not rewrite an existing held partition (`operations/lpar/creation/workflow.py`,
   `operations/vios/core.py`, `operations/templates/core.py`). Resource competition remains outside
   the requested existing-partition fence.
 - set_vios_fc_port_label, remove_vios_fc_port_label, create_vios_vfc_group_label,

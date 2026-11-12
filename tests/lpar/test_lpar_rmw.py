@@ -1966,7 +1966,10 @@ async def test_mcp_mixed_resources_keep_configured_rmw(
     async with HMCClient(make_config()) as hmc:
         monkeypatch.setattr(lifecycle, "with_client", lambda fn, **kwargs: fn(hmc))
         result = await lifecycle.hmc_dlpar_proc(
-            LPAR, LparResources(desired_procs=0.5, desired_vcpus=3, uncapped_weight=0)
+            lpar_name_or_uuid=LPAR,
+            resources=LparResources(
+                desired_procs=0.5, desired_vcpus=3, uncapped_weight=0
+            ),
         )
     assert post.call_count == 1
     assert post.calls.last.request.headers["If-Match"] == ETAG
@@ -1983,3 +1986,34 @@ async def test_mcp_mixed_resources_keep_configured_rmw(
     )
     assert result["runtime_verification"] == "matched"
     native.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_partition_post_tls_failure_keeps_identity_and_never_recovers(
+    mock_hmc, monkeypatch
+):
+    from hmcpctl.operations.lpar.errors import translate_lpar_write_error
+
+    get, post = _routes(mock_hmc)
+    failure = hmc_errors.HMCTLSFingerprintError("certificate identity mismatch")
+    assert translate_lpar_write_error(failure) is failure
+    attempts = []
+    async with HMCClient(make_config()) as hmc:
+        request = hmc._request_with_uuid_path_arguments
+
+        async def dispatch(method, path, **kwargs):
+            if method == "POST":
+                attempts.append(path)
+                raise failure
+            return await request(method, path, **kwargs)
+
+        monkeypatch.setattr(
+            hmc, "_request_with_uuid_path_arguments", AsyncMock(side_effect=dispatch)
+        )
+        with pytest.raises(hmc_errors.HMCTLSFingerprintError) as caught:
+            await hmc.update_logical_partition(
+                LPAR, lambda _lpar: {"PartitionName": "renamed"}, "the partition name"
+            )
+    assert caught.value is failure
+    assert len(attempts) == 1
+    assert get.call_count == 1 and post.call_count == 0

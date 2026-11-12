@@ -13,7 +13,7 @@ import re as _re
 import xml.etree.ElementTree as ET  # nosec B405
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urlparse
 
 import httpx
@@ -29,11 +29,13 @@ from ..documents.storage import (
     build_vscsi_mapping_document,
     build_web_file_document,
 )
-from ..errors import HMCError, HMCTransportError
+from ..errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ..resource_identity import is_uuid
 from ..xmlutil import WEB_NS, element_to_dict, localname
 from .client_contracts import StorageClient, _reject_non_uuid_path_argument
 from .client_parse import _parse_feed
+
+_DispatchResult = TypeVar("_DispatchResult")
 
 # HMC UOM namespace — used in read-modify-write VolumeGroup operations.
 _UOM_NS = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
@@ -537,10 +539,10 @@ class StorageMixin:
     async def _reconcile_storage_mutation(
         self: StorageClient,
         operation: str,
-        snapshot: Callable[[], Awaitable[Any]],
-        dispatch: Callable[[], Awaitable[Any]],
+        snapshot: Callable[[], Awaitable[object]],
+        dispatch: Callable[[], Awaitable[_DispatchResult]],
         note: str | Callable[[HMCError], str] = "",
-    ) -> Any:
+    ) -> _DispatchResult:
         """Read state around a failed storage mutation without retrying it.
 
         *note* adds what the caller knows the failed write may have left that the
@@ -553,6 +555,8 @@ class StorageMixin:
                 raise
             try:
                 await snapshot()
+            except HMCTLSFingerprintError:
+                raise
             except HMCError as readback_error:
                 observation = f"readback failed: {readback_error}"
             else:
@@ -639,13 +643,19 @@ class StorageMixin:
         The HMC may ignore If-Match (observed on V10R3 M1060, ADR 0328), so this
         whole-group write can silently lose a concurrent change. Callers must
         serialize writers to the same VolumeGroup.
+
+        Returns:
+            The first parsed updated VolumeGroup response entry, including its
+            VirtualDisks collection, or None when the successful response has no
+            body or entries. None leaves creation unconfirmed; inspect the volume
+            group's disks before retrying.
         """
 
         for argument, value in (("vios_uuid", vios_uuid), ("vg_uuid", vg_uuid)):
             if not _UUID_PATTERN.fullmatch(value):
                 raise ValueError(f"{argument} must be a UUID")
         element = DET.fromstring(build_virtual_disk_element(disk_name, capacity_mib))
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
         etag = _required_etag(etag)
         disks = _virtual_disks(vg_elem)
         if _disks_named(disks, disk_name):
@@ -675,7 +685,7 @@ class StorageMixin:
         serialize writers to the same VolumeGroup.
         """
 
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
         etag = _required_etag(etag)
         collections = _children_named(vg_elem, "VirtualDisks")
         matches = _disks_named(collections[0], disk_name) if collections else []
@@ -829,8 +839,8 @@ class StorageMixin:
 
     async def _get_vg_raw_xml(
         self: StorageClient, vios_uuid: str, vg_uuid: str
-    ) -> tuple[str | None, ET.Element]:
-        """GET the full VolumeGroup XML and return (ETag, VolumeGroup element).
+    ) -> tuple[str | None, ET.Element, str]:
+        """GET the VolumeGroup and return (ETag, VolumeGroup element, raw document).
 
         Parses the Atom feed to extract the single VolumeGroup element.
         The returned ET.Element is a copy with namespace prefixes re-registered
@@ -873,7 +883,7 @@ class StorageMixin:
                 200,
                 raw[:500],
             )
-        return resp.headers.get("ETag"), vg_elem
+        return resp.headers.get("ETag"), vg_elem, raw
 
     async def _post_vg_xml(
         self: StorageClient,
@@ -903,7 +913,7 @@ class StorageMixin:
             headers["If-Match"] = etag
         body = ET.tostring(vg_elem, encoding="unicode", xml_declaration=False)
 
-        async def dispatch() -> Any:
+        async def dispatch() -> httpx.Response:
             resp = await self._request_with_uuid_path_arguments(
                 "POST",
                 path,
@@ -1029,23 +1039,17 @@ class StorageMixin:
         serialize writers to the same VolumeGroup.
         """
         size_gib = _whole_gib(size_mib)
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         existing = self._find_vmlib(vg_elem)
         if existing is not None:
-            name = existing.findtext(
-                f"{{{_UOM_NS}}}RepositoryName"
-            ) or existing.findtext("RepositoryName")
             size = existing.findtext(
                 f"{{{_UOM_NS}}}RepositorySize"
             ) or existing.findtext("RepositorySize")
             if _same_gib(size, size_gib):
-                return {
-                    "Resource": {
-                        "RepositoryName": name or "VMLibrary",
-                        "RepositorySize": size,
-                    }
-                }
+                return _parse_feed(
+                    _raw, "create_media_repository VolumeGroup readback"
+                )[0]
             observed = f"{size} GiB" if size else "an unknown size"
             raise HMCError(
                 "Virtual media repository already exists with size "
@@ -1088,7 +1092,7 @@ class StorageMixin:
         serialize writers to the same VolumeGroup.
         """
         size_gib = _whole_gib(size_mib)
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         vmlib = self._find_vmlib(vg_elem)
         if vmlib is None:
@@ -1160,7 +1164,7 @@ class StorageMixin:
         whole-group write can silently lose a concurrent change. Callers must
         serialize writers to the same VolumeGroup.
         """
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         mr_tag = f"{{{_UOM_NS}}}MediaRepositories"
         mr = vg_elem.find(f".//{mr_tag}")
@@ -1197,7 +1201,7 @@ class StorageMixin:
         whole-group write can silently lose a concurrent change. Callers must
         serialize writers to the same VolumeGroup.
         """
-        etag, vg_elem = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
+        etag, vg_elem, _raw = await self._get_vg_raw_xml(vios_uuid, vg_uuid)
 
         vmlib = self._find_vmlib(vg_elem)
         if vmlib is None:
@@ -1374,4 +1378,4 @@ class StorageMixin:
             _note,
         )
         entries = _parse_feed(response, path) if response else []
-        return entries[0].get("Resource", entries[0]) if entries else None
+        return entries[0] if entries else None

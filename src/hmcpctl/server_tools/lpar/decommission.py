@@ -16,13 +16,8 @@ from typing import Any, Literal
 
 from fastmcp import FastMCP
 
-from ..._app import with_client
-from ...authorization.target_scope import TargetScopeError
-from ...config import build_config
-from ...operations.logical import engine, store
-from ...operations.logical.engine import OperationRequest
-from ...operations.lpar.decommission import DecommissionResult
-from ...operations.lpar.decommission_operation import (
+from hmcpctl.operations.lpar.decommission.core import DecommissionResult
+from hmcpctl.operations.lpar.decommission.operation import (
     STORAGE_CLEANUP,
     TOOL_NAME,
     decommission_body,
@@ -35,6 +30,12 @@ from ...operations.lpar.decommission_operation import (
     preview_target,
     result_from_record,
 )
+
+from ..._app import with_client
+from ...authorization.target_scope import TargetScopeError
+from ...config import build_config
+from ...operations.logical import engine, store
+from ...operations.logical.engine import OperationRequest
 from ...tool_registry import (
     Authorize,
     TargetSelector,
@@ -141,8 +142,6 @@ def decommission_handler(
     """The unwrapped ``hmc_decommission_lpar`` handler bound to the served gates."""
 
     def hmc_decommission_lpar(
-        request_id: str,
-        system_name_or_uuid: str | None = None,
         lpar_name_or_uuid: str | None = None,
         dry_run: bool = False,
         ownership_override: bool | None = None,
@@ -153,6 +152,9 @@ def decommission_handler(
         exclusive_writer_window: bool | None = None,
         continuation: Continuation = "none",
         wait_seconds: int = 60,
+        *,
+        request_id: str,
+        system_name_or_uuid: str | None = None,
         profile: str | None = None,
     ) -> DecommissionResult:
         """Inventory, authorize, and optionally decommission one LPAR.

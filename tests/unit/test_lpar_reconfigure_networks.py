@@ -16,17 +16,20 @@ from pydantic import ValidationError
 from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects
 from unit.test_lpar_reconfigure import hmc as base_hmc  # noqa: F401 - a fixture
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
+from hmcpctl.jobs import job_outcome
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import (
     EffectNotApplied,
     OperationFailed,
     OperationRequest,
 )
-from hmcpctl.operations.lpar import profile_persist, reconfigure
-from hmcpctl.operations.lpar import reconfigure_network as net
-from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch
-from hmcpctl.operations.lpar.reconfigure_network import NetworkPatch
+from hmcpctl.operations.lpar.profiles import persist as profile_persist
+from hmcpctl.operations.lpar.profiles.core import PartitionProfileOutcome
+from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
+from hmcpctl.operations.lpar.reconfiguration import network as net
+from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch
+from hmcpctl.operations.lpar.reconfiguration.network import NetworkPatch
 
 MAC_A = "02:00:00:00:00:0a"
 MAC_B = "02:00:00:00:00:0b"
@@ -58,8 +61,12 @@ class NetHMC:
         self.delete_lands = True
         self.response = True
 
-    async def _network_adapter_creation_feed(self, uuid, *, allow_empty=False):
-        assert uuid == LPAR and allow_empty is True
+    async def list_adapters(self, uuid, adapter_type, *, allow_empty_network=False):
+        assert (
+            uuid == LPAR
+            and adapter_type == "ClientNetworkAdapter"
+            and allow_empty_network is True
+        )
         return list(self.adapters)
 
     async def list_virtual_networks(self, system):
@@ -108,7 +115,7 @@ def _plan(fake, patch, view=STOPPED, allow=False):
 
 def _ctx(records=None):
     records = records or {}
-    return SimpleNamespace(connection="c", recorded=records.get)
+    return SimpleNamespace(host="hmc.test", connection="c", recorded=records.get)
 
 
 def _record(status, identity=None):
@@ -171,9 +178,9 @@ def test_plan_records_removal_identity_and_unpinned_baseline():
             {"mac": MAC_B, "adapter_uuid": "ub", "port_vlan_id": "20", "slot": "3"}
         ],
     }
-    assert net.removed_slots(plan) == ("3",)
-    assert net.adds(plan)
-    assert [s[0] for s in net.steps(plan)] == [
+    assert net.removed_slots(plan.get("networks")) == ("3",)
+    assert net.adds(plan.get("networks"))
+    assert [s[0] for s in net.steps(plan.get("networks"), plan["lpar_uuid"])] == [
         "network_add:0",
         "network_add:1",
         "network_remove:0",
@@ -249,23 +256,23 @@ def test_plan_names_an_unreadable_inventory():
     async def broken(*_, **__):
         raise HMCError("boom", 500, "secret body")
 
-    fake._network_adapter_creation_feed = broken
+    fake.list_adapters = broken
     with pytest.raises(OperationFailed, match="could not be read \\(HMCError\\)"):
         _plan(fake, {"remove": [{"mac": MAC_A}]})
 
 
 def test_plan_without_networks_key_has_no_steps():
     plan = {"lpar_uuid": LPAR}
-    assert net.steps(plan) == []
-    assert net.removed_slots(plan) == ()
-    assert not net.adds(plan)
+    assert net.steps(plan.get("networks"), plan["lpar_uuid"]) == []
+    assert net.removed_slots(plan.get("networks")) == ()
+    assert not net.adds(plan.get("networks"))
 
 
 # --- writes ------------------------------------------------------------------
 
 
 def _write(fake, plan, key):
-    return _run(net.write_for(fake, plan, key)())
+    return _run(net.write_for(fake, plan.get("networks"), plan["lpar_uuid"], key)())
 
 
 def test_unpinned_add_records_the_created_identity():
@@ -290,16 +297,30 @@ def test_add_without_response_identity_finds_the_new_adapter():
     assert _write(fake, plan, "network_add:0")["adapter_uuid"] == "u14"
 
 
-def test_add_refusal_is_not_applied_with_its_guidance():
+@pytest.mark.parametrize("code", ["REST0269", "HSCLB021"])
+@pytest.mark.parametrize("altered_format", [False, True])
+def test_add_refusal_is_not_applied_with_its_guidance(
+    monkeypatch, code, altered_format
+):
+    if altered_format:
+        original_str = HMCError.__str__
+        monkeypatch.setattr(
+            HMCError,
+            "__str__",
+            lambda error: original_str(error).replace(" (HTTP 500)", " [HTTP 500]"),
+        )
     fake = NetHMC()
     fake.add_error = HMCError(
-        "refused", 500, "<Message>REST0269 cookie=secret</Message>"
+        "refused", 500, f"<Message>{code} cookie=secret</Message>"
     )
     plan = _plan(fake, {"add": [{"port_vlan_id": 10}]})
-    with pytest.raises(EffectNotApplied, match="REST0269") as refused:
+    with pytest.raises(EffectNotApplied, match=code) as refused:
         _write(fake, plan, "network_add:0")
     assert "secret" not in str(refused.value)
-    assert "chsyscfg" in str(refused.value)
+    assert "HTTP 500" not in str(refused.value)
+    assert ("chsyscfg" if code == "REST0269" else "RMC state") in str(refused.value)
+    assert refused.value.__cause__ is fake.add_error
+    assert fake.calls == [("add", 10, None)]
 
 
 def test_other_add_error_stays_open():
@@ -355,6 +376,34 @@ def test_removal_error_with_adapter_listed_stays_open():
         _write(fake, plan, "network_remove:0")
 
 
+@pytest.mark.parametrize("failure_at", ["delete", "readback"])
+def test_removal_propagates_tls_identity_failure_without_further_reads(failure_at):
+    fake = NetHMC()
+    plan = _plan(fake, {"remove": [{"mac": MAC_B}]})
+    mismatch = HMCTLSFingerprintError("pinned certificate identity mismatch")
+    fake.delete_error = (
+        mismatch if failure_at == "delete" else HMCError("delete failed", 500)
+    )
+    fake.delete_lands = False
+    listing = fake.list_adapters
+    reads = []
+
+    async def observed(*args, **kwargs):
+        reads.append(args)
+        if len(reads) == 1:
+            return await listing(*args, **kwargs)
+        if failure_at == "readback":
+            raise mismatch
+        return []
+
+    fake.list_adapters = observed
+    with pytest.raises(HMCTLSFingerprintError) as raised:
+        _write(fake, plan, "network_remove:0")
+    assert raised.value is mismatch
+    assert len(reads) == (1 if failure_at == "delete" else 2)
+    assert fake.calls == [("delete", "ub")]
+
+
 # --- classifiers -------------------------------------------------------------
 
 
@@ -364,12 +413,16 @@ def _classify(classifier, plan, key):
 
 
 def _classifiers(fake, plan):
-    def opener(_connection):
+    def opener(_connection, _host):
         return fake
 
     return (
-        net.add_classifier(lambda _ctx: plan, opener),
-        net.remove_classifier(lambda _ctx: plan, opener),
+        net.add_classifier(
+            lambda _ctx: (plan["lpar_uuid"], plan.get("networks")), opener
+        ),
+        net.remove_classifier(
+            lambda _ctx: (plan["lpar_uuid"], plan.get("networks")), opener
+        ),
     )
 
 
@@ -413,15 +466,19 @@ def test_observed_waits_for_adds_and_removals():
     plan = _plan(fake, {"add": [{"port_vlan_id": 30}], "remove": [{"mac": MAC_A}]})
     added = _write(fake, plan, "network_add:0")
     ctx = _ctx({"network_add:0": _record("applied", added)})
-    done, seen = _run(net.observed_networks(ctx, fake, plan))
+    done, seen = _run(
+        net.observed_networks(ctx, fake, plan.get("networks"), plan["lpar_uuid"])
+    )
     assert not done
     _write(fake, plan, "network_remove:0")
-    done, seen = _run(net.observed_networks(ctx, fake, plan))
+    done, seen = _run(
+        net.observed_networks(ctx, fake, plan.get("networks"), plan["lpar_uuid"])
+    )
     assert done and MAC_A not in seen["networks"]
 
 
 def test_observed_is_trivially_done_without_networks():
-    assert _run(net.observed_networks(_ctx(), NetHMC(), {"lpar_uuid": LPAR})) == (
+    assert _run(net.observed_networks(_ctx(), NetHMC(), None, LPAR)) == (
         True,
         {},
     )
@@ -437,13 +494,38 @@ def test_warnings_name_unsaved_changes_and_delete_errors():
             )
         }
     )
-    notes = net.warnings(ctx, plan, saved=False)
+    notes = net.warnings(
+        ctx,
+        plan.get("networks"),
+        plan["lpar_uuid"],
+        saved=False,
+        save_profile=plan.get("save"),
+        save_attempted=False,
+    )
     assert any("HTTP 500" in n for n in notes)
     assert any("current configuration only" in n for n in notes)
     assert not any(
-        "current configuration only" in n for n in net.warnings(ctx, plan, True)
+        "current configuration only" in n
+        for n in net.warnings(
+            ctx,
+            plan.get("networks"),
+            plan["lpar_uuid"],
+            True,
+            save_profile=plan.get("save"),
+            save_attempted=False,
+        )
     )
-    assert net.warnings(_ctx(), plan, saved=False) == []
+    assert (
+        net.warnings(
+            _ctx(),
+            plan.get("networks"),
+            plan["lpar_uuid"],
+            saved=False,
+            save_profile=plan.get("save"),
+            save_attempted=False,
+        )
+        == []
+    )
 
 
 def test_add_refused_before_submission_is_not_applied():
@@ -468,7 +550,7 @@ def test_removal_error_with_unreadable_relist_keeps_the_delete_error():
     fake.delete_error = HMCError("refused", 500, "")
     plan = _plan(fake, {"remove": [{"mac": MAC_B}]})
     reads = []
-    listing = fake._network_adapter_creation_feed
+    listing = fake.list_adapters
 
     async def flaky(*args, **kwargs):
         reads.append(args)
@@ -476,7 +558,7 @@ def test_removal_error_with_unreadable_relist_keeps_the_delete_error():
             raise HMCError("relist", 503, "")
         return await listing(*args, **kwargs)
 
-    fake._network_adapter_creation_feed = flaky
+    fake.list_adapters = flaky
     with pytest.raises(HMCError, match="refused"):
         _write(fake, plan, "network_remove:0")
 
@@ -519,8 +601,11 @@ class BodyMixin(NetHMC):
             _profile_entry(name, ()) for name in self.recovery
         ]
 
-    async def list_adapters(self, uuid, adapter_type):
-        assert adapter_type != "ClientNetworkAdapter"
+    async def list_adapters(self, uuid, adapter_type, *, allow_empty_network=False):
+        if adapter_type == "ClientNetworkAdapter":
+            return await NetHMC.list_adapters(
+                self, uuid, adapter_type, allow_empty_network=allow_empty_network
+            )
         return []
 
     async def get_console_info(self):
@@ -548,11 +633,15 @@ def body(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
     fake.saves = []
     fake.save_lands = True
 
-    async def read(_hmc, system, lpar, name):
-        assert (system, lpar, name) == (SYS, LPAR, "default")
+    async def read(hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid):
+        assert (system_name_or_uuid, lpar_name_or_uuid, profile_selector) == (
+            SYS,
+            LPAR,
+            "default",
+        )
         return SimpleNamespace(etag="E1")
 
-    async def save(_hmc, system, lpar, name, **kwargs):
+    async def save(hmc, lpar_name_or_uuid, name, *, system_name_or_uuid, **kwargs):
         fake.calls.append("save")
         fake.saves.append(kwargs)
         fake.recovery.append(f"hmcprec-{len(fake.recovery):016x}")
@@ -560,10 +649,16 @@ def body(base_hmc, monkeypatch):  # noqa: F811 - the fixture, by parameter name
             fake.saved_slots = {
                 str(a["Resource"]["VirtualSlotNumber"]) for a in fake.adapters
             }
-        return SimpleNamespace(
+        return PartitionProfileOutcome(
+            action="save",
+            system_uuid=SYS,
+            partition_uuid=LPAR,
+            partition_type="LogicalPartition",
+            profile_name="default",
+            profile_uuid=None,
             execution="unknown",
             requested_change="unverified",
-            job=object(),
+            job=job_outcome("save-job", {"Resource": {"Status": "RUNNING"}}),
             recovery_verified=True,
             error=None,
         )
@@ -661,13 +756,18 @@ def test_an_unconfirmed_save_pauses_warns_and_resumes_without_adding_again(body)
     body.save_lands = False
     record = _submit({"networks": {"add": [{"port_vlan_id": 30}]}})
     assert record.outcome == "needs_attention"
-    assert any("current configuration only" in w for w in record.result["warnings"])
-    body.save_lands = True
+    [warning] = [w for w in record.result["warnings"] if "configuration only" in w]
+    assert "resume to save" not in warning
+    assert "hmc_save_current_partition_profile" in warning
+    body.saved_slots = {
+        str(adapter["Resource"]["VirtualSlotNumber"]) for adapter in body.adapters
+    }
     resumed = _submit(
         {"networks": {"add": [{"port_vlan_id": 30}]}}, continuation="resume"
     )
     assert resumed.outcome == "completed", resumed.warnings
     assert _writes(body).count("add 30") == 1
+    assert len(body.saves) == 1
 
 
 def test_a_live_removal_needs_disruption_and_reports_live(body):

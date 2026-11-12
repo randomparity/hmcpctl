@@ -16,17 +16,17 @@ from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.common import UOM_NS
 from hmcpctl.documents.lpar import LparResources, LparSettings
-from hmcpctl.documents.lpar_io import LparPhysicalIO
+from hmcpctl.documents.lpar_io import LparPhysicalIO, SriovLogicalPortAssignment
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import assignments as assignment_ops
-from hmcpctl.operations.lpar import core, workflows
 from hmcpctl.operations.lpar.assignments import (
     AssignmentResult,
     DedicatedPcieAssignment,
     LparPcieAssignments,
-    SriovLogicalPortAssignment,
     VnicAssignment,
 )
+from hmcpctl.operations.lpar.creation import core
+from hmcpctl.operations.lpar.creation import workflow as workflows
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import ATOM_NS
@@ -516,6 +516,7 @@ async def test_created_identity_unavailable_retains_uncertainty(target, kind):
             else next(s for s in result.steps if s.step == "affinity_group")
         )
         assert step.result["status"] == "readback-unavailable"
+        assert "Readback failure stages created-identity." in step.result["message"]
         assert "PRIVATE" not in str(result)
     assert target.events.count("create") == 1
     assert not {"lpar", "prof", "apply", "stamp"} & set(target.events)
@@ -1011,6 +1012,18 @@ async def test_saved_proof_is_independent(target, monkeypatch, fault, saved):
         else "readback-unavailable"
     )
     assert "PRIVATE" not in str(proof)
+    failures = {
+        "lpar-read": "native-partition-read",
+        "lpar-value": "native-partition-value",
+        "lpar-header": "native-partition-header",
+        "prof-read": "native-profile-read",
+        "lpar-identity": "native-partition-identity",
+    }
+    expected = failures.get(fault)
+    if expected is not None:
+        assert f"Readback failure stages {expected}." in proof["message"]
+    else:
+        assert "Readback failure stages" not in proof["message"]
     if saved:
         assert proof["observation_status"]["native-partition"] == "readback-unavailable"
         assert proof["observed"]["native-profile"] == 1

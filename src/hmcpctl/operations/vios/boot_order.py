@@ -5,8 +5,11 @@ import io
 import re
 import shlex
 
+from typing_extensions import TypedDict
+
 from ...client.core import HMCClient
 from ...documents.boot import select_boot_string
+from ...documents.native_records import build_filter
 from ...errors import HMCError
 from ...resource_identity import (
     is_uuid,
@@ -14,10 +17,17 @@ from ...resource_identity import (
     resolve_system_uuid,
     resolve_vios_uuid,
 )
-from ...ssh.commands import build_filter
 from ...ssh.transport import run_hmc_command
 from ...xmlutil import leaf_text
 from ..lpar.ownership import authorize_lpar_ownership_description
+
+
+class ViosBootOrderResult(TypedDict):
+    """Contained VIOS identity and its independently observed pending boot text."""
+
+    vios_uuid: str
+    vios_name: str
+    pending_boot_string: str | None
 
 
 async def _target(hmc, selector, system, *, authorize=False, ownership_override=False):
@@ -119,7 +129,7 @@ async def _read(hmc, system, identity):
 
 async def read_vios_boot_order(
     hmc: HMCClient, vios_name_or_uuid: str, *, system_name_or_uuid: str
-) -> dict:
+) -> ViosBootOrderResult:
     system, identity = await _target(hmc, vios_name_or_uuid, system_name_or_uuid)
     text = await _read(hmc, system, identity)
     return {
@@ -162,7 +172,7 @@ async def set_vios_boot_order(
     system_name_or_uuid: str,
     ownership_override: bool = False,
     boot_string: str | None = None,
-) -> dict:
+) -> ViosBootOrderResult:
     requested = select_boot_string(devices, boot_string)
     system, identity = await _target(
         hmc,

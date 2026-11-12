@@ -650,3 +650,62 @@ def test_raw_mode_accepts_a_destination_outside_any_repository(dest: Path) -> No
     with capture.capture(dest, raw=True):
         pass
     assert dest.exists()
+
+
+@pytest.mark.parametrize("raw", [False, True])
+@pytest.mark.parametrize(
+    "redirect", ["missing-dir", "other-worktree", "bare-config", "ceiling"]
+)
+def test_git_environment_cannot_hide_capture_repository(
+    tmp_path, monkeypatch, raw, redirect
+):
+    repo = _git_repo(tmp_path / "repo")
+    nested = repo / "nested"
+    nested.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = nested / ("a.capture.jsonl" if raw else "plain.jsonl")
+    if redirect == "missing-dir":
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing.git"))
+    elif redirect == "other-worktree":
+        monkeypatch.setenv("GIT_DIR", str(repo / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(outside))
+    elif redirect == "bare-config":
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.bare")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    else:
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(nested))
+    original = (HMCClient._request, asyncssh.SSHClientConnection.run)
+    with pytest.raises(ValueError), capture.capture(target, raw=raw):
+        pytest.fail("Git environment hid the physical repository")
+    assert not target.exists()
+    assert (HMCClient._request, asyncssh.SSHClientConnection.run) == original
+
+
+@pytest.mark.parametrize("raw", [False, True])
+def test_capture_refuses_unknown_git_discovery_failure(tmp_path, monkeypatch, raw):
+    target = tmp_path / "a.capture.jsonl"
+    failure = subprocess.CompletedProcess(
+        [], 128, stdout="", stderr="fatal: unsafe repository"
+    )
+    monkeypatch.setattr(capture.subprocess, "run", lambda *a, **kw: failure)
+    with pytest.raises(ValueError, match="Git"), capture.capture(target, raw=raw):
+        pytest.fail("An unknown Git failure admitted capture")
+    assert not target.exists()
+
+
+def test_capture_refuses_git_ignore_query_failure(tmp_path, monkeypatch):
+    target = tmp_path / "a.capture.jsonl"
+    replies = iter(
+        [
+            subprocess.CompletedProcess([], 0, stdout="true\n", stderr=""),
+            subprocess.CompletedProcess(
+                [], 128, stdout="", stderr="fatal: cannot read index"
+            ),
+        ]
+    )
+    monkeypatch.setattr(capture.subprocess, "run", lambda *a, **kw: next(replies))
+    with pytest.raises(ValueError, match="Git"), capture.capture(target):
+        pytest.fail("An unknown Git ignore-query failure admitted capture")
+    assert not target.exists()

@@ -42,23 +42,31 @@ from hmcpctl.xmlutil import parse_feed
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 import scenario_gap_report  # noqa: E402
+from capability_evidence import registry as capability_registry  # noqa: E402
+from capability_evidence import schema as capability_schema  # noqa: E402
+from live_test import artifacts as live_artifacts  # noqa: E402
+from live_test import config as live_config  # noqa: E402
 from live_test import (  # noqa: E402
+    evidence,
+    http_fixture,
+    inventory,
+    observation,
+    redaction,
+    results,
+    scenario_validation,
+)
+from live_test.arms import (  # noqa: E402
     bare_cec,
     connectivity,
     dedicated_pcie,
     escape_hatch,
-    evidence,
-    inventory,
     lpar,
     lpar_config,
     lpar_power,
     metrics,
     network,
-    observation,
     profiles,
     provisioning,
-    results,
-    scenario_validation,
     sriov,
     storage,
     storage_lifecycle,
@@ -66,7 +74,7 @@ from live_test import (  # noqa: E402
     vios_backup,
     vmedia,
 )
-from live_test import config as live_config  # noqa: E402
+from live_test.config import hmc_identity  # noqa: E402
 
 LIVE_WORKFLOW_MODULES = (
     bare_cec,
@@ -121,6 +129,20 @@ class _TextBlock:
         self.text = text
 
 
+def _served_model(**values):
+    """A generated record at the mocked tool boundary, with its fields unchanged."""
+    model = dataclasses.make_dataclass(
+        "ServedModel", [(name, object) for name in values]
+    )
+    return model(**values)
+
+
+def _normalized_answer(answer):
+    """Match RunState.call's plain successes and structured failures."""
+    status, data = answer
+    return status, observation.plain_data(data) if status == "PASS" else data
+
+
 class _ScriptedClient:
     def __init__(self, result=None, error=None):
         self.result = result
@@ -151,7 +173,7 @@ class _ScriptedSriovState(runner.RunState):
         self.calls.append((tool, kwargs))
         expected_tool, status, data = next(self._responses)
         assert tool == expected_tool
-        return status, data
+        return _normalized_answer((status, data))
 
 
 def _logical_port_state(
@@ -1520,7 +1542,7 @@ def _answer(answers: dict[str, object]):
     async def scripted_call(_state, _client, tool, **kwargs):
         calls.append((tool, kwargs))
         answer = answers.get(tool, ("PASS", {}))
-        return answer(kwargs) if callable(answer) else answer
+        return _normalized_answer(answer(kwargs) if callable(answer) else answer)
 
     return calls, scripted_call
 
@@ -1542,7 +1564,7 @@ def test_vios_backup_group_is_subtask_37_and_outside_all() -> None:
     """The ST37 restore needs its own authorization, so `all` never reaches it."""
     assert runner.SUBTASK_GROUPS["vios-backup"] == [37]
     assert 37 not in runner.SUBTASK_GROUPS["all"]
-    assert runner.SUBTASKS[37].__module__ == "live_test.vios_backup"
+    assert runner.SUBTASKS[37].__module__ == "live_test.arms.vios_backup"
 
 
 @pytest.mark.asyncio
@@ -1602,7 +1624,7 @@ _ST4_ANSWERS: dict[str, object] = {
     ),
     "hmc_get_minimum_affinity_policy": (
         "PASS",
-        SimpleNamespace(
+        _served_model(
             capability="available",
             min_affinity_score=0,
             min_affinity_score_action="none",
@@ -2931,14 +2953,14 @@ def test_the_iso_allowlist_merge_reaches_the_field_and_is_idempotent(monkeypatch
     monkeypatch.setenv("hmc_iso_url_allowlist", "variant.example.com")
 
     config = live_config.LiveTestConfig()
-    vmedia._allow_iso_host(config)
+    http_fixture._allow_iso_host(config)
 
     merged = os.environ[name]
     assert [k for k in os.environ if k.lower() == name.lower()] == [name]
     assert merged.split(",") == ["variant.example.com", config.iso_host]
     assert HMCConfig(host="h", user="u", password="p").iso_url_allowlist == merged
 
-    vmedia._allow_iso_host(config)
+    http_fixture._allow_iso_host(config)
     assert os.environ[name] == merged
 
 
@@ -2957,7 +2979,7 @@ def test_the_iso_allowlist_merge_keeps_a_variant_only_operator_entry(monkeypatch
     monkeypatch.setenv("hmc_iso_url_allowlist", "operator.example.com")
 
     config = live_config.LiveTestConfig()
-    vmedia._allow_iso_host(config)
+    http_fixture._allow_iso_host(config)
 
     assert os.environ[name].split(",") == ["operator.example.com", config.iso_host]
 
@@ -3312,7 +3334,7 @@ def test_failure_redaction_keeps_a_named_file_readable(filename):
     """#914: `config.toml: no default_profile set` printed as `<REDACTED-HOST>: …`."""
     message = f"{filename}: no default_profile set"
 
-    assert runner._redact_failure_text(message) == message
+    assert redaction.redact_failure_text(message) == message
 
 
 @pytest.mark.parametrize(
@@ -3337,7 +3359,7 @@ def test_failure_redaction_still_hides_a_hostname(hostname):
     `.md` are country-code TLDs, and any multi-label name stays a hostname.
     An underscore or hyphen in a label must not leave a leading label readable (#927).
     """
-    redacted = runner._redact_failure_text(f"connect to {hostname} failed")
+    redacted = redaction.redact_failure_text(f"connect to {hostname} failed")
 
     assert redacted == "connect to <REDACTED-HOST> failed"
 
@@ -3715,7 +3737,7 @@ def test_gap_output_can_be_copied_and_loaded_for_next_run(tmp_path):
     catalog.write_text(
         json.dumps(
             {
-                "format_version": runner.check_capability_inventory.MATURITY_FORMAT_VERSION,
+                "format_version": capability_schema.MATURITY_FORMAT_VERSION,
                 "admission_policy": "existing-runtime-guards",
                 "operations": [
                     {
@@ -3754,9 +3776,7 @@ def test_invalid_gap_catalog_fails_even_without_environment(tmp_path, records):
     catalog.write_text(
         json.dumps(
             {
-                "format_version": (
-                    runner.check_capability_inventory.MATURITY_FORMAT_VERSION
-                ),
+                "format_version": capability_schema.MATURITY_FORMAT_VERSION,
                 "admission_policy": "existing-runtime-guards",
                 "operations": records,
             }
@@ -4155,10 +4175,13 @@ def test_result_helpers_filter_malformed_entries_and_resource_shapes():
     assert results.entries({"entries": raw_entries}) == [raw_entries[0], raw_entries[2]]
     assert results.entries({"entries": {"UUID": "not-a-list"}}) == []
     assert results.entries("invalid") == []
-    # FastMCP hands a dataclass result (ADR 0197's FleetListing) to a client as a
-    # generated model rather than a mapping.
-    model = SimpleNamespace(entries=raw_entries, unreadable_systems=[])
-    assert results.entries(model) == [raw_entries[0], raw_entries[2]]
+    # Scenario helpers consume normalized results; arbitrary objects are malformed.
+    assert results.entries(SimpleNamespace(entries=raw_entries)) == []
+    model = _served_model(entries=raw_entries, unreadable_systems=[])
+    assert results.entries(observation.plain_data(model)) == [
+        raw_entries[0],
+        raw_entries[2],
+    ]
     assert results.resource(raw_entries[0]) == {"UUID": "nested"}
     assert results.resource({"UUID": "flat"}) == {"UUID": "flat"}
     assert results.resource({"Resource": "not-a-mapping"}) == {
@@ -4250,12 +4273,12 @@ def _live_hmc_config() -> HMCConfig:
 def _result_document(
     config: live_config.LiveTestConfig,
     hmc_config: HMCConfig,
-    artifacts: live_config.LiveTestArtifacts | None = None,
+    artifacts: live_artifacts.LiveTestArtifacts | None = None,
 ) -> dict:
     return {
         "config": asdict(config),
-        "hmc": runner._hmc_identity(hmc_config),
-        "artifacts": asdict(artifacts or live_config.LiveTestArtifacts()),
+        "hmc": hmc_identity(hmc_config),
+        "artifacts": asdict(artifacts or live_artifacts.LiveTestArtifacts()),
         "results": [{"status": "PASS"}],
     }
 
@@ -4263,7 +4286,7 @@ def _result_document(
 def test_restore_artifacts_round_trips_config_and_preserves_result_rows(tmp_path):
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
-    artifacts = live_config.LiveTestArtifacts(
+    artifacts = live_artifacts.LiveTestArtifacts(
         system_uuid="system-1",
         vios_uuid="vios-1",
         lp3_baseline={"description": "original"},
@@ -4287,12 +4310,13 @@ async def test_subset_preserves_destination_pending_scratch_recovery(
 ):
     """A read-only subset cannot erase the only evidence of unconfirmed restoration."""
     import live_test_recovery as recovery
+    from live_test.recovery import storage as recovery_storage
 
     _isolate_runner(monkeypatch)
     monkeypatch.chdir(tmp_path)
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
-    artifacts = live_config.LiveTestArtifacts(
+    artifacts = live_artifacts.LiveTestArtifacts(
         vios_uuid="vios-1", storage_volume_group_name="hpvg1234abcd"
     )
     destination = tmp_path / "test-results-storage.json"
@@ -4321,7 +4345,7 @@ async def test_subset_preserves_destination_pending_scratch_recovery(
         calls.append((tool, kwargs))
         return "PASS", []
 
-    finding = await recovery._run_volume_group_left(no_group, inputs)
+    finding = await recovery_storage._run_volume_group_left(no_group, inputs)
     assert (
         finding is not None and finding.what == "scratch group restoration unconfirmed"
     )
@@ -4345,7 +4369,7 @@ def test_subset_rejection_preserves_destination_for_recovery(
     document = _result_document(
         config,
         hmc_config,
-        live_config.LiveTestArtifacts(
+        live_artifacts.LiveTestArtifacts(
             vios_uuid="vios-1", storage_volume_group_name="hpvg1234abcd"
         ),
     )
@@ -4396,7 +4420,7 @@ def test_default_interruption_then_real_subset_preserves_recovery(
     document = _result_document(
         config,
         hmc_config,
-        live_config.LiveTestArtifacts(
+        live_artifacts.LiveTestArtifacts(
             vios_uuid="vios-A",
             vios_partition_id=1,
             storage_volume_group_name="hpvg1234abcd",
@@ -4492,7 +4516,7 @@ def test_default_rejection_preserves_destination_before_client(
     document = _result_document(
         config,
         hmc_config,
-        live_config.LiveTestArtifacts(
+        live_artifacts.LiveTestArtifacts(
             vios_uuid="vios-A", storage_volume_group_name="hpvg1234abcd"
         ),
     )
@@ -4540,7 +4564,7 @@ def test_restore_artifacts_accepts_a_document_carrying_the_run_block(tmp_path):
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
 
 
 def test_restore_drops_the_configured_test_user_from_before_632(tmp_path):
@@ -4579,7 +4603,9 @@ def test_restore_drops_the_network_test_partition_from_before_1377(tmp_path):
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == live_config.LiveTestArtifacts(system_uuid="system-uuid")
+    assert state.artifacts == live_artifacts.LiveTestArtifacts(
+        system_uuid="system-uuid"
+    )
 
 
 @pytest.mark.parametrize(
@@ -4614,7 +4640,7 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vios_backup_arm(
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
-    for name in live_config._VIOS_BACKUP_ARTIFACTS:
+    for name in live_artifacts._VIOS_BACKUP_ARTIFACTS:
         del document["artifacts"][name]
     document["artifacts"]["vios_uuid"] = "vios-1"
     results_path = tmp_path / "previous.json"
@@ -4634,7 +4660,7 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vmedia_artifacts
     config = live_config.LiveTestConfig()
     hmc_config = _live_hmc_config()
     document = _result_document(config, hmc_config)
-    for name in live_config._VMEDIA_REPOSITORY_ARTIFACTS:
+    for name in live_artifacts._VMEDIA_REPOSITORY_ARTIFACTS:
         del document["artifacts"][name]
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
@@ -4647,35 +4673,35 @@ def test_restore_artifacts_tolerates_a_document_from_before_the_vmedia_artifacts
 
 
 def test_decode_artifacts_refuses_a_non_string_vmedia_field():
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts["vmedia_blank_name"] = 3
 
     with pytest.raises(TypeError, match="vmedia_blank_name"):
-        live_config.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 @pytest.mark.parametrize("value", ["hmcpctl_live_0a1b2c3d", [3]])
 def test_decode_artifacts_refuses_media_change_names_not_a_string_array(value):
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts["vmedia_change_names"] = value
 
     with pytest.raises(TypeError, match="vmedia change names"):
-        live_config.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 def test_decode_artifacts_defaults_media_change_names_for_an_older_document():
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     del artifacts["vmedia_change_names"]
 
-    assert live_config.decode_artifacts(artifacts).vmedia_change_names == []
+    assert live_artifacts.decode_artifacts(artifacts).vmedia_change_names == []
 
 
 def test_decode_artifacts_refuses_a_non_string_vios_backup_field():
-    artifacts = asdict(live_config.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts["vios_backup_mapping"] = 3
 
     with pytest.raises(TypeError, match="vios_backup_mapping"):
-        live_config.decode_artifacts(artifacts)
+        live_artifacts.decode_artifacts(artifacts)
 
 
 def test_restore_artifacts_tolerates_a_config_with_the_removed_vios_slot_settings(
@@ -4721,7 +4747,7 @@ def test_restore_artifacts_rejects_wrong_types_without_partial_mutation(
     document["artifacts"]["vios_partition_id"] = True
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = live_config.LiveTestArtifacts(system_uuid="original")
+    original = live_artifacts.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4738,7 +4764,7 @@ def test_restore_artifacts_rejects_config_mismatch_without_mutation(tmp_path, ca
     document["config"]["system_name"] = "other-system"
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = live_config.LiveTestArtifacts(system_uuid="original")
+    original = live_artifacts.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4754,7 +4780,7 @@ def test_restore_artifacts_rejects_unknown_fields_without_mutation(tmp_path, cap
     document["artifacts"]["unknown"] = "value"
     results_path = tmp_path / "previous.json"
     results_path.write_text(json.dumps(document))
-    original = live_config.LiveTestArtifacts(system_uuid="original")
+    original = live_artifacts.LiveTestArtifacts(system_uuid="original")
     state = runner.RunState(config=config, artifacts=original)
 
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
@@ -4780,7 +4806,7 @@ def test_restore_artifacts_rejects_each_hmc_identity_mismatch(tmp_path, capsys, 
     state = runner.RunState(config=config)
     runner._restore_artifacts_from_results(state, hmc_config, str(results_path))
 
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
     assert "does not match this run" in capsys.readouterr().out
 
 
@@ -5783,7 +5809,7 @@ async def test_main_scrubs_session_failure_data(monkeypatch, tmp_path, capsys, b
 def test_session_redaction_keeps_empty_quoted_diagnostics(value):
     message = 'empty quoted diagnostic: "" and ' + "''"
     data = {"X-API-Session": value, "message": message}
-    assert runner._redact_failure_data(data)["message"] == message
+    assert redaction.redact_failure_data(data)["message"] == message
 
 
 @pytest.mark.parametrize(
@@ -5794,7 +5820,7 @@ def test_session_redaction_keeps_empty_quoted_diagnostics(value):
     ],
 )
 def test_session_redaction_decodes_named_entities_once(field, source, decoded):
-    result = runner._redact_failure_data(
+    result = redaction.redact_failure_data(
         {
             field: source,
             "message": "SYN_A diagnostic",
@@ -5897,7 +5923,7 @@ async def test_header_entity_decoding_preserves_unrelated_diagnostics(
     "header", ["X-API-Session&#58; SYN_A", "Cookie&#58; sid=SYN_A"]
 )
 def test_encoded_header_recognition_keeps_source_values(header):
-    result = runner._redact_failure_data({"message": "SYN_A denied", "body": header})
+    result = redaction.redact_failure_data({"message": "SYN_A denied", "body": header})
     assert result["message"] == "<REDACTED-SECRET> denied"
     assert "SYN_A" not in result["body"]
 
@@ -6244,7 +6270,7 @@ def test_named_container_collection_keeps_whole_object_limit():
         "message": "unvisited echo",
         "X-API-Session": [f"SYN_{i}" for i in range(300)],
     }
-    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
+    assert redaction.redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
 
 
 def test_ordinary_containers_do_not_identify_session_values():
@@ -6253,7 +6279,7 @@ def test_ordinary_containers_do_not_identify_session_values():
         "nested": ["ordinary"],
         "RequestHeaders": ["ordinary"],
     }
-    result = runner._redact_failure_data(data)
+    result = redaction.redact_failure_data(data)
     assert result["message"] == "ordinary denied"
     assert result["nested"] == ["ordinary"]
 
@@ -6312,7 +6338,7 @@ async def test_failure_redaction_resource_exhaustion_fails_closed(
 @pytest.mark.parametrize("closed", [False, True])
 @pytest.mark.parametrize("depth", [8, 16, 32])
 def test_failure_redaction_scans_nested_interiors_once(monkeypatch, closed, depth):
-    pattern = runner._SESSION_XML_TOKEN_RE
+    pattern = redaction._SESSION_XML_TOKEN_RE
     scanned = 0
 
     class CountingPattern:
@@ -6323,11 +6349,11 @@ def test_failure_redaction_scans_nested_interiors_once(monkeypatch, closed, dept
             scanned += len(text)
             return pattern.sub(replacement, text)
 
-    monkeypatch.setattr(runner, "_SESSION_XML_TOKEN_RE", CountingPattern())
+    monkeypatch.setattr(redaction, "_SESSION_XML_TOKEN_RE", CountingPattern())
     body = "<Cookie>" * depth + "sid=SYN_A"
     if closed:
         body += "</Cookie>" * depth
-    result = runner._redact_failure_data({"message": "SYN_A denied", "body": body})
+    result = redaction.redact_failure_data({"message": "SYN_A denied", "body": body})
     assert result == {
         "message": "<REDACTED-SECRET> denied",
         "body": "<REDACTED-SECRET>",
@@ -6340,7 +6366,7 @@ def test_failure_redaction_retains_bounded_diagnostics(closed):
     body = "<Cookie><Cookie>sid=SYN_A"
     if closed:
         body += "</Cookie></Cookie>"
-    data = runner._redact_failure_data(
+    data = redaction.redact_failure_data(
         {"message": "SYN_A denied HSCL0001", "body": body}
     )
     assert data == {
@@ -6352,7 +6378,7 @@ def test_failure_redaction_retains_bounded_diagnostics(closed):
 @pytest.mark.parametrize("wrapper", ["<!--{}-->", "<?diag {}?>", "<![CDATA[{}]]>"])
 def test_failure_redaction_keeps_literal_markup_in_xml_trivia(wrapper):
     source = wrapper.format("<Cookie>literal</Cookie>")
-    result = runner._redact_failure_data(source)
+    result = redaction.redact_failure_data(source)
     assert "<Cookie>literal" in result
     assert "<REDACTED-SECRET>" not in result
 
@@ -6365,7 +6391,7 @@ def test_failure_redaction_bounds_nested_objects(kind):
             data = [data]
     else:
         data = [data] * 5000
-    assert runner._redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
+    assert redaction.redact_failure_data(data) == "<REDACTED-FAILURE-DATA>"
 
 
 @pytest.mark.asyncio
@@ -6418,12 +6444,12 @@ async def test_connectivity_inventory_forwards_selectors_and_captures_context(
                 }
             ],
             "hmc_get_lpar": {"UUID": "lpar-uuid"},
-            "hmc_list_vios": SimpleNamespace(
+            "hmc_list_vios": _served_model(
                 entries=[{"UUID": "vios-uuid", "Resource": {"PartitionID": "7"}}],
                 unreadable_systems=[],
             ),
         }
-        return "PASS", responses.get(tool, {})
+        return _normalized_answer(("PASS", responses.get(tool, {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     state = runner.RunState()
@@ -6508,8 +6534,8 @@ _ST1_NULL_PROPERTY_500 = (
 )
 
 
-def _st1_capacity_row(**overrides: object) -> SimpleNamespace:
-    """One CapacitySummary as FastMCP delivers it: a generated model, not a mapping."""
+def _st1_capacity_row(**overrides: object) -> Any:
+    """A typed capacity record before the mocked call boundary normalizes it."""
     row = {
         "system_uuid": _ST1_SYSTEM_UUID,
         "system_name": _ST1_SYSTEM,
@@ -6520,37 +6546,35 @@ def _st1_capacity_row(**overrides: object) -> SimpleNamespace:
         "assigned_proc_units": 5.5,
         "free_proc_units": 2.5,
     }
-    return SimpleNamespace(**(row | overrides))
+    return _served_model(**(row | overrides))
 
 
-def _st1_inventory_system(system_id: str, capacity: str = "ok") -> SimpleNamespace:
+def _st1_inventory_system(system_id: str, capacity: str = "ok") -> Any:
     sources = {
-        part: SimpleNamespace(status=status)
+        part: _served_model(status=status)
         for part, status in (
             ("capacity", capacity),
             ("partitions", "ok"),
             ("ownership", "ok"),
         )
     }
-    return SimpleNamespace(
-        id=system_id, name=_ST1_SYSTEM, sources=SimpleNamespace(**sources)
+    return _served_model(
+        id=system_id, name=_ST1_SYSTEM, sources=_served_model(**sources)
     )
 
 
-def _st1_inspection(**statuses: str) -> SimpleNamespace:
+def _st1_inspection(**statuses: str) -> Any:
     status = {"uuid": _ST1_LPAR_UUID, "storage": "ok", "rmc": "ok", "refcodes": "ok"}
     status |= statuses
-    return SimpleNamespace(
+    return _served_model(
         uuid=status["uuid"],
-        resources=SimpleNamespace(
-            storage_source=SimpleNamespace(status=status["storage"])
-        ),
-        rmc=SimpleNamespace(source=SimpleNamespace(status=status["rmc"])),
-        refcodes=SimpleNamespace(source=SimpleNamespace(status=status["refcodes"])),
+        resources=_served_model(storage_source=_served_model(status=status["storage"])),
+        rmc=_served_model(source=_served_model(status=status["rmc"])),
+        refcodes=_served_model(source=_served_model(status=status["refcodes"])),
     )
 
 
-def _st1_ownership(**overrides: object) -> SimpleNamespace:
+def _st1_ownership(**overrides: object) -> Any:
     row = {
         "lpar_name": _ST1_LPAR,
         "description": "[hmcpctl owner:agent-a]",
@@ -6558,17 +6582,17 @@ def _st1_ownership(**overrides: object) -> SimpleNamespace:
         "owner": "agent-a",
         "unparsed": False,
     }
-    return SimpleNamespace(entries=[row | overrides])
+    return _served_model(entries=[row | overrides])
 
 
-def _st1_plan(candidate_uuid: str) -> SimpleNamespace:
-    return SimpleNamespace(
+def _st1_plan(candidate_uuid: str) -> Any:
+    return _served_model(
         plan_digest="digest",
-        selected=SimpleNamespace(system=SimpleNamespace(uuid=candidate_uuid)),
+        selected=_served_model(system=_served_model(uuid=candidate_uuid)),
         blockers=[],
         candidates=[
-            SimpleNamespace(
-                targets=SimpleNamespace(system=SimpleNamespace(uuid=candidate_uuid))
+            _served_model(
+                targets=_served_model(system=_served_model(uuid=candidate_uuid))
             )
         ],
     )
@@ -6617,7 +6641,7 @@ def _st1_responses() -> dict[str, object]:
         "hmc_get_lpar": {"UUID": _ST1_LPAR_UUID},
         "hmc_capacity_report": [_st1_capacity_row()],
         "hmc_find_placement": [_st1_capacity_row()],
-        "hmc_list_lpar_ownership": SimpleNamespace(
+        "hmc_list_lpar_ownership": _served_model(
             entries=[
                 {
                     "lpar_name": _ST1_LPAR,
@@ -6639,29 +6663,29 @@ def _st1_responses() -> dict[str, object]:
             unreadable_systems=[],
         ),
         "hmc_read_lpar_boot_order": {"lpar_uuid": _ST1_LPAR_UUID},
-        "hmc_inspect_lpar": SimpleNamespace(
+        "hmc_inspect_lpar": _served_model(
             uuid=_ST1_LPAR_UUID,
-            resources=SimpleNamespace(storage_source=SimpleNamespace(status="ok")),
-            rmc=SimpleNamespace(source=SimpleNamespace(status="ok")),
-            refcodes=SimpleNamespace(source=SimpleNamespace(status="ok")),
+            resources=_served_model(storage_source=_served_model(status="ok")),
+            rmc=_served_model(source=_served_model(status="ok")),
+            refcodes=_served_model(source=_served_model(status="ok")),
         ),
-        "hmc_inventory": SimpleNamespace(
+        "hmc_inventory": _served_model(
             systems=[_st1_inventory_system(f"c/{_ST1_SYSTEM_UUID}")],
             partitions=[
-                SimpleNamespace(name=_ST1_LPAR, system_id=f"c/{_ST1_SYSTEM_UUID}")
+                _served_model(name=_ST1_LPAR, system_id=f"c/{_ST1_SYSTEM_UUID}")
             ],
         ),
         "hmc_fleet_health": {"systems": [], "vios": [], "lpars": [], "warnings": []},
         "hmc_get_lpar_proc_compat": {"profile": _ST1_PROFILE},
         "hmc_snapshot_capture": _st1_snapshot(),
-        "hmc_plan_lpar": SimpleNamespace(
+        "hmc_plan_lpar": _served_model(
             plan_digest="digest",
-            selected=SimpleNamespace(system=SimpleNamespace(uuid=_ST1_SYSTEM_UUID)),
+            selected=_served_model(system=_served_model(uuid=_ST1_SYSTEM_UUID)),
             blockers=[],
             candidates=[
-                SimpleNamespace(
-                    targets=SimpleNamespace(
-                        system=SimpleNamespace(uuid=_ST1_SYSTEM_UUID.upper())
+                _served_model(
+                    targets=_served_model(
+                        system=_served_model(uuid=_ST1_SYSTEM_UUID.upper())
                     )
                 )
             ],
@@ -6693,7 +6717,7 @@ async def _run_st1(monkeypatch, overrides: dict[str, tuple[str, object]] | None 
             and kwargs["resource_type"] == "LogicalPartition"
         ):
             return "PASS", [{"UUID": _ST1_LPAR_UUID}]
-        return responses.get(tool, ("PASS", {}))
+        return _normalized_answer(responses.get(tool, ("PASS", {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     state = runner.RunState()
@@ -6766,7 +6790,7 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_list_lpar_ownership",
-            SimpleNamespace(
+            _served_model(
                 entries=[
                     {
                         "lpar_name": _ST1_LPAR,
@@ -6787,13 +6811,13 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_inspect_lpar",
-            SimpleNamespace(
+            _served_model(
                 uuid=_ST1_LPAR_UUID,
-                resources=SimpleNamespace(
-                    storage_source=SimpleNamespace(status="unavailable")
+                resources=_served_model(
+                    storage_source=_served_model(status="unavailable")
                 ),
-                rmc=SimpleNamespace(source=SimpleNamespace(status="ok")),
-                refcodes=SimpleNamespace(source=SimpleNamespace(status="denied")),
+                rmc=_served_model(source=_served_model(status="ok")),
+                refcodes=_served_model(source=_served_model(status="denied")),
             ),
             "lpar.inspect",
             {"resources-read", "refcodes-read"},
@@ -6854,18 +6878,18 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_inventory",
-            SimpleNamespace(
+            _served_model(
                 systems=[_st1_inventory_system("c/s", capacity="denied")],
-                partitions=[SimpleNamespace(name=_ST1_LPAR, system_id="c/s")],
+                partitions=[_served_model(name=_ST1_LPAR, system_id="c/s")],
             ),
             "inventory.logical",
             {"system-sources-read"},
         ),
         (
             "hmc_inventory",
-            SimpleNamespace(
+            _served_model(
                 systems=[_st1_inventory_system("c/s")],
-                partitions=[SimpleNamespace(name="other", system_id="c/elsewhere")],
+                partitions=[_served_model(name="other", system_id="c/elsewhere")],
             ),
             "inventory.logical",
             {"test-partition-listed", "partitions-belong-to-system"},
@@ -6889,10 +6913,10 @@ async def test_st1_records_each_scoped_read_as_a_passed_observation(monkeypatch)
         ),
         (
             "hmc_plan_lpar",
-            SimpleNamespace(
+            _served_model(
                 plan_digest="digest",
                 selected=None,
-                blockers=[SimpleNamespace(code="no_candidate")],
+                blockers=[_served_model(code="no_candidate")],
                 candidates=[],
             ),
             "lpar.plan",
@@ -6962,7 +6986,7 @@ async def test_st1_captures_the_partition_default_profile(monkeypatch):
             and kwargs["resource_type"] == "LogicalPartition"
         ):
             return "PASS", [{"UUID": _ST1_LPAR_UUID}]
-        return responses.get(tool, ("PASS", {}))
+        return _normalized_answer(responses.get(tool, ("PASS", {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     await connectivity.inventory_connectivity(None, runner.RunState())
@@ -6995,13 +7019,13 @@ async def test_st1_capture_without_a_profile_name_fails_without_promoting(
 
 @pytest.mark.asyncio
 async def test_st1_blocked_plan_without_a_digest_still_passes(monkeypatch):
-    blocked = SimpleNamespace(
+    blocked = _served_model(
         plan_digest=None,
         selected=None,
-        blockers=[SimpleNamespace(code="no_candidate")],
+        blockers=[_served_model(code="no_candidate")],
         candidates=[
-            SimpleNamespace(
-                targets=SimpleNamespace(system=SimpleNamespace(uuid=_ST1_SYSTEM_UUID))
+            _served_model(
+                targets=_served_model(system=_served_model(uuid=_ST1_SYSTEM_UUID))
             )
         ],
     )
@@ -7046,7 +7070,7 @@ async def test_st1_null_property_500_on_a_system_read_fails_closed(monkeypatch):
             and kwargs["resource_type"] == "LogicalPartition"
         ):
             return "PASS", [{"UUID": _ST1_LPAR_UUID}]
-        return responses.get(tool, ("PASS", {}))
+        return _normalized_answer(responses.get(tool, ("PASS", {})))
 
     monkeypatch.setattr(runner.RunState, "call", scripted_call)
     state = runner.RunState()
@@ -7870,11 +7894,7 @@ async def test_job_scenarios_fail_on_a_non_successful_status(
 
 @pytest.mark.asyncio
 async def test_wait_for_job_outcome_normalizes_from_the_served_shape():
-    """FastMCP serves `hmc_wait_for_job` unwrapped, so `result.data` is not a dict.
-
-    The scripted stubs above hand `_as_outcome` a mapping, so only this arm can
-    catch a normalizer that handles nothing else.
-    """
+    """A real MCP job result is normalized before the consumer validates it."""
     application = FastMCP("job-shape-probe")
 
     @application.tool
@@ -7890,10 +7910,10 @@ async def test_wait_for_job_outcome_normalizes_from_the_served_shape():
         )
 
     async with Client(application) as client:
-        result = await client.call_tool("probe", {})
+        status, data = await runner.RunState().call(client, "probe")
 
-    assert not isinstance(result.data, dict)
-    outcome = metrics._as_outcome(result.data)
+    assert status == "PASS" and isinstance(data, dict)
+    outcome = metrics._as_outcome(data)
     assert outcome is not None
     assert outcome.status == "COMPLETED_OK"
     assert outcome.job_id == "job-uuid"
@@ -7925,10 +7945,10 @@ async def test_sriov_changed_reads_the_served_result_shape(changed: bool):
         )
 
     async with Client(application) as client:
-        result = await client.call_tool("probe", {})
+        status, data = await runner.RunState().call(client, "probe")
 
-    assert not isinstance(result.data, dict)
-    assert sriov._sriov_changed(result.data) is changed
+    assert status == "PASS" and isinstance(data, dict)
+    assert sriov._sriov_changed(data) is changed
 
 
 def _recorded_scenarios() -> dict[str, set[str]]:
@@ -8019,9 +8039,7 @@ def test_verified_scenarios_name_registered_operations():
     a mistyped id yields an observation nothing can fingerprint. Caught here, in
     the pull request, rather than after an expensive run against real hardware.
     """
-    registered = {
-        tool.operation for tool in runner.check_capability_inventory.discover_registry()
-    }
+    registered = {tool.operation for tool in capability_registry.discover_registry()}
     declared = _recorded_operations()
 
     assert declared, (
@@ -8508,7 +8526,7 @@ def test_a_release_without_its_maintenance_level_is_rejected(tmp_path):
         encoding="utf-8",
     )
 
-    assert runner.check_capability_inventory.HMC_RELEASE.fullmatch("V10R3")
+    assert capability_schema.HMC_RELEASE.fullmatch("V10R3")
     with pytest.raises(ValueError, match=r"expected V<n>R<n>M<n>, e\.g\. V10R3M1060"):
         evidence.read_environment(env_file)
 
@@ -8584,7 +8602,7 @@ def test_emitted_observations_validate_against_the_catalog_shape(
     # exactly as `just capability-inventory` would catch it after a copy-in.
     evidence_ids: set[str] = set()
     for entry in document:
-        runner.check_capability_inventory._validate_observation(
+        capability_schema.validate_observation(
             entry["observation"], entry["operation"], evidence_ids, errors
         )
     assert errors == []
@@ -8898,7 +8916,7 @@ def test_the_two_assertion_id_patterns_agree():
     assert anchored.startswith("\\A") and anchored.endswith("\\Z")
     assert (
         anchored.removeprefix("\\A").removesuffix("\\Z")
-        == runner.check_capability_inventory.ASSERTION_ID.pattern
+        == capability_schema.ASSERTION_ID.pattern
     )
 
 
@@ -9107,9 +9125,8 @@ class NoExecutionPackages(importlib.abc.MetaPathFinder):
 
 sys.path.insert(0, sys.argv[1])
 sys.meta_path.insert(0, NoExecutionPackages())
-from live_test.config import (
-    LiveTestConfig, LiveTestArtifacts, decode_saved_config, decode_artifacts,
-)
+from live_test.artifacts import LiveTestArtifacts, decode_artifacts
+from live_test.config import LiveTestConfig, decode_saved_config
 config = LiveTestConfig()
 assert decode_saved_config(json.loads(json.dumps(asdict(config)))) == config
 artifacts = LiveTestArtifacts(lp3_baseline={'state': 'running'}, vmedia_orig_boot_order=['disk'])
@@ -9257,7 +9274,7 @@ def test_live_grading_contract(caller, cleanup, holds):
 async def test_job_get_consumers_grade_normalized_outcomes_strictly(
     monkeypatch, served_model, invalid
 ):
-    from live_test import bare_cec
+    from live_test.arms import bare_cec
 
     application = FastMCP("job-inspection-probe")
 
@@ -9294,9 +9311,7 @@ async def test_job_get_consumers_grade_normalized_outcomes_strictly(
         if served_model:
             data = result.data
             if invalid == "raw":
-                from types import SimpleNamespace
-
-                data = SimpleNamespace(**values)
+                data = _served_model(**values)
             else:
                 for name, value in values.items():
                     setattr(data, name, value)
@@ -9304,7 +9319,7 @@ async def test_job_get_consumers_grade_normalized_outcomes_strictly(
             data = values
 
     async def scripted_call(_state, _client, _tool, **_kwargs):
-        return "PASS", data
+        return _normalized_answer(("PASS", data))
 
     async def no_cli(*_args):
         pass
@@ -9472,6 +9487,71 @@ def test_provenance_uses_executed_checkout_from_any_cwd(
             subprocess.run(
                 ["git", "-C", str(owner), "worktree", "remove", str(linked)], check=True
             )
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+@pytest.mark.parametrize(
+    "redirect", ["missing-dir", "foreign-worktree", "foreign-index"]
+)
+def test_source_provenance_ignores_git_environment(
+    tmp_path, monkeypatch, dirty, redirect
+):
+    owner = tmp_path / "owner"
+    foreign = tmp_path / "foreign"
+    owner.mkdir()
+    foreign.mkdir()
+    _live_repo(owner)
+    _live_repo(foreign)
+    expected = subprocess.check_output(
+        ["git", "-C", str(owner), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "foreign provenance",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "update-index",
+            "--assume-unchanged",
+            "--",
+            "src/hmcpctl/__init__.py",
+        ],
+        check=True,
+    )
+    if dirty:
+        (owner / "src/hmcpctl/__init__.py").write_text("changed = True\n")
+    monkeypatch.setattr(
+        evidence, "__file__", str(owner / "scripts/live_test/evidence.py")
+    )
+    if redirect == "missing-dir":
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing.git"))
+    elif redirect == "foreign-worktree":
+        monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(owner))
+    else:
+        monkeypatch.setenv("GIT_INDEX_FILE", str(foreign / ".git/index"))
+    found = evidence.repository_root()
+    assert found == owner
+    provenance = evidence.run_provenance(
+        [52], "lpar-security-policy", found, "V1_0", False
+    )
+    assert provenance["tested_commit"] == expected
+    assert provenance["tree_clean"] is (not dirty)
 
 
 def test_copied_runner_source_cannot_borrow_callers_git_identity(tmp_path, monkeypatch):
@@ -9697,14 +9777,14 @@ def test_pre_st58_saved_config_defaults_only_missing_keys(missing):
 
 
 def test_pre_st58_artifacts_default_missing_journal_empty():
-    saved = asdict(live_config.LiveTestArtifacts())
+    saved = asdict(live_artifacts.LiveTestArtifacts())
     saved.pop("creation_memory_layout", None)
     assert (
-        getattr(live_config.decode_artifacts(saved), "creation_memory_layout", None)
+        getattr(live_artifacts.decode_artifacts(saved), "creation_memory_layout", None)
         == {}
     )
     saved["creation_memory_layout"] = {}
-    assert live_config.decode_artifacts(saved).creation_memory_layout == {}
+    assert live_artifacts.decode_artifacts(saved).creation_memory_layout == {}
 
 
 @pytest.mark.parametrize(
@@ -9778,7 +9858,7 @@ def test_st58_restore_malformed_context_refuses_without_partial_state(
     path.write_text(json.dumps(document))
     state = runner.RunState()
     assert not runner._restore_artifacts_from_results(state, hmc, str(path))
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
 
 
 @pytest.mark.parametrize("arguments", [["67"], ["--group", "lpar-memory-statistics"]])
@@ -9797,8 +9877,9 @@ def test_statistics_direct_runner_requires_private_named_destination(
 def test_creation_memory_optional_defaults_and_registration():
     from dataclasses import asdict
 
+    from live_test import artifacts as live_artifacts
     from live_test import config as settings
-    from live_test import creation_memory
+    from live_test.arms import creation_memory
 
     saved = asdict(settings.LiveTestConfig())
     saved["protected_lpar_names"] = list(saved["protected_lpar_names"])
@@ -9808,9 +9889,9 @@ def test_creation_memory_optional_defaults_and_registration():
         ):
             saved.pop(key)
     assert settings.decode_saved_config(saved).creation_memory_case == ""
-    artifacts = asdict(settings.LiveTestArtifacts())
+    artifacts = asdict(live_artifacts.LiveTestArtifacts())
     artifacts.pop("creation_memory")
-    assert settings.decode_artifacts(artifacts).creation_memory == {}
+    assert live_artifacts.decode_artifacts(artifacts).creation_memory == {}
     assert runner.SUBTASK_GROUPS["creation-memory"] == [65]
     assert runner.SUBTASKS[65] is creation_memory.exercise_creation_memory
 
@@ -9834,7 +9915,7 @@ def test_st65_refuses_saved_or_borrowed_context(
     path.write_text(json.dumps(document))
     state = runner.RunState()
     assert not runner._restore_artifacts_from_results(state, hmc, str(path))
-    assert state.artifacts == live_config.LiveTestArtifacts()
+    assert state.artifacts == live_artifacts.LiveTestArtifacts()
     assert 65 not in runner.SUBTASK_GROUPS["all"]
 
 
@@ -9889,3 +9970,255 @@ def test_paging_optional_defaults_preserve_old_documents():
     del saved["paging_expected_current_vios"]
     del saved["paging_writer_window"]
     assert decode_saved_config(saved).paging_writer_window is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", ["entry", "list", "tuple", "mapping", "nested"])
+async def test_call_normalizes_generated_records_before_scenarios_inspect_them(shape):
+    @dataclasses.dataclass
+    class Entry:
+        UUID: str
+
+    @dataclasses.dataclass
+    class Listing:
+        entries: list[Entry]
+
+    entry = Entry("entry-a")
+    raw, expected = {
+        "entry": (entry, {"UUID": "entry-a"}),
+        "list": ([entry], [{"UUID": "entry-a"}]),
+        "tuple": ((entry,), [{"UUID": "entry-a"}]),
+        "mapping": ({"entries": [entry]}, {"entries": [{"UUID": "entry-a"}]}),
+        "nested": (Listing([entry]), {"entries": [{"UUID": "entry-a"}]}),
+    }[shape]
+    state = runner.RunState()
+    status, data = await state.call(
+        _ScriptedClient(result=_ToolResult(data=raw)), "tool"
+    )
+    assert (status, data) == ("PASS", expected)
+    assert json.loads(json.dumps(data)) == expected
+    state.record(0, "tool", status, data)
+    assert state.results[0]["data"] == expected
+    assert entry.UUID == "entry-a"
+
+
+@pytest.mark.asyncio
+async def test_call_normalizes_a_real_mcp_typed_collection():
+    entry = dataclasses.make_dataclass("Entry", [("UUID", str)])
+    listing = dataclasses.make_dataclass("Listing", [("entries", list[entry])])
+    app = FastMCP("typed result boundary")
+
+    def list_entries():
+        return listing([entry("entry-a")])
+
+    list_entries.__annotations__["return"] = listing
+    app.tool(list_entries)
+    async with Client(app) as client:
+        status, data = await runner.RunState().call(client, "list_entries")
+    assert (status, data) == ("PASS", {"entries": [{"UUID": "entry-a"}]})
+    assert results.entries(data) == [{"UUID": "entry-a"}]
+    assert results.field(data, "entries") == [{"UUID": "entry-a"}]
+
+
+@pytest.mark.asyncio
+async def test_call_preserves_served_property_names_after_client_sanitization():
+    schema = {
+        "type": "object",
+        "properties": {
+            "memory-size": {"type": "integer"},
+            "memory_size": {"type": "integer"},
+        },
+        "required": ["memory-size", "memory_size"],
+    }
+    expected = {"memory-size": 256, "memory_size": 512}
+    generated = TypeAdapter(json_schema_to_type(schema)).validate_python(expected)
+    status, data = await runner.RunState().call(
+        _ScriptedClient(result=_ToolResult(data=generated)), "tool"
+    )
+    assert (status, data) == ("PASS", expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "group,expected",
+    [(None, [0]), ("provision-boot", [72]), ("logical-workflow", [73])],
+)
+async def test_default_run_requires_explicit_task_admission(
+    monkeypatch, tmp_path, group, expected
+):
+    _isolate_runner(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def task(number):
+        async def run(_client, state):
+            seen.append(number)
+            state.record(number, "selection-only-probe", "PASS", {})
+
+        return run
+
+    monkeypatch.setattr(
+        runner, "SUBTASKS", {number: task(number) for number in (0, 72, 73, 999)}
+    )
+    assert (
+        await runner.main(
+            group=group,
+            results_path=str(tmp_path / "results.json"),
+            config=live_config.LiveTestConfig(),
+            hmc_config=HMCConfig.from_mapping({}),
+        )
+        == 0
+    )
+    assert seen == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "subtask,label",
+    [
+        (66, "Paging switch"),
+        (67, "Statistics reset"),
+        (54, "Memory move"),
+        (61, "Processor move"),
+        (64, "Accelerator QoS"),
+    ],
+)
+async def test_direct_dispatch_requires_the_private_tasks_named_group(
+    monkeypatch, tmp_path, capsys, subtask, label
+):
+    def forbidden_client(*args, **kwargs):
+        pytest.fail("invalid selection opened a client")
+
+    monkeypatch.setattr(runner, "Client", forbidden_client)
+    assert (
+        await runner.main(
+            subtask_filter=subtask,
+            results_path=str(tmp_path / "results.json"),
+            config=live_config.LiveTestConfig(),
+            hmc_config=HMCConfig.from_mapping({}),
+        )
+        == 1
+    )
+    assert label in capsys.readouterr().out
+    assert not (tmp_path / "results.json").exists()
+
+
+@pytest.mark.parametrize("guard", ["source", "serial", "profile"])
+@pytest.mark.parametrize(
+    "redirect", ["none", "missing-dir", "foreign-worktree", "foreign-index"]
+)
+@pytest.mark.parametrize("dirty", [False, True, "untracked"])
+def test_live_arm_revision_uses_physical_checkout(
+    tmp_path, monkeypatch, guard, redirect, dirty
+):
+    from live_test.arms import (
+        lpar_serial_adapter,
+        partition_profile_contract,
+        system_profile_source,
+    )
+
+    owner = tmp_path / "owner"
+    foreign = tmp_path / "foreign"
+    owner.mkdir()
+    foreign.mkdir()
+    _live_repo(owner)
+    _live_repo(foreign)
+    head = subprocess.check_output(
+        ["git", "-C", str(owner), "rev-parse", "HEAD"], text=True
+    ).strip()
+    tree = subprocess.check_output(
+        ["git", "-C", str(owner), "rev-parse", "HEAD^{tree}"], text=True
+    ).strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "foreign candidate",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(foreign),
+            "update-index",
+            "--assume-unchanged",
+            "--",
+            "src/hmcpctl/__init__.py",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(owner), "config", "status.showUntrackedFiles", "no"],
+        check=True,
+    )
+    if dirty == "untracked":
+        (owner / "src/hmcpctl/untracked.py").write_text("untracked = True\n")
+    elif dirty:
+        (owner / "src/hmcpctl/__init__.py").write_text("changed = True\n")
+    if redirect == "missing-dir":
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing.git"))
+    elif redirect == "foreign-worktree":
+        monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(owner))
+    elif redirect == "foreign-index":
+        monkeypatch.setenv("GIT_INDEX_FILE", str(foreign / ".git/index"))
+    if guard == "source":
+        monkeypatch.setattr(
+            system_profile_source,
+            "__file__",
+            str(owner / "scripts/live_test/arms/system_profile_source.py"),
+        )
+        assert system_profile_source._revision() == (head, not dirty)
+        return
+    module = (
+        lpar_serial_adapter.files if guard == "serial" else partition_profile_contract
+    )
+    monkeypatch.setattr(
+        module, "__file__", str(owner / "scripts/live_test/arms/guard.py")
+    )
+    monkeypatch.setattr(lpar_serial_adapter.files, "ROOT", owner)
+    # The imported-client boundary is covered separately; exercise real Git here.
+    monkeypatch.setattr(
+        module.inspect, "getfile", lambda _: str(owner / "src/hmcpctl/client/core.py")
+    )
+    check = (
+        (lambda: module.validate_deployed_candidate({"commit": head, "tree": tree}))
+        if guard == "serial"
+        else (
+            lambda: module.verify_revision({"tested_commit": head, "tested_tree": tree})
+        )
+    )
+    if dirty:
+        with pytest.raises(ValueError, match="clean"):
+            check()
+    else:
+        check()
+
+
+@pytest.mark.parametrize(
+    "value", ["nan", "inf", "-inf", "0", "-1", "0.99", "101", "100.01", "2.001"]
+)
+def test_live_config_rejects_unusable_sriov_capacity(tmp_path, value) -> None:
+    config_path = _example_env_with(tmp_path, "LIVE_TEST_SRIOV_CAPACITY_PERCENT", value)
+
+    with pytest.raises(ValueError, match="sriov_capacity_percent"):
+        live_config.LiveTestConfig.from_env_file(config_path)
+
+
+@pytest.mark.parametrize("value", ["1", "1.25", "2", "100", "1.2500"])
+def test_live_config_accepts_assignable_sriov_capacity(tmp_path, value) -> None:
+    config_path = _example_env_with(tmp_path, "LIVE_TEST_SRIOV_CAPACITY_PERCENT", value)
+
+    config = live_config.LiveTestConfig.from_env_file(config_path)
+
+    assert config.sriov_capacity_percent == float(value)

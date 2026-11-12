@@ -220,7 +220,7 @@ def test_upload_failure_renders_ordered_notes_at_stderr_boundary(
 ):
     from rendered_output import collapse_whitespace
 
-    from hmcpctl.operations.storage.resources import _ACCEPTED_NOTE
+    from hmcpctl.operations.storage.iso_upload import _ACCEPTED_NOTE
 
     notes = (
         (_ACCEPTED_NOTE, PAYLOAD, "Cleanup failed [bold]:smile:") if with_notes else ()
@@ -323,8 +323,12 @@ def test_machine_tsv_retains_existing_escape_grammar_on_terminal():
         ),
         (
             (
-                "from hmcpctl.cli_commands.virtualization.vnic import _confirm_on_stderr\n"
-                "_confirm_on_stderr(value)"
+                "try:\n"
+                "    cli.app(['network', 'remove-vnic', 'system-test', value, '4'])\n"
+                "except SystemExit as refused:\n"
+                "    assert refused.code == 1\n"
+                "else:\n"
+                "    raise AssertionError('confirmation must refuse the mutation')"
             ),
             "stderr",
         ),

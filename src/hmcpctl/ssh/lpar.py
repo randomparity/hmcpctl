@@ -20,7 +20,7 @@ from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
 if TYPE_CHECKING:
-    from ..operations.lpar.assignments import SriovLogicalPortAssignment
+    from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
 
 from pydantic import TypeAdapter
 
@@ -34,7 +34,7 @@ from ..documents.lpar import (
     shared_units_over_vcpus,
     shared_vcpu_defaults,
 )
-from .commands import build_attribute_record, build_filter
+from ..documents.native_records import build_attribute_record, build_filter
 from .description_validation import validate_lpar_description
 from .profiles import set_lpar_description
 from .transport import HMCCLIError, run_hmc_command
@@ -281,6 +281,9 @@ async def create_lpar_via_cli(
             quoted=("power_ctrl_lpar_ids",),
         )
     cmd = f"mksyscfg -r lpar -m {shlex.quote(system_name)} -i {shlex.quote(config_str)}"
+    # Specialized failures retain only a refusal code for reconciliation. Translate
+    # after leaving the handler so private provider bodies and exception chains
+    # cannot reappear in a formatted traceback (creation-memory/layout contracts).
     layout_error = None
     code = None
     try:

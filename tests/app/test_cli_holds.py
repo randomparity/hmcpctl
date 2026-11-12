@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -13,8 +14,9 @@ from typer import _click
 from typer.testing import CliRunner
 
 from hmcpctl.cli import app
+from hmcpctl.cli_commands import holds as hold_commands
 from hmcpctl.cli_commands.tool_mirrors import CLI_TOOL_MIRRORS
-from hmcpctl.operations.logical import holds
+from hmcpctl.operations.logical import holds, store
 from hmcpctl.server_tools.catalog import TOOL_SECURITY
 from hmcpctl.tool_registry import hold_guarded
 
@@ -76,6 +78,39 @@ def test_holds_list_and_release_stay_local_and_hide_the_hold_id():
     assert holds.list_holds() == ()
     again = RUNNER.invoke(app, ["holds", "release", LPAR])
     assert json.loads(again.stdout) == {"released": []}
+
+
+@pytest.mark.parametrize("command", [("list",), ("release", LPAR)])
+@pytest.mark.parametrize(
+    "fault,diagnostic",
+    [("permissions", "store_not_private"), ("corruption", "store_corrupt")],
+)
+def test_operator_commands_refuse_unsafe_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: tuple[str, ...],
+    fault: str,
+    diagnostic: str,
+) -> None:
+    monkeypatch.setenv(store.STATE_DIR_ENV, str(tmp_path / "private-state"))
+    placed = _place()
+    database = store.state_dir() / store.DB_NAME
+    original = database.read_bytes()
+    local = typer.Typer()
+    hold_commands.register_commands(local)
+    try:
+        if fault == "permissions":
+            database.chmod(0o644)
+        else:
+            database.write_bytes(b"not a sqlite database")
+        response = RUNNER.invoke(local, list(command))
+        assert response.exit_code == 1, response.output
+        assert diagnostic in response.output, response.output
+        assert placed.hold_id not in response.output
+    finally:
+        database.write_bytes(original)
+        database.chmod(0o600)
+    assert holds.list_holds() == (placed,)
 
 
 def test_holds_release_refuses_a_non_uuid():

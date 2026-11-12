@@ -16,8 +16,11 @@ from lpar.test_memory_statistics_reset import reset_boundary  # noqa: F401 — b
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from live_test import evidence, runner
-from live_test import memory_statistics as arm
-from live_test.config import LiveTestConfig
+from live_test.arms import memory_statistics as arm
+from live_test.config import (
+    LiveTestConfig,
+    hmc_identity,
+)
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
@@ -100,7 +103,7 @@ async def exercise(live_boundary):
             False,
         ),
         "config": asdict(state.config),
-        "hmc": runner._hmc_identity(state.hmc_config),
+        "hmc": hmc_identity(state.hmc_config),
         "artifacts": asdict(state.artifacts),
         "results": state.results,
     }

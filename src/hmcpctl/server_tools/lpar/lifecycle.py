@@ -6,6 +6,14 @@ from typing import Any, Literal
 
 from pydantic import StrictBool
 
+from hmcpctl.operations.lpar.memory.current import change_lpar_memory
+from hmcpctl.operations.lpar.memory.move import move_lpar_memory
+from hmcpctl.operations.lpar.memory.paging import (
+    PagingSwitchoverResult,
+    switch_lpar_paging_vios,
+)
+from hmcpctl.operations.lpar.memory.statistics import reset_lpar_memory_statistics
+
 from ..._app import (
     with_client,
 )
@@ -30,12 +38,8 @@ from ...operations.lpar.assignments import (
 )
 from ...operations.lpar.core import delete_lpar, rename_lpar
 from ...operations.lpar.dlpar import modify_lpar, set_lpar_memory, set_lpar_processors
-from ...operations.lpar.memory import change_lpar_memory
-from ...operations.lpar.memory_move import move_lpar_memory
-from ...operations.lpar.memory_statistics import reset_lpar_memory_statistics
-from ...operations.lpar.paging import PagingSwitchoverResult, switch_lpar_paging_vios
-from ...operations.lpar.processor_move import move_lpar_processors
-from ...operations.lpar.processors import change_lpar_processors
+from ...operations.lpar.processors.current import change_lpar_processors
+from ...operations.lpar.processors.move import move_lpar_processors
 from ...tool_registry import tool_module
 
 tool, register_tools, tool_security = tool_module()
@@ -50,9 +54,10 @@ tool, register_tools, tool_security = tool_module()
 )
 def hmc_switch_lpar_paging_vios(
     lpar_name_or_uuid: str,
-    system_name_or_uuid: str,
     expected_current_paging_vios_name_or_uuid: str,
     exclusive_writer_window: StrictBool,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PagingSwitchoverResult:
     """Switch a running shared partition's redundant paging provider once.
@@ -102,10 +107,11 @@ def hmc_switch_lpar_paging_vios(
 )
 def hmc_reset_lpar_memory_statistics(
     lpar_name_or_uuid: str,
-    system_name_or_uuid: str,
     reset: LparMemoryStatisticsReset | None = None,
-    profile: str | None = None,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Reset memory statistics history once on a contained Running shared partition.
 
@@ -160,9 +166,10 @@ PowerOffToolOperation = Literal["shutdown", "osshutdown"]
 def hmc_modify_lpar(
     lpar_name_or_uuid: str,
     resources: LparResources = LparResources(),
-    system_name_or_uuid: str | None = None,
     assignments: LparPcieAssignments = LparPcieAssignments(),
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str | None = None,
     profile: str | None = None,
 ) -> LparPcieWorkflowResult:
     """Modify an LPAR's memory or CPU resource assignment.
@@ -212,10 +219,11 @@ def hmc_modify_lpar(
 
 @tool(effect="mutate", operation="lpar.rename", target_kind="lpar")
 def hmc_rename_lpar(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     new_name: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> dict[str, Any] | None:
     """Rename one LPAR after enforcing its ownership token.
@@ -249,10 +257,11 @@ def hmc_rename_lpar(
 def hmc_dlpar_proc(
     lpar_name_or_uuid: str,
     resources: LparResources = LparResources(),
-    profile: str | None = None,
-    system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
     change: LparProcessorChange | None = None,
+    *,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
     """Change absolute processor resources or native current-processor quantities.
 
@@ -331,10 +340,11 @@ def hmc_dlpar_proc(
 def hmc_dlpar_mem(
     lpar_name_or_uuid: str,
     resources: LparResources = LparResources(),
-    profile: str | None = None,
-    system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
     change: LparMemoryChange | None = None,
+    *,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
     """Change absolute memory resources or typed native current-memory quantities.
 
@@ -398,9 +408,10 @@ def hmc_dlpar_mem(
 
 @tool(effect="destructive", operation="lpar.delete", target_kind="lpar")
 def hmc_delete_lpar(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> str:
     """Delete (destroy) an LPAR by name or UUID.
@@ -449,14 +460,15 @@ def hmc_power_on_lpar(
     timeout_seconds: int = 300,
     poll_interval: int = 5,
     force: bool = False,
-    profile: str | None = None,
-    system_name_or_uuid: str | None = None,
     affinity_assessment: ProvisionAffinityAssessment | None = None,
     ownership_override: bool = False,
     boot_mode: BootMode = "norm",
     partition_profile_uuid: str | None = None,
     operation_type: PowerOnOperationType | None = None,
     keylock: PowerOnKeylock | None = None,
+    *,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
 ) -> LparPowerOnOutcome:
     """Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection.
 
@@ -554,11 +566,12 @@ def hmc_power_off_lpar(
     wait: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
-    profile: str | None = None,
-    system_name_or_uuid: str | None = None,
     ownership_override: bool = False,
     restart: bool = False,
     operation: PowerOffToolOperation = "shutdown",
+    *,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
 ) -> dict[str, Any] | None:
     """Submit a PowerOff job for a logical partition, optionally restarting it or selecting the shutdown operation.
 
@@ -632,9 +645,10 @@ def hmc_dump_restart_lpar(
     wait: bool = False,
     timeout_seconds: int = 300,
     poll_interval: int = 5,
+    ownership_override: bool = False,
+    *,
     profile: str | None = None,
     system_name_or_uuid: str | None = None,
-    ownership_override: bool = False,
 ) -> dict[str, Any] | None:
     """Crash a logical partition and take a platform dump (PowerOff operation=dumprestart).
 
@@ -684,10 +698,11 @@ def hmc_dump_restart_lpar(
 def hmc_move_lpar_memory(
     lpar_name_or_uuid: str,
     target_lpar_name_or_uuid: str,
-    system_name_or_uuid: str,
     move: LparMemoryMove,
-    profile: str | None = None,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Move dedicated memory once and independently observe both partitions.
 
@@ -731,10 +746,11 @@ def hmc_move_lpar_memory(
 def hmc_move_lpar_processors(
     lpar_name_or_uuid: str,
     target_lpar_name_or_uuid: str,
-    system_name_or_uuid: str,
     move: LparProcessorMove,
-    profile: str | None = None,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Move processor quantities once and independently observe both partitions.
 

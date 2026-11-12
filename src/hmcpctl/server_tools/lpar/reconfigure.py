@@ -18,8 +18,8 @@ from ...config import build_config
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.models import OperationRecord
-from ...operations.logical.store import OperationRefused, connection_label
-from ...operations.lpar.reconfigure import (
+from ...operations.logical.store import connection_label
+from ...operations.lpar.reconfiguration.core import (
     RECONFIGURE_CLASSIFIERS,
     ReconfigurePatch,
     delegated_tools,
@@ -35,6 +35,7 @@ from ...tool_registry import (
     validate_security,
 )
 from ..delegation import authorize_as
+from .continuation import continuation_arguments
 
 RECONFIGURE_TOOL_NAME = "hmc_reconfigure_lpar"
 UNMOUNT_TOOL_NAME = "hmc_unmount_optical_media"
@@ -72,12 +73,7 @@ def _effective(
             raise ValueError(f"a new operation needs {', '.join(missing)}")
         return {"allow_disruption": False, "exclusive_writer_window": False, **given}
     recorded = engine.recorded_arguments(agent_id, request_id, RECONFIGURE_TOOL_NAME)
-    if recorded is None:
-        raise OperationRefused(
-            "not_found",
-            f"no operation has request_id {request_id}; omit continuation to start one",
-        )
-    return {**recorded, **given}
+    return continuation_arguments(recorded, given, request_id)
 
 
 def reconfigure_handler(
@@ -88,14 +84,15 @@ def reconfigure_handler(
     """The unwrapped ``hmc_reconfigure_lpar`` handler bound to the served gates."""
 
     def hmc_reconfigure_lpar(
-        request_id: str,
         lpar_name_or_uuid: str | None = None,
-        system_name_or_uuid: str | None = None,
         patch: ReconfigurePatch | None = None,
         allow_disruption: bool | None = None,
         exclusive_writer_window: bool | None = None,
         continuation: Continuation = "none",
         wait_seconds: int = 60,
+        *,
+        request_id: str,
+        system_name_or_uuid: str | None = None,
         profile: str | None = None,
     ) -> OperationRecord:
         """Change an LPAR's processors, memory, name, boot, virtual disks or network

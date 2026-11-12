@@ -1,5 +1,6 @@
 """D01 non-pool quantity grammar and guarded effective-memory outcomes."""
 
+import json
 import shlex
 from copy import deepcopy
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ import pytest
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_memory import LparMemoryChange
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.memory import change_lpar_memory
+from hmcpctl.operations.lpar.memory.current import change_lpar_memory
 from hmcpctl.ssh.memory import change_lpar_memory_quantity
 
 CONFIG = HMCConfig.from_mapping({})
@@ -259,7 +260,8 @@ def quantity_boundary(monkeypatch):
         return_value=[{"UUID": SYSTEM_UUID, "SystemName": "sys-R1"}]
     )
     monkeypatch.setattr(
-        "hmcpctl.operations.lpar.memory.authorize_lpar_mutation", boundary.authorize
+        "hmcpctl.operations.lpar.memory.current.authorize_lpar_mutation",
+        boundary.authorize,
     )
     boundary.command = AsyncMock(side_effect=submit)
     monkeypatch.setattr("hmcpctl.ssh.memory.run_hmc_command", boundary.command)
@@ -287,6 +289,7 @@ async def test_add_uses_current_not_desired_and_reports_profile_location(
     assert result["after"]["current_memory_mib"] == 1536
     assert result["change_location"]["lives_in"] == "current-configuration"
     assert result["warnings"]
+    assert json.loads(json.dumps(result)) == result
     assert b.command.await_count == 1
     b.authorize.assert_awaited_once()
 
@@ -949,3 +952,78 @@ async def test_inactive_positive_set_native_running_requirement_is_rejected(
     assert not any(
         "requires a later activation" in warning for warning in result["warnings"]
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("stage", ["lpar_feed", "vios_feed", "detail"])
+@pytest.mark.parametrize("uncertain", [False, True])
+@pytest.mark.parametrize("identity_failure", [False, True])
+async def test_memory_quantity_tls_readback_keeps_uncertainty_and_stops(
+    quantity_boundary, kind, stage, uncertain, identity_failure
+):
+    from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCTLSFingerprintError
+
+    b = quantity_boundary
+    if kind == "VirtualIOServer":
+        for entry in (b.before, b.after):
+            entry["Resource"]["PartitionType"] = "Virtual IO Server"
+        b.hmc.list_logical_partitions.return_value = []
+        b.hmc.list_vios.return_value = [b.before]
+        b.hmc.get_vios = AsyncMock(side_effect=b.hmc.get_logical_partition.side_effect)
+    if uncertain:
+        b.submit_error = HMCError("submission uncertain")
+    reader = (
+        b.hmc.get_vios if kind == "VirtualIOServer" else b.hmc.get_logical_partition
+    )
+    methods = [
+        b.command,
+        b.hmc.get_managed_system,
+        b.hmc.list_logical_partitions,
+        b.hmc.list_vios,
+        b.hmc.get_logical_partition,
+        reader,
+    ]
+    stopped = None
+
+    def fail():
+        nonlocal stopped
+        stopped = [method.await_count for method in methods]
+        raise (
+            HMCTLSFingerprintError("private-certificate-detail")
+            if identity_failure
+            else HMCError("ordinary read unavailable")
+        )
+
+    if stage == "detail":
+        original = reader.side_effect
+
+        async def read(*args, **kwargs):
+            if b.submitted:
+                fail()
+            return await original(*args, **kwargs)
+
+        reader.side_effect = read
+    else:
+        feed = (
+            b.hmc.list_logical_partitions if stage == "lpar_feed" else b.hmc.list_vios
+        )
+
+        async def inventory(*args, **kwargs):
+            if b.submitted:
+                fail()
+            return feed.return_value
+
+        feed.side_effect = inventory
+    result = await change(b, operation="add", quantity_mib=512)
+    expected_error = (
+        TLS_OBSERVATION_ABORTED if identity_failure else "ordinary read unavailable"
+    )
+    assert expected_error in result["warnings"]
+    assert (TLS_OBSERVATION_ABORTED in result["warnings"]) is identity_failure
+    assert result["outcome"] == "unverified" and result["workflow_completed"] is False
+    assert result["after"] is None and result["before"]["current_memory_mib"] == 1024
+    assert result["submission_error"] == ("submission uncertain" if uncertain else None)
+    assert "private-certificate-detail" not in str(result)
+    b.command.assert_awaited_once()
+    assert stopped is not None and stopped == [method.await_count for method in methods]

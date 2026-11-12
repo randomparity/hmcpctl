@@ -76,7 +76,7 @@ invented field argument. Use existing build_filter for the numeric filter, then 
 
 ## Closed interfaces
 
-New module scripts/live_test/vios_boot_source.py exports:
+New module scripts/live_test/arms/vios_boot_source.py exports:
 - validate_packet(packet: dict) -> None
 - encode_boot_record(partition_id: int, case_index: int) -> str
 - parse_native_header(raw: str, identity: dict) -> dict[str, str]
@@ -120,11 +120,12 @@ preflight; root binds its stable digest before final preflight/capture. No autom
 Window is bounded to3200–7200 seconds, absolute UTC bounds; expiry stops resource effects.
 A new window does not reset consumed effects. Root must separately disposition any retry.
 
-Selected boundary-owner source hashes are a closed exact path set: the existing AME
-SOURCE_PATHS minus scripts/live_vios_ame_source.py, plus scripts/live_test/vios_boot_source.py
-and scripts/live_vios_boot_source.py. This expands to20 paths at this baseline and is
-enumerated explicitly below; no caller-selected extra or missing path. It is a
-selected execution-boundary attestation, not a claim to hash all transitive Python imports.
+Selected boundary-owner source hashes use the closed exact set declared by `SOURCE_PATHS`
+in `scripts/live_test/arms/vios_boot_source.py`. It includes the shared VIOS support owner,
+the boot-source arm and wrapper, and their selected dependencies; it excludes the AME arm.
+The runtime constant
+is authoritative; no caller-selected extra or missing path is allowed. This attestation
+covers the selected execution boundaries.
 Budgets is exactly {stages:<the four [REST,SSH,bytes,seconds] table tuples>, rows:{regular:128,
 vios:8,profiles:32,pools:4,with_own_vios:9,with_own_profiles:33}}. Integers are strict, not bool.
 parse_native_header's identity argument is the closed REST-derived record {system_uuid,
@@ -143,7 +144,7 @@ not-attempted,intent,acknowledged,rejected,unknown. Deletion adds no native crea
 record_sha256 is null for its fixed UUID route. cases contains at most8 ordered entries
 {index,literal_sha256,record,record_sha256,execution,native_output,native_readback,readback_sha256,
 snapshot_index,observation}; observation is unobserved,exact,rejected,mismatch,unavailable,unknown.
-indices are0..7 internally; renderer prints1..8. snapshots retain the existing ame.snapshot
+indices are0..7 internally; renderer prints1..8. snapshots retain the existing support.snapshot
 shape and digest; native_readback retains complete bounded private raw text and parsed cells.
 A reported exact match is re-derived from record/literal/header/identity/snapshot data.
 uncertainty_native is null or {qualifying:false,witness:{raw,cells}}, retaining only the
@@ -165,9 +166,9 @@ create.identity is the closed REST-derived identity above. deletion.observation=
 predelete_detail,predelete_native,restored_snapshot_index}; predelete_detail preserves the
 bounded fresh REST detail, not only a claimed marker. cases.native_readback={detail,before,
 after}, with full bounded REST detail and native witnesses; unobserved entries remain null.
-Native readback hash is ame.digest of that complete object; literal/record hashes are SHA256
-of exact UTF-8 bytes. Snapshot entries are unchanged ame.snapshot records; digest stable
-with ame.digest when comparing B0/B1. B0 and B1 are located by create.observation indices;
+Native readback hash is packets.digest of that complete object; literal/record hashes are SHA256
+of exact UTF-8 bytes. Snapshot entries are unchanged support.snapshot records; digest stable
+with packets.digest when comparing B0/B1. B0 and B1 are located by create.observation indices;
 N1 is native_baseline. Refusal/unknown cases keep available raw witnesses and null missing ones.
 The finite outcome vocabulary for create/deletion observation is the same unobserved/exact/
 rejected/mismatch/unavailable/unknown set; confirmed deletion means exact plus B0 and absence.
@@ -189,10 +190,11 @@ shared CPU 0.1/0.5/1.0 units; vCPU 1/1/2; uncapped. Memory mode ded, mem_expansi
 lpar_env=vioserver and profile_name=default_profile; all resources explicit. One initial
 ownership description is atomic in that same mksyscfg record. No post-create ownership stamp,
 all_resources, activation, devices, profile apply, paging, pool, service or AME variation.
-Build creation with existing ame._record_pairs and build_attribute_record, with the one
-fixed case supplying mem_expansion="0". Never reuse the experimental boot encoder for create.
+Build creation with existing LparResources, _lpar_resource_pairs and build_attribute_record,
+with boot's fixed resources and mem_expansion="0". Never reuse the experimental boot encoder
+for create.
 
-Admission retains the AME snapshot's classic management and VIOS/AME capability checks,
+Admission retains the shared snapshot's classic management and VIOS/AME capability checks,
 region alignment and resource capacity. This deliberately bounds this source experiment to
 that proven creation envelope, not C09's eventual applicability or controller-mode support.
 At most 128 ordinary partitions, 8 pre-existing VIOSes, 32 saved profiles and 4 pools;
@@ -312,7 +314,7 @@ source deployment), exact clean Git/import closure, not a new project floor or h
 Capture worst block time2330s +198s Git =2528s <2600s; read-only170+18=188s <200s.
 
 Packet<=64KiB; exact private results journal<=32MiB, separate session<=1MiB. Each checkpoint
-uses ame._save's durable0600 temp/fsync/replace/directory-fsync; never overwrite last intent
+uses packets._save's durable0600 temp/fsync/replace/directory-fsync; never overwrite last intent
 with a fabricated result after checkpoint failure. Four final result/session pairs plus one
 max32MiB in-flight temp and packets/receipts fit a proposed168MiB window disk allowance.
 Reject larger serialized artifacts; no append-only payload copies. Window/output directories
@@ -323,28 +325,30 @@ indices/outcome/cleanup labels and source revision only; no product PASS or matu
 
 ## Reuse and finite boundary ownership
 
-At this base the AME module and reused client owners are byte-identical to6b85ac16.
-Preflight/recovery gained additive accelerator-QoS routes; retain them unchanged.
-Reuse ame.encode/digest/_json/_keys/_text/_uuid/_private/_git_read/_attest/_save/_receipt,
-snapshot, _admit_capacity, _record_pairs, _candidate, _observed, _foreign/_baseline_foreign
-only within their established signatures and semantics. _attest iterates packet hash keys;
-new validate_packet first proves the exact20-path set. _candidate tolerates absent REST
-Description, so new native marker confirmation and exact observed identity remain required.
+The ownership transition in [ADR 0357](../../adr/0357-shared-vios-source-infrastructure.md)
+places existing budgets, counted transport, snapshots and their validation helpers in
+`scripts/live_test/vios_source_support.py`. Both arms depend directly on it; support imports
+neither arm. Packet helpers remain in `packets.py`. Existing signatures and semantics stay
+fixed. _attest iterates packet hash keys; validate_packet first proves the exact closed set
+declared by SOURCE_PATHS, including shared support, packet validation and partition creation.
+_candidate tolerates absent REST Description, so new native marker confirmation and exact observed identity remain required.
 New admission enforces c09v- absence; do not call AME's c07v- admission unchanged.
 Do not reuse AME packet/cases/grant/history/lifecycle/entrypoint policy or mutate AME globals.
 Use existing build_attribute_record for creation, build_filter for the numeric native query,
 run_hmc_command for bounded SSH, and delete_vios for scoped inactive deletion.
 
-BootSourceBudget(ame.Budget) owns __init__(stage: str, packet: dict) and
-reserve(cursor: str, case_index: int = 0) -> None. Initialize stage,maximum,used,started,
-deadline,window,block,calls from this diagnostic's table; bind initial entrypoint monotonic
-start before setup. Inherit section/remaining/timeout/dispatch/charge/refund unchanged.
-Snapshot opens its own section; never wrap it in a second section. Other actions each have
-one bounded section. reserve overrides AME's two-case formula with the schedule below.
-BootSourceHMC(ame.CountedHMC) retains constructor(config,budget) and overrides
-async _request(method: str, path: str, **kwargs). Before parent resource DELETE it requires
+Both probes instantiate support.Budget(stage, packet, limits) with their own stage limit
+tuple. The accounting class owns section/remaining/timeout/dispatch/charge/refund;
+each scenario owns its module-local _reserve calculation. Boot's
+_reserve(budget, cursor, case_index=0) checks the schedule below without inheriting
+AME's two-case policy or mutating its limits. Bind initial entrypoint monotonic
+start before setup. Snapshot opens its own section; never wrap it in a second
+section. Other actions each have one bounded section.
+BootSourceHMC(support.CountedHMC) retains constructor(config,budget) and overrides
+async _request(method: str, path: str, **kwargs). Before counted resource DELETE it requires
 capture stage, delete-intent, non-held state, one remaining delete slot, armed exact route,
-current grant/source/reserve. Parent alone increments delete_count and consumes delete_sent.
+current grant/source/reserve. Boot's override increments delete_count and consumes delete_sent
+before physical accounting and transport; AME owns its separate two-delete policy.
 Never reset these fields or rearm unknown. Clear only delete_uuid in finally. Session DELETE
 remains separately once-only and permitted for own-session closeout after a resource hold.
 Recovery/preflight never arm resource DELETE; non-GET resource REST is otherwise refused.
@@ -376,7 +380,7 @@ pre-create/post-delete snapshots have no owned fixture. Slack buys no additional
 Unknown/refused attempts retain consumed slots and precharged payload; early stop reduces
 available effects and never transfers them to another candidate or window.
 
-Journal checkpoint bounds are checked before ame._save:32MiB results/1MiB session.
+Journal checkpoint bounds are checked before packets._save:32MiB results/1MiB session.
 Preflight uses phase baseline-observed and partial=false; its own predecessor validation
 checks that exact phase, matching binding digest (packet without baseline_sha256), observed
 baseline, completed companion session, and final packet digest before capture.
@@ -442,26 +446,11 @@ A partial journal, unknown token or failed fsync remains held; do not fabricate 
 
 ## Exact selected source closure
 
-This is the20-path execution-boundary witness, not transitive-import closure. Packet hashes
-must cover these exact keys; test/document paths are not executable runtime boundaries.
-
-- scripts/live_test/vios_ame_source.py
-- scripts/live_test_preflight.py
-- scripts/live_test_recovery.py
-- scripts/live_test_evidence.py
-- src/hmcpctl/config.py
-- src/hmcpctl/client/core.py
-- src/hmcpctl/client/client_systems.py
-- src/hmcpctl/client/client_profiles.py
-- src/hmcpctl/client/client_resolution.py
-- src/hmcpctl/documents/partition_profile.py
-- src/hmcpctl/documents/lpar.py
-- src/hmcpctl/operations/vios/core.py
-- src/hmcpctl/resource_identity.py
-- src/hmcpctl/ssh/lpar.py
-- src/hmcpctl/ssh/commands.py
-- src/hmcpctl/ssh/description_validation.py
-- src/hmcpctl/ssh/transport.py
-- src/hmcpctl/xmlutil.py
-- scripts/live_test/vios_boot_source.py
-- scripts/live_vios_boot_source.py
+The authoritative enumeration is `SOURCE_PATHS` in
+[`scripts/live_test/arms/vios_boot_source.py`](../../../scripts/live_test/arms/vios_boot_source.py).
+Packet `imported_source_sha256` must contain exactly those keys. The set includes the arm
+package initializer, shared VIOS support and packet-validation owners, and native
+partition-creation coordinator. It excludes the AME arm.
+Hash the current declared owners when preparing a fresh commit-bound capture; the runtime
+validator rejects either missing or additional keys. Test and document paths are outside
+this selected execution-boundary witness.

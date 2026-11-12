@@ -13,12 +13,13 @@ import binascii
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from ...errors import HMCError, HMCTransportError
+from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
 from ..lpar.ownership import lpar_ownership_entry
 from ..partition_state import PartitionState
+from ..resource_reading import resource_container
 from ..systems.fleet import sparse_system_entry, system_entry, unreadable_system
 from .capacity import system_capacity
 from .composite import (
@@ -26,8 +27,11 @@ from .composite import (
     optional_int,
     optional_text,
     processor_figures,
-    resource_container,
 )
+
+if TYPE_CHECKING:
+    from hmcpctl.client.core import HMCClient
+
 
 SYSTEMS_TOOL = "hmc_list_systems"
 PARTITIONS_TOOL = "hmc_list_lpars"
@@ -191,7 +195,9 @@ def check_inputs(
     return decode_cursor(cursor) if cursor is not None else None
 
 
-async def _enumerate(hmc: Any, admit: Admit) -> tuple[SourceStatus, list[_Candidate]]:
+async def _enumerate(
+    hmc: HMCClient, admit: Admit
+) -> tuple[SourceStatus, list[_Candidate]]:
     denial = admit(SYSTEMS_TOOL, None)
     if denial is not None:
         return _status(SYSTEMS_TOOL, denial + _SELECTOR_HINT), []
@@ -199,6 +205,8 @@ async def _enumerate(hmc: Any, admit: Admit) -> tuple[SourceStatus, list[_Candid
     # no connection (#1501). Each page reads its own systems' entries.
     try:
         summaries = await hmc.list_system_summaries()
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         return _unavailable(SYSTEMS_TOOL, f"managed systems are unavailable: {exc}"), []
     candidates = [
@@ -227,7 +235,7 @@ def _unresolved(selector: str, status: SourceStatus) -> InventorySystem:
 
 
 async def _resolve(
-    hmc: Any, admit: Admit, selectors: Sequence[str]
+    hmc: HMCClient, admit: Admit, selectors: Sequence[str]
 ) -> tuple[list[InventorySystem], list[_Candidate], str | None]:
     """Admit, then resolve, each distinct selector against ``quick/All``.
 
@@ -255,6 +263,8 @@ async def _resolve(
                 _unresolved(selector, _unavailable(PARTITIONS_TOOL, stopped))
             )
             continue
+        except HMCTLSFingerprintError:
+            raise
         except (HMCError, ValueError) as exc:
             text = f"managed system {selector!r} is unavailable: {exc}"
             unresolved.append(
@@ -300,7 +310,7 @@ def _partition(
 class _Reader:
     """One page's per-system reads, sharing the lazily asked capacity decision."""
 
-    hmc: Any
+    hmc: HMCClient
     admit: Admit
     connection: str
     enumerated: bool
@@ -332,6 +342,8 @@ class _Reader:
         try:
             entry = await system_entry(self.hmc, candidate.summary)
             return _status(CAPACITY_TOOL, None), system_capacity(entry), entry, None
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             text = f"managed system {candidate.uuid} is unavailable: {exc}"
             stop = text if isinstance(exc, HMCTransportError) else None
@@ -357,6 +369,8 @@ class _Reader:
         elif partitions_status.status == "ok":
             try:
                 entries = await self.hmc.list_logical_partitions(candidate.uuid)
+            except HMCTLSFingerprintError:
+                raise
             except HMCError as exc:
                 text = f"partitions of {candidate.uuid} are unavailable: {exc}"
                 partitions_status = _unavailable(PARTITIONS_TOOL, text)
@@ -413,7 +427,7 @@ class _Reader:
 
 
 async def read_inventory(
-    hmc: Any,
+    hmc: HMCClient,
     *,
     connection: str,
     admit: Admit,

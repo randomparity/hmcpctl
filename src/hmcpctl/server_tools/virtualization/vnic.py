@@ -29,8 +29,9 @@ tool, register_tools, tool_security = tool_module()
 
 @tool(effect="read", operation="network.list_fc_ports", target_kind="managed_system")
 def hmc_list_fc_ports(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> list[dict[str, str]]:
     """List Virtual Fibre Channel (NPIV) adapters for a managed system via the HMC CLI.
@@ -62,8 +63,9 @@ def hmc_list_fc_ports(
 
 @tool(effect="read", operation="network.list_sea", target_kind="managed_system")
 def hmc_list_sea_adapters(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> list[dict[str, str]]:
     """List Shared Ethernet Adapter (SEA) virtual Ethernet ports via the HMC CLI.
@@ -95,7 +97,7 @@ def hmc_list_sea_adapters(
 
 @tool(effect="read", operation="vnic.list", target_kind="lpar")
 def hmc_list_vnics(
-    system_name_or_uuid: str, lpar_name_or_uuid: str, profile: str | None = None
+    lpar_name_or_uuid: str, *, system_name_or_uuid: str, profile: str | None = None
 ) -> list[dict[str, Any]]:
     """List vNICs (SR-IOV-backed Virtual NICs) on an LPAR via the HMC CLI.
 
@@ -129,7 +131,6 @@ def hmc_list_vnics(
     extra_targets=(("vios", "vios_name"),),
 )
 def hmc_add_vnic(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     vios_name: str,
     vios_lpar_id: str,
@@ -138,8 +139,9 @@ def hmc_add_vnic(
     capacity_percent: float,
     port_vlan_id: int,
     ownership_override: bool = False,
-    profile: str | None = None,
     *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
     pvid_priority: StrictInt | None = None,
     allowed_vlan_ids: list[StrictInt] | Literal["all", "none"] | None = None,
     allowed_os_mac_addrs: list[str] | Literal["all", "none"] | None = None,
@@ -208,10 +210,11 @@ def hmc_add_vnic(
 
 @tool(effect="destructive", operation="vnic.remove", target_kind="lpar")
 def hmc_remove_vnic(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     slot_num: str,
     ownership_override: bool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> dict[str, Any]:
     """Remove a vNIC from an LPAR via the HMC CLI.
@@ -246,12 +249,12 @@ def hmc_remove_vnic(
 
 @tool(effect="mutate", operation="vnic.update_policy", target_kind="lpar")
 def hmc_update_vnic_policy(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     slot_num: str,
     ownership_override: bool = False,
-    profile: str | None = None,
     *,
+    system_name_or_uuid: str,
+    profile: str | None = None,
     port_vlan_id: StrictInt | None = None,
     pvid_priority: StrictInt | None = None,
     auto_priority_failover: StrictBool | None = None,

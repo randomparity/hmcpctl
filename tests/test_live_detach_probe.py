@@ -4,13 +4,16 @@ import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import test_live_lpar_power_arm as arm
 from live_test import config as live_config
-from live_test import detach_probe, lpar_power, runner
+from live_test import runner
+from live_test.arms import detach_probe, lpar_power
 from test_live_lpar_power_arm import GROUP, SYSTEM, FakeClient, World
 
 from hmcpctl.errors import HMCError
@@ -510,7 +513,12 @@ def test_typed_mapping_retains_exact_fields():
         backing_name: str
 
     row = Row("vhost1/vtscsi1", "client-uuid", "VirtualDisk", "run-disk")
-    assert detach_probe.mapping_rows([row]) == frozenset({tuple(vars(row).values())})
+    client = SimpleNamespace(
+        call_tool=AsyncMock(return_value=SimpleNamespace(data=[row]))
+    )
+    status, data = asyncio.run(runner.RunState().call(client, "tool"))
+    assert status == "PASS"
+    assert detach_probe.mapping_rows(data) == frozenset({tuple(vars(row).values())})
 
 
 def test_surviving_mapping_snapshot_stops_even_if_later_reads_would_converge(

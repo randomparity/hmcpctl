@@ -15,7 +15,22 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists
+from hmcpctl.operations.lpar.provisioning.media import (
+    Boot,
+    LparInstall,
+    check_built_name,
+    check_install,
+    check_mac,
+)
+from hmcpctl.operations.storage.iso_upload import require_allowlisted_iso_url
+from hmcpctl.operations.storage.resources import (
+    VolumeGroup,
+    storage_mapping,
+    volume_group,
+)
 
 from ...documents.lpar import (
     LparResources,
@@ -25,29 +40,19 @@ from ...documents.lpar import (
     validate_partition_type,
 )
 from ...documents.storage import STORAGE_KINDS, StorageKind, validate_virtual_disk
-from ...errors import HMCError, HMCTransportError
+from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
 from ...ssh.affinity import MinimumAffinityPolicy, validate_minimum_affinity_policy
 from ...ssh.lpar import validate_caller_token
 from ...xmlutil import leaf_text
 from ..affinity.rest import ProvisionAffinityAssessment, validate_affinity_request
 from ..inventory.capacity import system_capacity
-from ..storage.resources import (
-    VolumeGroup,
-    require_allowlisted_iso_url,
-    storage_mapping,
-    volume_group,
-)
 from ..systems.fleet import system_entry
 from .assignments import LparPcieAssignments
-from .install_media import (
-    Boot,
-    LparInstall,
-    check_built_name,
-    check_install,
-    check_mac,
-)
-from .provision import check_vlan_exists
+
+if TYPE_CHECKING:
+    from hmcpctl.client.core import HMCClient
+
 
 MAX_SELECTORS = 16
 
@@ -527,7 +532,7 @@ _FAILED = object()
 class _Evaluator:
     """Runs the spec's checks on one candidate at a time, sharing the capacity grant."""
 
-    hmc: Any
+    hmc: HMCClient
     admit: PlanAdmit
     request: PlanRequest
     connection: str
@@ -567,6 +572,8 @@ class _Evaluator:
                 _blocker("unavailable", check, self.stalled, target=target, tool=tool)
             )
             raise _Stalled from exc
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             text = f"{tool} failed for {target}: {exc}"
             blockers.append(
@@ -903,7 +910,7 @@ def _unresolved(selector: str, blocker: PlanBlocker) -> PlanCandidate:
 
 
 async def _lookup(
-    hmc: Any, selector: str, stalled: str | None
+    hmc: HMCClient, selector: str, stalled: str | None
 ) -> tuple[dict[str, Any] | None, str, str | None]:
     """Read one selector's system entry; the third value is a transport stall.
 
@@ -915,6 +922,8 @@ async def _lookup(
             raise HMCError(stalled)
         summary = summary_matching(await hmc.list_system_summaries(), selector)
         entry = await system_entry(hmc, summary) if summary is not None else None
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError) as exc:
         # summary_matching raises ValueError when several systems share a name.
         if isinstance(exc, HMCTransportError):
@@ -924,7 +933,7 @@ async def _lookup(
 
 
 async def _resolve(
-    hmc: Any, admit: PlanAdmit, selectors: Sequence[str]
+    hmc: HMCClient, admit: PlanAdmit, selectors: Sequence[str]
 ) -> tuple[list[_Candidate], list[PlanCandidate], str | None]:
     """Admit each distinct selector as ``hmc_list_lpars``, then resolve it (ADR 0196)."""
     candidates: list[_Candidate] = []
@@ -952,7 +961,7 @@ async def _resolve(
 
 
 async def _enumerate(
-    hmc: Any, admit: PlanAdmit
+    hmc: HMCClient, admit: PlanAdmit
 ) -> tuple[list[_Candidate], PlanBlocker | None, bool]:
     denial = admit(SYSTEMS_TOOL, None, None)
     if denial is not None:
@@ -974,13 +983,15 @@ async def _enumerate(
             _Candidate(None, summary["UUID"], await system_entry(hmc, summary))
             for summary in summaries[:CANDIDATES_LIMIT]
         ]
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         text = f"managed systems are unavailable: {exc}"
         return [], _blocker("unavailable", "system", text, tool=SYSTEMS_TOOL), False
     return candidates, None, len(summaries) > CANDIDATES_LIMIT
 
 
-def _request_blockers(hmc: Any, request: PlanRequest) -> list[PlanBlocker]:
+def _request_blockers(hmc: HMCClient, request: PlanRequest) -> list[PlanBlocker]:
     blockers: list[PlanBlocker] = []
     install = request.install
     if install is not None and not request.exclusive_writer_window:
@@ -1170,7 +1181,7 @@ def _rank(candidate: PlanCandidate) -> tuple[Any, ...]:
 
 
 async def plan_lpar(
-    hmc: Any, *, connection: str, admit: PlanAdmit, request: PlanRequest
+    hmc: HMCClient, *, connection: str, admit: PlanAdmit, request: PlanRequest
 ) -> LparPlan:
     """Plan *request* on one connection without writing or reserving anything."""
     request = check_request(request)

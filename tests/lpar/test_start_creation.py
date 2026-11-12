@@ -14,7 +14,7 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.documents.lpar_start import LparStartSettings
-from hmcpctl.operations.lpar.start import (
+from hmcpctl.operations.lpar.creation.start import (
     admit_start_creation,
     recheck_start_controllers,
 )
@@ -158,7 +158,8 @@ async def test_readback_planes(
 ):
     from types import SimpleNamespace
 
-    from hmcpctl.operations.lpar import profiles, start
+    from hmcpctl.operations.lpar.creation import start
+    from hmcpctl.operations.lpar.profiles import core as profiles
 
     observed = entry(name="new")
     observed["Resource"].update(
@@ -194,7 +195,8 @@ async def test_readback_planes(
 async def test_power_control_readback(hmc, monkeypatch, fault):
     from types import SimpleNamespace
 
-    from hmcpctl.operations.lpar import profiles, start
+    from hmcpctl.operations.lpar.creation import start
+    from hmcpctl.operations.lpar.profiles import core as profiles
 
     admission = await admit_start_creation(
         hmc, SYSTEM, "system", LparStartSettings(power_ctrl_lpar_ids=(7,))
@@ -286,7 +288,7 @@ async def test_postcreate_identity_and_family_barriers(
     from lpar.test_serial_creation import invoke
 
     from hmcpctl.errors import HMCError
-    from hmcpctl.operations.lpar import profiles
+    from hmcpctl.operations.lpar.profiles import core as profiles
 
     b = serial_target
     b.local["Resource"]["AutoStart"] = "false"

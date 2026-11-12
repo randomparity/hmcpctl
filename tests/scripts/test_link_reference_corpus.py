@@ -168,3 +168,11 @@ def test_git_resolution_failure_is_announced(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "could not resolve" in captured.out
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_repository_query_uses_physical_checkout(redirected_git_checkout):
+    root = redirected_git_checkout
+    assert link_reference_corpus._run_git(
+        ["rev-parse", "--absolute-git-dir"], cwd=root
+    ) == str(root / ".git")

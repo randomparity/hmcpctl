@@ -29,7 +29,7 @@ def environment_only_config(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def hmc(monkeypatch: pytest.MonkeyPatch) -> FakeHMC:
     fake = FakeHMC()
-    monkeypatch.setattr(power, "open_client", lambda _connection: fake)
+    monkeypatch.setattr(power, "open_client", lambda _connection, _host: fake)
     monkeypatch.setattr(power, "POLL_SECONDS", 0)
     return fake
 

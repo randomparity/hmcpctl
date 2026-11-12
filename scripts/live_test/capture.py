@@ -25,7 +25,7 @@ import functools
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import time
 from collections.abc import Callable, Generator
@@ -83,30 +83,55 @@ _ACTIVE = False
 
 
 def destination_is_ignored(path: Path) -> bool:
-    """Report whether Git would let *path* be committed from where it is written.
-
-    Same rule as `live_test.runner`: exit 1 from `git check-ignore -q`
-    means an unignored path inside a repository; exit 0 (ignored) and anything
-    else (no repository, or outside one) leave nothing committable.
-    """
+    """Admit an ignored path or a destination proven outside Git work trees."""
+    if not inside_work_tree(path):
+        return True
     target = path.parent.resolve() / path.name
-    proc = subprocess.run(
+    # Fixed Git ignore query; the destination remains a separate path argument.
+    proc = subprocess.run(  # nosec B603, B607
         ["git", "-C", str(target.parent), "check-ignore", "-q", str(target)],
         capture_output=True,
         check=False,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
     )
-    return proc.returncode != 1
+    if proc.returncode not in (0, 1):
+        raise ValueError("Git could not verify capture destination ignore rules")
+    return proc.returncode == 0
 
 
 def inside_work_tree(path: Path) -> bool:
-    """Report whether *path*'s directory lies inside any git work tree."""
-    proc = subprocess.run(
+    """Inspect the physical destination without inherited Git routing/configuration."""
+    # Fixed Git discovery query; inherited routing is removed and errors deny.
+    proc = subprocess.run(  # nosec B603, B607
         ["git", "-C", str(path.parent.resolve()), "rev-parse", "--is-inside-work-tree"],
         capture_output=True,
         text=True,
         check=False,
+        env={
+            **{
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
+            "LC_ALL": "C",
+        },
     )
-    return proc.returncode == 0 and proc.stdout.strip() == "true"
+    if proc.returncode == 0 and proc.stdout.strip() in {"true", "false"}:
+        return proc.stdout.strip() == "true"
+    if proc.returncode == 128 and proc.stderr.startswith(
+        (
+            "fatal: not a git repository (or any of the parent directories): .git\n",
+            "fatal: not a git repository (or any parent up to mount point ",
+        )
+    ):
+        return False
+    raise ValueError(
+        "Git could not determine whether capture destination is in a work tree"
+    )
 
 
 def _text(value: str | bytes | None) -> str | None:

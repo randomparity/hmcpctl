@@ -7,7 +7,7 @@ is `On`; `power-on --partition-profile` then silently drops them, leaving no boo
 
 ## Scope
 
-New `operations/lpar/profile_sync.py` owns the policy (clean extension, no ownership move).
+New `operations/lpar/profiles/sync.py` owns the policy (clean extension, no ownership move).
 
 - `ChangeLocation(current_profile_sync, lives_in, profile_name)` with `summary()`.
   `read_change_location(hmc, lpar_uuid)` reads the partition entry once: `On` gives

@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from live_test import runner
-from live_test.memory_quantities import GROUP
+from live_test.arms.memory_quantities import GROUP
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -403,6 +403,11 @@ def authorized(
     handler takes no ``hold_id`` gets one from the registry; the wrapper removes it before
     authorizing and calling the handler, so the handler never sees it (ADR 0327).
     """
+    # Metadata consumers need no application guard, ledger, or HMC client. Load
+    # enforcement when composing a wrapper, before any invocation can run.
+    from .operations.logical import holds
+    from .resource_identity import guarding_partitions
+
     signature = inspect.signature(handler)
     injected = _injects_hold_id(name, security, handler)
 
@@ -410,27 +415,29 @@ def authorized(
 
         @functools.wraps(handler)
         async def guarded(*args: Any, **kwargs: Any) -> Any:
-            presented = kwargs.pop(HOLD_ID, None) if injected else None
-            arguments = _authorize_call(
-                signature, name, security, authorize, args, kwargs
-            )
-            hold_id = presented if injected else arguments.get(HOLD_ID)
-            context = _call_context(name, security, hold_id)
-            with calling(context):
-                return await handler(*args, **kwargs)
+            with guarding_partitions(holds.HOLD_GUARD):
+                presented = kwargs.pop(HOLD_ID, None) if injected else None
+                arguments = _authorize_call(
+                    signature, name, security, authorize, args, kwargs
+                )
+                hold_id = presented if injected else arguments.get(HOLD_ID)
+                context = _call_context(name, security, hold_id)
+                with calling(context):
+                    return await handler(*args, **kwargs)
 
     else:
 
         @functools.wraps(handler)
         def guarded(*args: Any, **kwargs: Any) -> Any:
-            presented = kwargs.pop(HOLD_ID, None) if injected else None
-            arguments = _authorize_call(
-                signature, name, security, authorize, args, kwargs
-            )
-            hold_id = presented if injected else arguments.get(HOLD_ID)
-            context = _call_context(name, security, hold_id)
-            with calling(context):
-                return handler(*args, **kwargs)
+            with guarding_partitions(holds.HOLD_GUARD):
+                presented = kwargs.pop(HOLD_ID, None) if injected else None
+                arguments = _authorize_call(
+                    signature, name, security, authorize, args, kwargs
+                )
+                hold_id = presented if injected else arguments.get(HOLD_ID)
+                context = _call_context(name, security, hold_id)
+                with calling(context):
+                    return handler(*args, **kwargs)
 
     if injected:
         _add_hold_id(guarded)

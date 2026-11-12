@@ -23,11 +23,12 @@ from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter as Adapter
 from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import core, workflows
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
 )
+from hmcpctl.operations.lpar.creation import core
+from hmcpctl.operations.lpar.creation import workflow as workflows
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh import lpar as native
 from hmcpctl.ssh import profiles
@@ -654,7 +655,14 @@ async def test_serial_combined_submission_discards_provider_chain(target, option
         **options,
     )
     with pytest.raises(HMCError, match="Serial creation outcome unknown") as raised:
-        await core._create_via_cli(target.hmc, SYSTEM, "system", creation)
+        await core._create_via_cli(
+            target.hmc,
+            SYSTEM,
+            "system",
+            creation,
+            defer_apply=True,
+            native_readback=True,
+        )
     assert PRIVATE not in str(raised.value)
     assert raised.value.__cause__ is None and raised.value.__context__ is None
     assert target.events.count("create") == 1

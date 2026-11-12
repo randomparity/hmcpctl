@@ -1,10 +1,32 @@
 """Typed native partition-create physical and IBM i tagged I/O (ADR 0274)."""
 
+import re
 from dataclasses import dataclass, field, fields
+from decimal import Decimal
 
-from pydantic import ConfigDict, StrictInt
+from pydantic import ConfigDict, StrictBool, StrictInt
 
-from ..ssh.profiles import DRC_INDEX_PATTERN, ProfileIoSlot
+#: The DRC-index form every captured and documented `io_slots` index takes (ADR 0166).
+DRC_INDEX_PATTERN = re.compile(r"[0-9A-F]{8}")
+
+
+@dataclass(frozen=True)
+class ProfileIoSlot:
+    """One `io_slots` entry in the ADR 0165-admitted read rendering."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    drc_index: str = field(
+        metadata={
+            "description": "Physical slot DRC index: eight uppercase hexadecimal digits."
+        }
+    )
+    pool_id: str | None = field(
+        metadata={"description": "Decimal I/O pool ID, or null for no pool."}
+    )
+    is_required: StrictBool = field(
+        metadata={"description": "Whether the slot is required for profile activation."}
+    )
 
 
 def decimal_id(value: str) -> str:
@@ -136,3 +158,26 @@ class LparPhysicalIO:
             or self.tagged()
             or self.virtual_opti_pool_id is not None
         )
+
+
+@dataclass(frozen=True)
+class SriovLogicalPortAssignment:
+    """Direct SR-IOV logical-port assignment request."""
+
+    profile_name: str = field(metadata={"description": "Target HMC profile name."})
+    adapter_id: str = field(metadata={"description": "SR-IOV adapter identifier."})
+    physical_port_id: str = field(metadata={"description": "Physical-port identifier."})
+    logical_port_id: str = field(metadata={"description": "Logical-port identifier."})
+    capacity_percent: Decimal = field(
+        metadata={"description": "Requested decimal capacity percentage."}
+    )
+
+
+def validate_capacity_percent(value: Decimal) -> Decimal:
+    """Require a finite percentage from 1 through 100 with two decimal places."""
+    if not value.is_finite() or value < 1 or value > 100:
+        raise ValueError("capacity_percent must be between 1 and 100")
+    exponent = value.as_tuple().exponent
+    if isinstance(exponent, int) and exponent < -2:
+        raise ValueError("capacity_percent supports at most two decimal places")
+    return value

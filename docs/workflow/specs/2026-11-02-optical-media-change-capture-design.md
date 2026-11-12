@@ -24,7 +24,7 @@ new capture, and ST22's existing teardown removes any run medium ST71 left. The 
 Its wrapper is `scripts/live_vmedia_media_change.py`. The arm was numbered 70 when its 2026-11-02 windows ran; it became 71
 when #1226's `lpar-reconfigure` arm landed on `main` with 70 first.
 
-ST71 (`scripts/live_test/vmedia_media_change.py`) runs only when the test partition is
+ST71 (`scripts/live_test/arms/vmedia_media_change.py`) runs only when the test partition is
 unprotected and `Not Activated`, the repository has 2 GiB free, and ST16 resolved the VIOS
 UUID, its partition id and the partition UUID. Otherwise it records SKIP rows and touches
 nothing. Every HMC call inside ST71 runs under `live_test.capture.capture()` (default, redacting

@@ -18,7 +18,8 @@ from hmcpctl.errors import HMCError
 from hmcpctl.operations.lpar import ownership
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import config, lpar_config, runner
+from live_test import config, runner
+from live_test.arms import lpar_config
 from live_test.observation import CallFailure
 
 SYSTEM = "aaaaaaaa-0000-4000-8000-000000000001"
@@ -34,9 +35,11 @@ MODES = {
 
 
 def arm_module():
-    path = Path(__file__).parents[1] / "scripts/live_test/processor_sharing_weight.py"
+    path = (
+        Path(__file__).parents[1] / "scripts/live_test/arms/processor_sharing_weight.py"
+    )
     assert path.is_file(), "ST59 independent sharing arm must be installed"
-    return importlib.import_module("live_test.processor_sharing_weight")
+    return importlib.import_module("live_test.arms.processor_sharing_weight")
 
 
 @pytest.fixture
@@ -360,11 +363,11 @@ async def test_sharing_arm_accepts_uuid_case_without_changing_requests(
 async def test_sharing_observations_match_source_sites_and_actual_invocation(
     target, monkeypatch
 ):
-    import check_capability_inventory as inventory
     import promote_live_observations as promotion
+    from capability_evidence import registry as capability_registry
 
     state = await exercise(target, monkeypatch)
-    sites = inventory.discover_observation_sites()
+    sites = capability_registry.discover_observation_sites()
     assert sites[("lpar.dlpar_proc", 59)] == "st59-lpar-shared-weight"
     assert sites[("lpar.dlpar_proc", 5901)] == "st59-lpar-dedicated-sharing"
     run = {

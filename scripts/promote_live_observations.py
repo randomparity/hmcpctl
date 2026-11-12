@@ -9,14 +9,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import check_capability_inventory as inventory
+from capability_evidence import closure as capability_closure
+from capability_evidence import registry as capability_registry
+from capability_evidence import schema as capability_schema
+from capability_evidence import verification as capability_verification
 from live_test import runner
 from live_test.runner import SUBTASK_GROUPS
 
@@ -36,14 +39,22 @@ class PromotionError(ValueError):
 
 def _run(root: Path, *args: str) -> str:
     try:
-        result = subprocess.run(
+        # Promotion uses fixed Git/just/Python commands with branch and file allowlists.
+        result = subprocess.run(  # nosec B603
             args,
             cwd=root,
             check=True,
             capture_output=True,
             text=True,
+            # Preserve the caller's config-file selection for normal commit hooks.
             env={
-                **os.environ,
+                **{
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith("GIT_")
+                    or key
+                    in {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"}
+                },
                 "GIT_EDITOR": "true",
                 "UV_NO_SYNC": "1",
                 "PYTHONPATH": str(root / "src"),
@@ -64,7 +75,7 @@ def _json(path: Path, limit: int) -> Any:
             raw = stream.read(limit + 1)
         if len(raw) > limit:
             raise PromotionError("input exceeds the supported byte limit")
-        return json.loads(raw, object_pairs_hook=inventory._unique_pairs)
+        return json.loads(raw, object_pairs_hook=capability_schema.unique_pairs)
     except (OSError, UnicodeError, ValueError, RecursionError) as error:
         raise PromotionError(
             "cannot load input; check JSON shape, encoding and byte limit"
@@ -126,7 +137,9 @@ def _read_run(path: Path, head: str, now: datetime) -> tuple[dict[str, Any], lis
         or run.get("detach_probe", False) is not False
         or run.get("subtasks") != SUBTASK_GROUPS[arm]
         or any(type(task) is not int for task in run["subtasks"])
-        or not inventory._matches(inventory.SCHEMA_VERSION, run.get("schema_version"))
+        or not capability_schema.matches(
+            capability_schema.SCHEMA_VERSION, run.get("schema_version")
+        )
     ):
         raise PromotionError(
             "run provenance does not describe a complete clean candidate arm"
@@ -152,7 +165,7 @@ def _evidence(value: dict, run: dict, fingerprint: str, now: datetime) -> None:
         value["tested_commit"] != run["tested_commit"]
         or value["closure_fingerprint"] != fingerprint
         or observed > run["finished_time"]
-        or now - observed > timedelta(days=inventory.STALE_AFTER_DAYS)
+        or now - observed > timedelta(days=capability_verification.STALE_AFTER_DAYS)
     ):
         raise PromotionError(
             "sidecar evidence is stale or disagrees with candidate provenance"
@@ -163,7 +176,7 @@ def _rows(
     rows: list, run: dict, fingerprints: dict[str, str], now: datetime
 ) -> list[dict]:
     identities: set[str] = set()
-    sites = inventory.discover_observation_sites()
+    sites = capability_registry.discover_observation_sites()
     for row in rows:
         if not isinstance(row, dict) or set(row) not in (
             {"operation", "observation"},
@@ -176,7 +189,7 @@ def _rows(
         errors: list[str] = []
         if "observation" in row:
             value = row["observation"]
-            inventory._validate_observation(value, operation, identities, errors)
+            capability_schema.validate_observation(value, operation, identities, errors)
             if (
                 errors
                 or value["channel"] != "live"
@@ -187,7 +200,9 @@ def _rows(
                 )
         else:
             scope = row["missing_scope"]
-            inventory._scope_identity(scope, "promotion gap", errors, missing=True)
+            capability_schema.scope_identity(
+                scope, "promotion gap", errors, missing=True
+            )
             if errors or not isinstance(scope, dict) or "confirmation" not in scope:
                 raise PromotionError("sidecar gap lacks a valid confirmation")
             value = scope["confirmation"]
@@ -249,7 +264,7 @@ def _invocation(sidecar: dict, run: dict, sites: dict[tuple[str, int], str]) -> 
             if (
                 security is None
                 and (sidecar["operation"], run["group"], value["scenario"])
-                not in inventory._release_routes()
+                not in capability_registry.release_routes()
             ):
                 continue
             if (
@@ -406,21 +421,21 @@ def _catalog(
     root: Path, claims: list, results: list[Path], head: str
 ) -> tuple[dict, str]:
     now = datetime.now(UTC)
-    registry = inventory.discover_registry()
+    registry = capability_registry.discover_registry()
     handlers = {tool.operation: tool.handler.rsplit(".", 1)[0] for tool in registry}
     catalog = _json(root / "docs/capabilities/maturity.json", 4 * 1024 * 1024)
     if (
         not isinstance(catalog, dict)
         or set(catalog) != {"format_version", "admission_policy", "operations"}
         or type(catalog["format_version"]) is not int
-        or catalog["format_version"] != inventory.MATURITY_FORMAT_VERSION
+        or catalog["format_version"] != capability_schema.MATURITY_FORMAT_VERSION
         or catalog["admission_policy"] != "existing-runtime-guards"
         or not isinstance(catalog["operations"], list)
         or not all(isinstance(row, dict) for row in catalog["operations"])
     ):
         raise PromotionError("candidate catalog has an invalid shape")
     errors: list[str] = []
-    inventory._validate_maturity(catalog["operations"], handlers, errors)
+    capability_schema.validate_maturity(catalog["operations"], handlers, errors)
     if errors:
         raise PromotionError("candidate catalog fails inventory validation")
     observations: dict[str, list] = defaultdict(list)
@@ -437,7 +452,7 @@ def _catalog(
             if isinstance(row, dict) and isinstance(row.get("operation"), str):
                 operation = row["operation"]
                 if operation in handlers and operation not in fingerprints:
-                    fingerprints[operation] = inventory.closure_fingerprint(
+                    fingerprints[operation] = capability_closure.closure_fingerprint(
                         root, handlers[operation]
                     )
         for row in _rows(rows, run, fingerprints, now):
@@ -450,10 +465,10 @@ def _catalog(
             "results must cover exactly the selected release claim arms"
         )
     _merge(catalog, observations, gaps, claims)
-    inventory._validate_maturity(catalog["operations"], handlers, errors)
+    capability_schema.validate_maturity(catalog["operations"], handlers, errors)
     if errors:
         raise PromotionError("promoted catalog fails inventory validation")
-    snapshot = inventory.render_release_verification(
+    snapshot = capability_verification.render_release_verification(
         catalog["operations"], registry, root, now
     )
     return catalog, snapshot
@@ -536,8 +551,9 @@ def promote(
     root = root.resolve()
     head, allowed = _candidate(root, branch)
     try:
-        claims = inventory.load_release_claims(
-            claims_path, {tool.operation for tool in inventory.discover_registry()}
+        claims = capability_registry.load_release_claims(
+            claims_path,
+            {tool.operation for tool in capability_registry.discover_registry()},
         )
         if not claims:
             raise PromotionError("select a nonempty release claims file")
@@ -547,16 +563,16 @@ def promote(
                 "candidate must remain clean before creating the promotion branch"
             )
         _run(root, "git", "switch", "-c", branch)
-        inventory.write_runtime_projection(
+        capability_verification.write_runtime_projection(
             root / "docs/capabilities/maturity.json",
             json.dumps(catalog, indent=2) + "\n",
         )
-        inventory.write_runtime_projection(
+        capability_verification.write_runtime_projection(
             root / "docs/capabilities/release-verification.json", snapshot
         )
         _regenerate(root, claims_path)
         return _commit(root, allowed, head)
-    except (inventory.InventoryError, OSError) as error:
+    except (capability_schema.InventoryError, OSError) as error:
         raise PromotionError(
             "promotion validation or output failed; inspect inputs and checkout"
         ) from error

@@ -16,6 +16,7 @@ import pytest
 
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.common import UOM_NS
+from hmcpctl.errors import HMCTLSFingerprintError
 from hmcpctl.ssh import memory as native
 from hmcpctl.xmlutil import ATOM_NS
 
@@ -27,7 +28,7 @@ POOL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
 
 def observation_module():
-    name = "hmcpctl.operations.lpar.paging_observation"
+    name = "hmcpctl.operations.lpar.memory.paging_observation"
     assert importlib.util.find_spec(name), "observation owner is missing"
     return __import__(name, fromlist=["observe_paging"])
 
@@ -630,7 +631,7 @@ async def test_duplicate_pool_provider_is_a_positive_contradiction(paging_bounda
 async def test_known_member_observation_precedes_completeness(
     paging_boundary, changed, missing
 ):
-    from hmcpctl.operations.lpar.paging import compare_paging
+    from hmcpctl.operations.lpar.memory.paging import compare_paging
 
     before = await observe(paging_boundary)
     replacement = paging_boundary.pool_member_response(changed, missing)
@@ -644,3 +645,27 @@ async def test_known_member_observation_precedes_completeness(
     )
     if changed:
         assert "providers" in diagnostics
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault_at", range(1, 7))
+async def test_fatal_tls_stops_paging_observation(paging_boundary, fault_at):
+    b = paging_boundary
+    original = b.hmc._get.side_effect
+    failure = HMCTLSFingerprintError("private-pin")
+    reads = 0
+
+    async def get(*args, **kwargs):
+        nonlocal reads
+        reads += 1
+        if reads == fault_at:
+            raise failure
+        return await original(*args, **kwargs)
+
+    b.hmc._get.side_effect = get
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await observe(b)
+    assert caught.value is failure
+    assert reads == fault_at
+    b.current.assert_not_awaited()
+    b.devices.assert_not_awaited()

@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from hmcpctl.client.core import HMCClient
+from hmcpctl.operations.resource_reading import resource_container
 from hmcpctl.operations.systems.fleet import operating_system_entry
 
-from ...errors import HMCError
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import resolve_lpar_uuid, resolve_system_uuid
 from ...xmlutil import leaf_text, render_mtms
 from .capacity import system_capacity
@@ -75,11 +76,6 @@ def optional_float(value: object) -> float | None:
         return float(text) if text is not None else None
     except ValueError:
         return None
-
-
-def resource_container(resource: dict[str, Any], name: str) -> dict[str, Any]:
-    value = resource.get(name)
-    return value if isinstance(value, dict) else {}
 
 
 def processor_figures(resource: dict[str, Any]) -> dict[str, Any]:
@@ -182,6 +178,8 @@ async def _inventory_or_warning(
     """
     try:
         return await read
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         return f"{source} inventory is unavailable: {exc}"[:_MAX_WARNING_LENGTH]
 
@@ -200,13 +198,23 @@ async def _fetch_system_summary_data(
             f"Managed system {system_uuid!r} not found after resolution. "
             "List managed systems to inspect the available systems."
         )
-    async with asyncio.TaskGroup() as tasks:
-        lpars_task = tasks.create_task(
-            _inventory_or_warning(hmc.list_logical_partitions(system_uuid), "LPAR")
-        )
-        vios_task = tasks.create_task(
-            _inventory_or_warning(hmc.list_vios(system_uuid), "VIOS")
-        )
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            lpars_task = tasks.create_task(
+                _inventory_or_warning(hmc.list_logical_partitions(system_uuid), "LPAR")
+            )
+            vios_task = tasks.create_task(
+                _inventory_or_warning(hmc.list_vios(system_uuid), "VIOS")
+            )
+    except ExceptionGroup as errors:
+        identity_errors = errors.subgroup(HMCTLSFingerprintError)
+        if identity_errors is None:
+            raise
+        # TaskGroup has already joined every sibling; retain all failures as cause.
+        failure: BaseException = identity_errors
+        while isinstance(failure, BaseExceptionGroup):
+            failure = failure.exceptions[0]
+        raise failure from errors
     return system, lpars_task.result(), vios_task.result()
 
 

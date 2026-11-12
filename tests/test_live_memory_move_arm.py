@@ -2,6 +2,7 @@ import asyncio
 import sys
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import make_dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -9,9 +10,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import memory_move as arm
 from live_test import runner
+from live_test.arms import memory_move as arm
 from live_test.config import LiveTestConfig
+from live_test.observation import plain_data
+from live_test.recovery import procedures
 from lpar.test_memory_move import (
     SOURCE,
     TARGET,
@@ -89,7 +92,7 @@ def live_boundary(monkeypatch, boundary):  # noqa: F811 — pytest injects the i
         return "0,256"
 
     monkeypatch.setattr(arm, "run_hmc_command", AsyncMock(side_effect=cli))
-    root = Path(arm.__file__).resolve().parents[2]
+    root = Path(arm.__file__).resolve().parents[3]
 
     def git(repo, *args):
         stdout = (
@@ -544,7 +547,7 @@ def test_recovery_route_is_read_only(live_boundary, monkeypatch, tmp_path, capsy
     path = tmp_path / "result.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
 
     def no_generic(*args):
         raise AssertionError("memory move must not enter deletion-oriented recovery")
@@ -651,7 +654,7 @@ def test_system_observation_failure_after_effect_cannot_attest_clean(
     path = tmp_path / "result.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 2
     assert "CLEAN:" not in capsys.readouterr().out
     assert state.effects == 2
@@ -696,7 +699,8 @@ async def test_explicit_null_generated_result_allows_both_phases(live_boundary):
 
     async def generated(*args, **kwargs):
         status, data = await original(*args, **kwargs)
-        return status, SimpleNamespace(**data)
+        model = make_dataclass("GeneratedResult", [(name, object) for name in data])
+        return status, plain_data(model(**data)) if status == "PASS" else data
 
     state.call = generated
     await arm.exercise_memory_move(None, state)
@@ -842,7 +846,7 @@ def test_incomplete_proof_never_clears_matching_baselines(
     path = tmp_path / "result.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     command.reset_mock()
     assert recovery.main(["--results", str(path)]) == 2
     captured = capsys.readouterr()

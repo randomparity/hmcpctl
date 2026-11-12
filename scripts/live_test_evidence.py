@@ -276,7 +276,7 @@ def _render_boot_start(document: dict[str, Any]) -> str | None:
 
 
 def _render_ethernet_update(document: dict[str, Any]) -> str | None:
-    from live_test import ethernet_update
+    from live_test.arms import ethernet_update
 
     try:
         ethernet_update.validate_document(document)

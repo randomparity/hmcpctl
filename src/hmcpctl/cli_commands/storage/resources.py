@@ -14,36 +14,40 @@ import typer
 from typer._click.globals import get_current_context
 
 from hmcpctl.client.core import HMCClient
-
-from ...documents.storage import StorageKind, validate_virtual_disk
-from ...operations.lpar.profile_sync import ChangeLocation
-from ...operations.lpar.provision import (
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+from hmcpctl.operations.lpar.provisioning.core import (
     AttachDiskResult,
     ProvisionStorage,
     attach_disk_to_lpar,
 )
-from ...operations.storage.resources import (
-    StorageMutationResult,
+from hmcpctl.operations.storage.iso_upload import StorageUploadResult, upload_iso
+from hmcpctl.operations.storage.optical import (
+    StorageOpticalResult,
     create_media_repository,
     create_optical_media,
-    create_virtual_disk,
-    create_volume_group,
     delete_media_repository,
     delete_optical_media,
-    delete_virtual_disk,
-    detach_storage_mapping,
     get_media_repository,
     list_optical_media,
-    list_storage_mappings,
-    list_volume_groups,
     load_optical_media,
-    map_storage,
     mount_optical_media,
-    resolve_volume_group_uuid,
     unload_optical_media,
     unmount_optical_media,
-    upload_iso,
 )
+from hmcpctl.operations.storage.resources import (
+    StorageMutationResult,
+    create_virtual_disk,
+    create_volume_group,
+    delete_virtual_disk,
+    detach_storage_mapping,
+    list_storage_mappings,
+    list_volume_groups,
+    map_storage,
+    resolve_volume_group_uuid,
+)
+
+from ...documents.storage import StorageKind, validate_virtual_disk
+from ...jobs import JobOutcome
 from ...resource_identity import resolve_vios_uuid
 from ..output import (
     InventoryFormat,
@@ -112,13 +116,13 @@ def _confirm_storage(yes: bool, text: str) -> None:
 
 def _print_mutation(
     summary: dict[str, Any],
-    result: StorageMutationResult,
     selected: InventoryFormat,
     details: bool,
     *,
+    details_payload: Any,
+    job: JobOutcome | None = None,
     location: ChangeLocation | None = None,
 ) -> None:
-    location = result.change_location if location is None else location
     summary = {
         "outcome": "request_succeeded",
         "verification": "final state not verified",
@@ -127,7 +131,6 @@ def _print_mutation(
     if location is not None:
         summary["change_location"] = asdict(location)
         summary["change_location_summary"] = location.summary()
-    job = result.job
     if job is not None:
         summary.update(
             job_id=job.job_id,
@@ -142,7 +145,7 @@ def _print_mutation(
             summary["outcome"] = "submitted"
         summary["verification"] = "returned job status"
     print_inventory(
-        result.raw if details else summary, selected, title="Storage result"
+        details_payload if details else summary, selected, title="Storage result"
     )
     if summary["outcome"] == "failed":
         raise typer.Exit(1)
@@ -230,9 +233,11 @@ def storage_create_vg(
             "system": system,
             "physical_volumes": pv_list,
         },
-        vg,
         selected,
         details,
+        details_payload=vg.raw,
+        job=vg.job,
+        location=vg.change_location,
     )
 
 
@@ -289,9 +294,11 @@ def storage_create_disk(
             "vg": vg,
             "capacity_mib": capacity_mib,
         },
-        disk,
         selected,
         details,
+        details_payload=disk.raw,
+        job=disk.job,
+        location=disk.change_location,
     )
 
 
@@ -342,9 +349,11 @@ def storage_delete_disk(
             "system": system,
             "vg": vg,
         },
-        disk,
         selected,
         details,
+        details_payload=disk.raw,
+        job=disk.job,
+        location=disk.change_location,
     )
 
 
@@ -446,9 +455,9 @@ def storage_attach_disk(
         summary["verification"] = "preconditions validated; no mutation"
     _print_mutation(
         summary,
-        StorageMutationResult(raw),
         selected,
         details or selected == InventoryFormat.json,
+        details_payload=raw,
         location=result.change_location,
     )
     if not result.dry_run and not result.workflow_completed:
@@ -510,6 +519,7 @@ def storage_map(
         )
     )
 
+    assert result.change_location is not None
     _print_mutation(
         {
             "operation": "map",
@@ -521,9 +531,14 @@ def storage_map(
             "kind": kind,
             "target_device": target,
         },
-        result,
         selected,
         details,
+        details_payload={
+            "lpar_uuid": result.lpar_uuid,
+            "resource": result.raw,
+            "change_location": asdict(result.change_location),
+        },
+        job=result.job,
         location=result.change_location,
     )
 
@@ -580,9 +595,11 @@ def storage_create_media_repo(
             "vg": vg,
             "size_mib": size_mib,
         },
-        result,
         selected,
         details,
+        details_payload=result.raw,
+        job=result.job,
+        location=result.change_location,
     )
 
 
@@ -641,9 +658,11 @@ def storage_create_media(
             "vg": vg,
             "size_mib": size_mib,
         },
-        result,
         selected,
         details,
+        details_payload=result.raw,
+        job=result.job,
+        location=result.change_location,
     )
 
 
@@ -689,9 +708,11 @@ def storage_delete_media_repo(
             "system": system,
             "vg": vg,
         },
-        result,
         selected,
         details,
+        details_payload=result.raw,
+        job=result.job,
+        location=result.change_location,
     )
 
 
@@ -743,9 +764,11 @@ def storage_delete_media(
             "system": system,
             "vg": vg,
         },
-        result,
         selected,
         details,
+        details_payload=result.raw,
+        job=result.job,
+        location=result.change_location,
     )
 
 
@@ -864,6 +887,7 @@ def storage_mount_optical_media(
             system_name_or_uuid=system,
         )
     )
+    assert result.change_location is not None
     _print_mutation(
         {
             "operation": "mount-optical-media",
@@ -874,9 +898,14 @@ def storage_mount_optical_media(
             "lpar_uuid": result.lpar_uuid,
             "target_device": target_device,
         },
-        result,
         selected,
         details,
+        details_payload={
+            "lpar_uuid": result.lpar_uuid,
+            "resource": result.raw,
+            "change_location": asdict(result.change_location),
+        },
+        job=result.job,
         location=result.change_location,
     )
 
@@ -933,6 +962,7 @@ def storage_unmount_optical_media(
         )
 
     result = with_client(_go)
+    assert result.change_location is not None
     _print_mutation(
         {
             "operation": "unmount-optical-media",
@@ -942,9 +972,10 @@ def storage_unmount_optical_media(
             "lpar": lpar,
             "backing_storage": "retained",
         },
-        result,
         selected,
         details,
+        details_payload=asdict(result.change_location),
+        job=result.job,
         location=result.change_location,
     )
 
@@ -958,7 +989,7 @@ _RELEASE_HELP = (
 def _change_optical(
     command: str,
     question: str,
-    operation: Callable[[HMCClient], Awaitable[StorageMutationResult]],
+    operation: Callable[[HMCClient], Awaitable[StorageOpticalResult]],
     *,
     yes: bool,
     release: bool,
@@ -975,12 +1006,14 @@ def _change_optical(
             "operation": command,
             **summary,
             "lpar_uuid": result.lpar_uuid,
-            "target_device": result.raw["target_device"],
+            "target_device": result.target_device,
             "release": release,
         },
-        result,
         selected,
         details,
+        details_payload=result.raw,
+        job=result.job,
+        location=result.change_location,
     )
 
 
@@ -1196,6 +1229,7 @@ def storage_detach_mapping(
         )
 
     result = with_client(_go)
+    assert result.change_location is not None
     _print_mutation(
         {
             "operation": "detach-mapping",
@@ -1204,9 +1238,10 @@ def storage_detach_mapping(
             "system": system,
             "backing_storage": "retained",
         },
-        result,
         selected,
         details,
+        details_payload=asdict(result.change_location),
+        job=result.job,
         location=result.change_location,
     )
 
@@ -1251,7 +1286,7 @@ def storage_upload_iso(
     """
     selected = resolve_inventory_format(as_json or details, format)
 
-    async def _go(hmc: HMCClient) -> StorageMutationResult:
+    async def _go(hmc: HMCClient) -> StorageUploadResult:
         return await upload_iso(
             hmc,
             vios,
@@ -1269,17 +1304,22 @@ def storage_upload_iso(
         "vios": vios,
         "vg": vg,
         "system": system,
-        "outcome": result.raw.get("status", "unknown"),
-        "media_size_bytes": result.raw.get("media_size_bytes"),
-        "source_sha256": result.raw.get("source_sha256"),
+        "outcome": result.status,
+        "media_size_bytes": result.media_size_bytes,
+        "source_sha256": result.source_sha256,
         "verification": "repository entry observed"
-        if result.raw.get("status") == "uploaded"
+        if result.status == "uploaded"
         else "final state not verified",
     }
     _print_mutation(
-        summary, result, selected, details or selected == InventoryFormat.json
+        summary,
+        selected,
+        details or selected == InventoryFormat.json,
+        details_payload=result.raw,
+        job=result.job,
+        location=result.change_location,
     )
-    if result.raw.get("status") != "uploaded":
+    if result.status != "uploaded":
         raise typer.Exit(1)
 
 

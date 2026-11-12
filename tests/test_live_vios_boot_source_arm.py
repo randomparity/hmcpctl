@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import csv
 import hashlib
 import io
@@ -21,8 +22,10 @@ from hmcpctl.config import HMCConfig
 from hmcpctl.ssh.transport import HMCCLIError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import vios_ame_source as ame
-from live_test import vios_boot_source as source
+from live_test import packets
+from live_test import vios_source_support as support
+from live_test.arms import vios_ame_source as ame
+from live_test.arms import vios_boot_source as source
 from test_live_vios_ame_source_arm import SYS, V0, Wire, field
 
 VALUES = [
@@ -70,7 +73,7 @@ def packet(tmp_path):
             "caller_nonce": nonce,
             "description": f"[hmcpctl owner:source-test created:2026-10-27] [caller {nonce}]",
         },
-        "resources": deepcopy(ame.RESOURCES),
+        "resources": deepcopy(source.RESOURCES),
         "encoding_id": "csv-minimal-two-attribute-v1",
         "values": VALUES.copy(),
         "baseline_sha256": None,
@@ -251,9 +254,9 @@ def test_private_paths_receipt_and_input(tmp_path):
     p = packet(tmp_path)
     directory = Path(p["window"]["directory"])
     output = directory / "preflight-initial"
-    ame._receipt(p, "preflight-initial", "a" * 64, output)
+    support._receipt(p, "preflight-initial", "a" * 64, output)
     with pytest.raises(ValueError):
-        ame._receipt(p, "preflight-initial", "a" * 64, output)
+        support._receipt(p, "preflight-initial", "a" * 64, output)
     f = directory / "packet"
     f.write_text("{}")
     f.chmod(0o644)
@@ -270,24 +273,77 @@ def test_private_paths_receipt_and_input(tmp_path):
 
 
 def test_filesystem_session_bound_and_failed_checkpoint(tmp_path, monkeypatch):
-    with pytest.raises(ame.CheckpointError):
+    with pytest.raises(packets.CheckpointError):
         source._save(tmp_path, {"raw": "x" * (1024 * 1024)}, "session.json")
     (tmp_path / "results.json").write_text("old intent")
-    monkeypatch.setattr(ame.os, "fsync", Mock(side_effect=OSError("synthetic fsync")))
-    with pytest.raises(ame.CheckpointError):
+    monkeypatch.setattr(
+        packets.os, "fsync", Mock(side_effect=OSError("synthetic fsync"))
+    )
+    with pytest.raises(packets.CheckpointError):
         source._save(tmp_path, {"phase": "new"})
     assert (tmp_path / "results.json").read_text() == "old intent"
 
 
 def test_attestation_exact_selected_closure(tmp_path, monkeypatch):
+    expected_ame = {
+        "scripts/live_test/arms/__init__.py",
+        "scripts/live_test/arms/vios_ame_source.py",
+        "scripts/live_test/packets.py",
+        "scripts/live_test/vios_source_support.py",
+        "scripts/live_test_evidence.py",
+        "scripts/live_test_preflight.py",
+        "scripts/live_test_recovery.py",
+        "scripts/live_vios_ame_source.py",
+        "src/hmcpctl/client/client_profiles.py",
+        "src/hmcpctl/client/client_resolution.py",
+        "src/hmcpctl/client/client_systems.py",
+        "src/hmcpctl/client/core.py",
+        "src/hmcpctl/config.py",
+        "src/hmcpctl/documents/lpar.py",
+        "src/hmcpctl/documents/native_records.py",
+        "src/hmcpctl/documents/partition_profile.py",
+        "src/hmcpctl/operations/partition_creation.py",
+        "src/hmcpctl/operations/vios/core.py",
+        "src/hmcpctl/resource_identity.py",
+        "src/hmcpctl/ssh/commands.py",
+        "src/hmcpctl/ssh/description_validation.py",
+        "src/hmcpctl/ssh/lpar.py",
+        "src/hmcpctl/ssh/transport.py",
+        "src/hmcpctl/xmlutil.py",
+    }
+    assert len(ame.SOURCE_PATHS) == len(expected_ame)
+    assert set(ame.SOURCE_PATHS) == expected_ame
+    expected_boot = {
+        "scripts/live_test/arms/__init__.py",
+        "scripts/live_test/arms/vios_boot_source.py",
+        "scripts/live_test/packets.py",
+        "scripts/live_test/vios_source_support.py",
+        "scripts/live_test_evidence.py",
+        "scripts/live_test_preflight.py",
+        "scripts/live_test_recovery.py",
+        "scripts/live_vios_boot_source.py",
+        "src/hmcpctl/client/client_profiles.py",
+        "src/hmcpctl/client/client_resolution.py",
+        "src/hmcpctl/client/client_systems.py",
+        "src/hmcpctl/client/core.py",
+        "src/hmcpctl/config.py",
+        "src/hmcpctl/documents/lpar.py",
+        "src/hmcpctl/documents/native_records.py",
+        "src/hmcpctl/documents/partition_profile.py",
+        "src/hmcpctl/operations/partition_creation.py",
+        "src/hmcpctl/operations/vios/core.py",
+        "src/hmcpctl/resource_identity.py",
+        "src/hmcpctl/ssh/commands.py",
+        "src/hmcpctl/ssh/description_validation.py",
+        "src/hmcpctl/ssh/lpar.py",
+        "src/hmcpctl/ssh/transport.py",
+        "src/hmcpctl/xmlutil.py",
+    }
+    assert len(source.SOURCE_PATHS) == len(expected_boot)
+    assert set(source.SOURCE_PATHS) == expected_boot
     p = packet(tmp_path)
-    assert len(source.SOURCE_PATHS) == 20
-    assert set(source.SOURCE_PATHS) == (
-        set(ame.SOURCE_PATHS) - {"scripts/live_vios_ame_source.py"}
-        | {"scripts/live_test/vios_boot_source.py", "scripts/live_vios_boot_source.py"}
-    )
     monkeypatch.setattr(
-        ame,
+        packets,
         "_git_read",
         lambda root, args: "changed" if args == ("rev-parse", "HEAD") else "",
     )
@@ -307,7 +363,7 @@ def config(p):
 
 def test_caps_precharge_errors_and_nested(tmp_path):
     p = packet(tmp_path)
-    b = source.BootSourceBudget("capture", p)
+    b = support.Budget("capture", p, source.LIMITS["capture"])
     assert b.maximum == (830, 40, 42 * 1024 * 1024, 2600)
     with b.section("test", 1, 0, 1024, 20):
         b.dispatch(0, "GET")
@@ -331,17 +387,17 @@ def test_caps_precharge_errors_and_nested(tmp_path):
 )
 def test_reserve_suffix_and_expiry(tmp_path, cursor, index):
     p = packet(tmp_path)
-    b = source.BootSourceBudget("capture", p)
-    b.reserve(cursor, index)
+    b = support.Budget("capture", p, source.LIMITS["capture"])
+    source._reserve(b, cursor, index)
     for dimension in range(3):
         b.used = [0, 0, 0]
         b.used[dimension] = b.maximum[dimension]
         with pytest.raises(ValueError):
-            b.reserve(cursor, index)
+            source._reserve(b, cursor, index)
     b.used = [0, 0, 0]
     b.deadline = time.monotonic()
     with pytest.raises(ValueError):
-        b.reserve(cursor, index)
+        source._reserve(b, cursor, index)
 
 
 @pytest.mark.parametrize(
@@ -355,21 +411,25 @@ def test_reserve_suffix_and_expiry(tmp_path, cursor, index):
 )
 def test_reserve_closed_cursor(tmp_path, cursor, index):
     with pytest.raises(ValueError):
-        source.BootSourceBudget("capture", packet(tmp_path)).reserve(cursor, index)
+        source._reserve(
+            support.Budget("capture", packet(tmp_path), source.LIMITS["capture"]),
+            cursor,
+            index,
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", list(source.LIMITS))
 async def test_cleanup_physical_guard_before_parent(tmp_path, monkeypatch, stage):
     p = packet(tmp_path)
-    h = source.BootSourceHMC(config(p), source.BootSourceBudget(stage, p))
+    h = source.BootSourceHMC(config(p), support.Budget(stage, p, source.LIMITS[stage]))
     sends = []
 
     async def request(self, method, path, **kwargs):
         sends.append(path)
         return httpx.Response(204)
 
-    monkeypatch.setattr(ame.HMCClient, "_request", request)
+    monkeypatch.setattr(support.HMCClient, "_request", request)
     h.delete_uuid = OWN
     try:
         with (
@@ -382,11 +442,40 @@ async def test_cleanup_physical_guard_before_parent(tmp_path, monkeypatch, stage
         await h._http.aclose()
 
 
-def test_reuse_globals_unchanged():
-    assert ame.LIMITS["capture"] == (418, 12, 20 * 1024 * 1024, 1130)
-    assert issubclass(source.BootSourceBudget, ame.Budget)
-    assert issubclass(source.BootSourceHMC, ame.CountedHMC)
-    assert source.BootSourceBudget.reserve is not ame.Budget.reserve
+def test_arms_depend_directly_on_shared_support():
+    owner = "live_test.vios_source_support"
+    assert source.BootSourceHMC.__bases__[0].__module__ == owner
+    assert ame.CountedHMC.__bases__[0].__module__ == owner
+    imports = ast.walk(ast.parse(Path(source.__file__).read_text()))
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and any(alias.name == "vios_ame_source" for alias in node.names)
+        for node in imports
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE"])
+async def test_shared_transport_does_not_authorize_resource_mutations(
+    tmp_path, monkeypatch, method
+):
+    from unittest.mock import AsyncMock
+
+    p = packet(tmp_path)
+    budget = support.Budget("capture", p, source.LIMITS["capture"])
+    hmc = support.CountedHMC(config(p), budget)
+    send = AsyncMock(return_value=httpx.Response(204))
+    monkeypatch.setattr(support.HMCClient, "_request", send)
+    try:
+        with (
+            budget.section("refused mutation", 1, 0, source.MIB, 20),
+            pytest.raises(packets.Held, match="unallocated REST mutation"),
+        ):
+            await hmc._request(method, "/rest/api/uom/VirtualIOServer/" + OWN)
+        send.assert_not_awaited()
+        assert budget.used == [0, 0, 0]
+    finally:
+        await hmc._http.aclose()
 
 
 SAVED_RESOURCES = {
@@ -563,20 +652,22 @@ async def rig(tmp_path, monkeypatch):
     p = packet(tmp_path)
     wire = BootWire(p)
     monkeypatch.setattr(source, "run_hmc_command", wire.ssh)
-    monkeypatch.setattr(ame, "run_hmc_command", wire.ssh)
+    monkeypatch.setattr(support, "run_hmc_command", wire.ssh)
     monkeypatch.setattr(source, "_attest", lambda p: None)
     monkeypatch.setattr(
-        ame.HMCClient,
+        support.HMCClient,
         "_new_http_client",
         lambda self, port: httpx.AsyncClient(
             base_url="https://hmc.test:443", transport=httpx.MockTransport(wire.request)
         ),
     )
-    h = source.BootSourceHMC(config(p), source.BootSourceBudget("capture", p))
+    h = source.BootSourceHMC(
+        config(p), support.Budget("capture", p, source.LIMITS["capture"])
+    )
     h.packet_sha = "d" * 64
-    before = await ame.snapshot(h, p)
-    p["baseline_sha256"] = ame.digest(before["stable"])
-    h.budget = source.BootSourceBudget("capture", p)
+    before = await support.snapshot(h, p)
+    p["baseline_sha256"] = packets.digest(before["stable"])
+    h.budget = support.Budget("capture", p, source.LIMITS["capture"])
     h.packet = p
     h.grant_sha = h.packet_sha
     h.exclusive = True
@@ -818,8 +909,8 @@ async def test_maxima_real_snapshot_counts(rig, count, profiles, expected):
         w.profile_ids = lambda ident: (
             original(ident)[:1] if ident.endswith("00000000000a") else original(ident)
         )
-    h.budget = source.BootSourceBudget("capture", p)
-    await ame.snapshot(h, p)
+    h.budget = support.Budget("capture", p, source.LIMITS["capture"])
+    await support.snapshot(h, p)
     assert h.budget.used[:2] == [expected, 1]
 
 
@@ -832,7 +923,7 @@ async def test_snapshot_complete_collection_guards(rig, fault):
     path = f"/rest/api/uom/ManagedSystem/{SYS}/VirtualIOServer"
     w.envelope_fault = (path, 1, fault)
     with pytest.raises(ValueError):
-        await ame.snapshot(h, p)
+        await support.snapshot(h, p)
     assert w.injected == 1 and not w.boots and not w.deletes
 
 
@@ -904,7 +995,7 @@ async def test_recovery_present_absence_cannot_repair_history(rig, unknown):
         document[unknown]["execution"] = "unknown"
     if unknown != "companion":
         source._save(out, session(p, document=document), "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = support.Budget("recover", p, source.LIMITS["recover"])
     recovery = out.parent / "recover"
     recovery.mkdir(mode=0o700)
     before = (w.creates, len(w.boots), len(w.deletes))
@@ -920,7 +1011,7 @@ async def test_recovery_complete_history_and_current_baseline(rig):
     p, _w, h, out, _ = rig
     document = await run_capture(rig)
     source._save(out, session(p, document=document), "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = support.Budget("recover", p, source.LIMITS["recover"])
     recovery = out.parent / "recover"
     recovery.mkdir(mode=0o700)
     result = await source.recover(h, p, document, recovery)
@@ -949,7 +1040,7 @@ def test_session_exact_closeout(tmp_path, field, value):
 
 def test_session_predecessor_recomputes_baseline_and_binding(tmp_path):
     p = packet(tmp_path)
-    p["baseline_sha256"] = ame.digest({"synthetic": "baseline"})
+    p["baseline_sha256"] = packets.digest({"synthetic": "baseline"})
     initial = Path(p["window"]["directory"]) / "preflight-initial"
     initial.mkdir(mode=0o700)
     d = source._new_document(p, "d" * 64)
@@ -986,11 +1077,11 @@ async def test_ordered_intent_checkpoint_crashes_stop_effects(
                 effects_at_failure = (w.creates, len(w.boots), len(w.deletes))
                 if edge == "after":
                     save(directory, d, name_out)
-                raise ame.CheckpointError("synthetic checkpoint loss")
+                raise packets.CheckpointError("synthetic checkpoint loss")
         save(directory, d, name_out)
 
     monkeypatch.setattr(source, "_save", fault)
-    with pytest.raises(ame.CheckpointError):
+    with pytest.raises(packets.CheckpointError):
         await run_capture(rig)
     assert h.held and reached == event + 1
     assert (w.creates, len(w.boots), len(w.deletes)) == effects_at_failure
@@ -1014,7 +1105,9 @@ async def test_cleanup_reuse_once_only_even_if_rearmed(rig, monkeypatch):
     sent = len(w.http)
     with (
         h.budget.section("attack-delete", 1, 0, 1024 * 1024, 20),
-        pytest.raises(ValueError),
+        pytest.raises(
+            packets.Held, match="resource DELETE lacks one exact current intent"
+        ),
     ):
         await h._request("DELETE", "/rest/api/uom/VirtualIOServer/" + OWN)
     assert len(w.http) == sent and h.delete_count == 1
@@ -1033,7 +1126,7 @@ async def test_cleanup_rechecks_after_scoped_deleter_reads(rig, monkeypatch, cha
                 monkeypatch.setattr(
                     source,
                     "_attest",
-                    Mock(side_effect=ame.Held("synthetic source drift")),
+                    Mock(side_effect=packets.Held("synthetic source drift")),
                 )
             elif change == "grant":
                 h.grant_sha = "e" * 64
@@ -1057,8 +1150,8 @@ async def test_caps_unknown_response_keeps_precharge_and_session_once(rig, monke
     async def unknown(self, method, path, **kwargs):
         raise TimeoutError("synthetic unknown")
 
-    monkeypatch.setattr(ame.HMCClient, "_request", unknown)
-    h.budget = source.BootSourceBudget("capture", rig[0])
+    monkeypatch.setattr(support.HMCClient, "_request", unknown)
+    h.budget = support.Budget("capture", rig[0], source.LIMITS["capture"])
     with h.budget.section("logon", 1, 0, 1024 * 1024, 20), pytest.raises(TimeoutError):
         await h._request("PUT", "/rest/api/web/Logon")
     assert h.budget.used == [1, 0, 1024 * 1024]
@@ -1072,7 +1165,7 @@ async def test_caps_unknown_response_keeps_precharge_and_session_once(rig, monke
 
 def write_packet(p, tmp_path):
     path = tmp_path / "packet.json"
-    raw = ame.encode(p)
+    raw = packets.encode(p)
     path.write_bytes(raw)
     path.chmod(0o600)
     return path, hashlib.sha256(raw).hexdigest()
@@ -1164,7 +1257,7 @@ async def test_session_real_closeout_and_initial_deadline(rig, monkeypatch, faul
             return original(req)
 
         monkeypatch.setattr(
-            ame.HMCClient,
+            support.HMCClient,
             "_new_http_client",
             lambda self, port: httpx.AsyncClient(
                 base_url="https://hmc.test:443", transport=httpx.MockTransport(request)
@@ -1229,7 +1322,7 @@ async def test_session_owned_unreaped_attestation_never_clean(rig, monkeypatch):
     _p, w, h, _out, _ = rig
 
     def held(p):
-        error = ame.Held("synthetic unreaped own source process")
+        error = packets.Held("synthetic unreaped own source process")
         error.own_process_pid = 123
         raise error
 
@@ -1254,26 +1347,26 @@ def test_attestation_every_bound_input(tmp_path, monkeypatch, fault):
         p["imported_source_sha256"][name] = hashlib.sha256(
             path.read_bytes()
         ).hexdigest()
-    monkeypatch.setattr(ame, "_root", lambda: root)
-    monkeypatch.setattr(ame.hmcpctl, "__file__", str(package / "__init__.py"))
-    monkeypatch.setattr(ame.sys, "version_info", (3, 11, 15))
+    monkeypatch.setattr(packets, "_root", lambda: root)
+    monkeypatch.setattr(packets.hmcpctl, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(packets.sys, "version_info", (3, 11, 15))
     calls = []
 
     def git(root, args):
         calls.append(args)
         if fault == "git-timeout":
-            raise ame.Held("source attestation process deadline expired")
+            raise packets.Held("source attestation process deadline expired")
         if args == ("rev-parse", "HEAD"):
             return "f" * 40 if fault == "head" else p["tested_commit"]
         if args == ("rev-parse", "HEAD^{tree}"):
             return "f" * 40 if fault == "tree" else p["tested_tree"]
         return "dirty" if fault == "dirty" else ""
 
-    monkeypatch.setattr(ame, "_git_read", git)
+    monkeypatch.setattr(packets, "_git_read", git)
     if fault == "runtime":
-        monkeypatch.setattr(ame.sys, "version_info", (3, 11, 14))
+        monkeypatch.setattr(packets.sys, "version_info", (3, 11, 14))
     if fault == "import":
-        monkeypatch.setattr(ame.hmcpctl, "__file__", str(tmp_path / "different.py"))
+        monkeypatch.setattr(packets.hmcpctl, "__file__", str(tmp_path / "different.py"))
     if fault == "bytes":
         (root / source.SOURCE_PATHS[-1]).write_text("changed")
     with pytest.raises(ValueError):
@@ -1387,7 +1480,7 @@ async def test_recovery_renamed_owned_uuid_remains_residue(rig):
         "description": p["fixture"]["description"],
         "factor": "0",
     }
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = support.Budget("recover", p, source.LIMITS["recover"])
     output = out.parent / "recover"
     output.mkdir(mode=0o700)
     result = await source.recover(h, p, d, output)
@@ -1404,7 +1497,7 @@ def test_private_wrong_owner_is_rejected(tmp_path, monkeypatch):
     p.write_text("{}")
     p.chmod(0o600)
     uid = p.stat().st_uid
-    monkeypatch.setattr(ame.os, "getuid", lambda: uid + 1)
+    monkeypatch.setattr(packets.os, "getuid", lambda: uid + 1)
     with pytest.raises(ValueError):
         source._read_private(p, 65536)
 
@@ -1586,7 +1679,7 @@ async def test_history_rejects_contradictory_physical_trace(rig, fault):
         sum(c["kind"] == k for c in trace["calls"]) for k in ["REST", "SSH"]
     ]
     source._save(out, session(p, document=document), "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = support.Budget("recover", p, source.LIMITS["recover"])
     output = out.parent / "recover"
     output.mkdir(mode=0o700)
     result = await source.recover(h, p, document, output)
@@ -1615,7 +1708,7 @@ async def test_recovery_session_trace_must_extend_capture(rig, fault):
     else:
         close["transport"]["used"][2] += source.MIB + 1
     source._save(out, close, "session.json")
-    h.budget = source.BootSourceBudget("recover", p)
+    h.budget = support.Budget("recover", p, source.LIMITS["recover"])
     output = out.parent / "recover"
     output.mkdir(mode=0o700)
     result = await source.recover(h, p, document, output)
@@ -1692,3 +1785,88 @@ async def test_uncertainty_snapshot_checkpoint_failure_stops_native_read(
     assert h.held and "uncertainty" not in h.native_consumed and not w.deletes
     stored = json.loads((out / "results.json").read_text())
     assert len(stored["snapshots"]) == 2 and stored["phase"] == "held"
+
+
+@pytest.mark.parametrize("arm", ["ame", "boot"])
+@pytest.mark.parametrize("change", ["missing", "extra"])
+def test_selected_source_set_is_closed(tmp_path, arm, change):
+    from test_live_vios_ame_source_arm import packet as ame_packet
+
+    selected, make_packet = (ame, ame_packet) if arm == "ame" else (source, packet)
+    p = make_packet(tmp_path)
+    if change == "missing":
+        del p["imported_source_sha256"]["scripts/live_test/vios_source_support.py"]
+    else:
+        p["imported_source_sha256"]["scripts/live_test/unselected.py"] = "a" * 64
+    with pytest.raises(packets.Held):
+        selected.validate_packet(p)
+
+
+@pytest.mark.parametrize("arm", ["ame", "boot"])
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        "src/hmcpctl/documents/native_records.py",
+        "scripts/live_test/vios_source_support.py",
+    ],
+)
+def test_native_record_source_mutation_invalidates_capture(
+    tmp_path, monkeypatch, arm, source_path
+):
+    from test_live_vios_ame_source_arm import packet as ame_packet
+
+    selected, make_packet = (ame, ame_packet) if arm == "ame" else (source, packet)
+    p = make_packet(tmp_path)
+    root = tmp_path / "checkout"
+    checkout = Path(__file__).resolve().parents[1]
+    codec = source_path
+    for name in {*selected.SOURCE_PATHS, codec}:
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((checkout / name).read_bytes())
+
+    def fingerprints():
+        return {
+            name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+            for name in selected.SOURCE_PATHS
+        }
+
+    p["imported_source_sha256"] = fingerprints()
+    assert "src/hmcpctl/ssh/commands.py" in p["imported_source_sha256"]
+    selected.validate_packet(p)
+    monkeypatch.setattr(packets, "_root", lambda: root)
+    monkeypatch.setattr(
+        packets.hmcpctl, "__file__", str(root / "src/hmcpctl/__init__.py")
+    )
+    monkeypatch.setattr(packets.sys, "version_info", (3, 11, 15))
+    monkeypatch.setattr(
+        packets,
+        "_git_read",
+        lambda root, args: {
+            ("rev-parse", "HEAD"): p["tested_commit"],
+            ("rev-parse", "HEAD^{tree}"): p["tested_tree"],
+        }.get(args, ""),
+    )
+    selected._attest(p)
+    target = root / codec
+    original = target.read_bytes()
+    changed = (
+        original.replace(b"RECORD_DELIMITERS.items()", b"{}.items()")
+        if source_path.endswith("native_records.py")
+        else original.replace(b'"snapshot", 68, 1', b'"snapshot", 67, 1')
+    )
+    assert original != changed
+    target.write_bytes(changed)
+    assert fingerprints() != p["imported_source_sha256"]
+    with pytest.raises(packets.Held, match="imported source closure changed"):
+        selected._attest(p)
+    p["imported_source_sha256"] = fingerprints()
+    selected._attest(p)
+    # A capture made before the owner move cannot attest the new selected closure.
+    del p["imported_source_sha256"][codec]
+    with pytest.raises(packets.Held):
+        selected.validate_packet(p)
+    p["imported_source_sha256"] = fingerprints()
+    p["imported_source_sha256"]["scripts/live_test/unselected.py"] = "a" * 64
+    with pytest.raises(packets.Held):
+        selected.validate_packet(p)

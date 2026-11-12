@@ -55,21 +55,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import html
 import inspect
 import json
 import os
-import re
 from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
-from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, unquote
 
-import check_capability_inventory
+from capability_evidence import schema as capability_schema
 from fastmcp import Client
 
 from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
@@ -79,79 +75,67 @@ from hmcpctl.server import TOOL_SECURITY, _gates, create_mcp
 from hmcpctl.server_tools.command import configure_arbitrary_command_tool
 from live_test import config as live_config
 from live_test import evidence, scenario_validation
-from live_test.accelerator_qos import exercise_accelerator_qos
-from live_test.bare_cec import exercise_bare_cec
-from live_test.config import (
-    LiveTestArtifacts,
-    LiveTestConfig,
-    decode_artifacts,
-    decode_saved_config,
-)
-from live_test.connectivity import inventory_connectivity
-from live_test.creation_memory import exercise_creation_memory
-from live_test.creation_memory_layout import exercise_creation_memory_layout
-from live_test.dedicated_pcie import exercise_dedicated_pcie_assignment
-from live_test.detach_probe import exercise_detach_probe
-from live_test.escape_hatch import exercise_cli_escape_hatch
-from live_test.inventory import capture_lpar_baseline
-from live_test.logical_workflow import exercise_logical_workflow
-from live_test.lpar import (
+from live_test.arms.accelerator_qos import exercise_accelerator_qos
+from live_test.arms.bare_cec import exercise_bare_cec
+from live_test.arms.connectivity import inventory_connectivity
+from live_test.arms.creation_memory import exercise_creation_memory
+from live_test.arms.creation_memory_layout import exercise_creation_memory_layout
+from live_test.arms.dedicated_pcie import exercise_dedicated_pcie_assignment
+from live_test.arms.detach_probe import exercise_detach_probe
+from live_test.arms.escape_hatch import exercise_cli_escape_hatch
+from live_test.arms.logical_workflow import exercise_logical_workflow
+from live_test.arms.lpar import (
     exercise_lpar_lifecycle,
     mutate_lpar_properties,
     restore_lpar_baseline,
 )
-from live_test.lpar_affinity_group import exercise_lpar_affinity_group
-from live_test.lpar_config import (
+from live_test.arms.lpar_affinity_group import exercise_lpar_affinity_group
+from live_test.arms.lpar_config import (
     exercise_lpar_config,
     exercise_lpar_reporting,
     exercise_lpar_settings,
 )
-from live_test.lpar_hardware_memory import exercise_lpar_hardware_memory
-from live_test.lpar_linux_roles import exercise_lpar_linux_roles
-from live_test.lpar_physical_io import exercise_lpar_physical_io
-from live_test.lpar_power import exercise_lpar_power
-from live_test.lpar_reconfigure import exercise_lpar_reconfigure
-from live_test.lpar_security_policy import exercise_lpar_security_policy
-from live_test.lpar_vtpm import exercise_lpar_vtpm
-from live_test.memory_move import exercise_memory_move
-from live_test.memory_quantities import exercise_memory_quantities
-from live_test.memory_statistics import exercise_memory_statistics, private_destination
-from live_test.metrics import (
+from live_test.arms.lpar_hardware_memory import exercise_lpar_hardware_memory
+from live_test.arms.lpar_linux_roles import exercise_lpar_linux_roles
+from live_test.arms.lpar_physical_io import exercise_lpar_physical_io
+from live_test.arms.lpar_power import exercise_lpar_power
+from live_test.arms.lpar_reconfigure import exercise_lpar_reconfigure
+from live_test.arms.lpar_security_policy import exercise_lpar_security_policy
+from live_test.arms.lpar_vtpm import exercise_lpar_vtpm
+from live_test.arms.memory_move import exercise_memory_move
+from live_test.arms.memory_quantities import exercise_memory_quantities
+from live_test.arms.memory_statistics import (
+    exercise_memory_statistics,
+    private_destination,
+)
+from live_test.arms.metrics import (
     exercise_pcm_preferences,
     inspect_metrics_jobs,
     inspect_metrics_templates,
 )
-from live_test.network import inventory_network, mutate_virtual_networking
-from live_test.observation import (
-    SCENARIO_ID,
-    Assertion,
-    CallFailure,
-    ExpectedOutcome,
-    KnownGap,
-    classify_failure,
-    grade_assertions,
+from live_test.arms.network import inventory_network, mutate_virtual_networking
+from live_test.arms.paging_switchover import exercise_paging_switchover
+from live_test.arms.partition_profiles import exercise_partition_profiles
+from live_test.arms.processor_move import exercise_processor_move
+from live_test.arms.processor_quantities import exercise_processor_quantities
+from live_test.arms.processor_sharing_weight import exercise_processor_sharing_weight
+from live_test.arms.profile_contract_run import (
+    exercise as exercise_profile_contract,
 )
-from live_test.paging_switchover import exercise_paging_switchover
-from live_test.partition_profile_contract import exercise as exercise_profile_contract
-from live_test.partition_profiles import exercise_partition_profiles
-from live_test.processor_move import exercise_processor_move
-from live_test.processor_quantities import exercise_processor_quantities
-from live_test.processor_sharing_weight import exercise_processor_sharing_weight
-from live_test.profiles import exercise_backup_artifacts, inventory_lpar_profiles
-from live_test.provision_boot import exercise_provision_boot
-from live_test.provisioning import (
+from live_test.arms.profiles import exercise_backup_artifacts, inventory_lpar_profiles
+from live_test.arms.provision_boot import exercise_provision_boot
+from live_test.arms.provisioning import (
     exercise_storage_provisioning,
     validate_provisioning_dry_run,
 )
-from live_test.sriov import exercise_sriov_assignment
-from live_test.storage import inventory_storage
-from live_test.storage_lifecycle import exercise_disk_lifecycle
-from live_test.storage_volume_group import exercise_volume_group
-from live_test.system_profiles import exercise_system_profiles
-from live_test.users import exercise_users, inventory_users
-from live_test.vios_backup import exercise_vios_backup
-from live_test.vmedia import (
-    IsoHttpServer,
+from live_test.arms.sriov import exercise_sriov_assignment
+from live_test.arms.storage import inventory_storage
+from live_test.arms.storage_lifecycle import exercise_disk_lifecycle
+from live_test.arms.storage_volume_group import exercise_volume_group
+from live_test.arms.system_profiles import exercise_system_profiles
+from live_test.arms.users import exercise_users, inventory_users
+from live_test.arms.vios_backup import exercise_vios_backup
+from live_test.arms.vmedia import (
     vmedia_boot_verification,
     vmedia_bootstrap_and_create_repo,
     vmedia_mapping_crossvalidation,
@@ -160,359 +144,26 @@ from live_test.vmedia import (
     vmedia_teardown,
     vmedia_upload_iso,
 )
-from live_test.vmedia_media_change import vmedia_media_change
+from live_test.arms.vmedia_media_change import vmedia_media_change
+from live_test.artifacts import LiveTestArtifacts, decode_artifacts
+from live_test.config import LiveTestConfig, decode_saved_config, hmc_identity
+from live_test.http_fixture import IsoHttpServer
+from live_test.inventory import capture_lpar_baseline
+from live_test.observation import (
+    SCENARIO_ID,
+    Assertion,
+    CallFailure,
+    ExpectedOutcome,
+    KnownGap,
+    classify_failure,
+    grade_assertions,
+    plain_data,
+)
+from live_test.redaction import redact_failure_data, redact_failure_text
 
 # ---------------------------------------------------------------------------
 # Pre-run guard: HMC credentials must resolve before the first dispatch
 # ---------------------------------------------------------------------------
-
-
-_SESSION_FIELD_RE = re.compile(
-    r"(?i)(?:RequestHeaders|Cookie|Set-Cookie|sessionCookie|X-API-Session)"
-)
-_SESSION_XML_TOKEN_RE = re.compile(
-    r"(?s)<!\[CDATA\[.*?(?:\]\]>|\Z)|<!--.*?(?:-->|\Z)|<\?.*?(?:\?>|\Z)|"
-    r"<(?P<closing>/)?(?P<tag>[\w.:-]+)(?=[\s/>])"
-    r"(?:[^'\"><]|'[^']*'|\"[^\"]*\"|'[^'<]*\Z|\"[^\"<]*\Z)*(?:>|\Z)"
-)
-_SESSION_XML_ATTR_RE = re.compile(
-    r"""([\w.:-]+)\s*=\s*(?:"([^"]*)(?:"|\Z)|'([^']*)(?:'|\Z))"""
-)
-_SESSION_HEADER_RE = re.compile(
-    r"(?i)(?<![\w-])(?:Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][^\r\n]*"
-    r"(?:\r?\n[ \t]+[^\r\n]*)*"
-)
-_SESSION_ENTITY_RE = re.compile(r"(?i)&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);")
-_SESSION_HEADER_VALUE_RE = re.compile(
-    r"(?i)(?<![\w-])(?P<name>Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][ \t]*"
-    r"(?P<value>[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)"
-)
-_SESSION_VALUE_RE = re.compile(
-    r"(?i)(?=(?<![\w-])(?P<name>Cookie|Set-Cookie|sessionCookie|X-API-Session)['\"]?\s*[:=][ \t]*"
-    r"""(?P<value>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:&(?:\#\d+|\#x[0-9a-f]+|[a-z][a-z0-9]+);|[^\s,;{}])+))"""
-)
-
-
-_SECRET_VALUE_RE = re.compile(
-    r"(?i)\b(?P<name>password|passwd|token|secret|api[_-]?key)"
-    r"(?P<separator>\s*(?:=|:)\s*)(?P<quote>['\"]?)(?P<value>[^\s,;'\"&]+)"
-    r"(?P=quote)"
-)
-_URL_USERINFO_RE = re.compile(r"(?i)\b(?P<scheme>[a-z][a-z0-9+.-]*://)[^/\s@]+@")
-#: Labels admit `_` (#927). It is a word character, so without it `\b` cannot fire
-#: inside an underscore label: the match began at the next dot-separated label and
-#: left every label up to the underscore one readable, or missed a two-label name.
-_HOSTNAME_RE = re.compile(
-    r"(?i)\b(?:[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\.)+[a-z]{2,63}\b"
-)
-#: A single-dot `name.ext` with one of these extensions is a filename, not a
-#: host (#914). None is an IANA TLD — `.py`, `.md`, `.sh` and `.zip` are, so
-#: they stay out; a multi-label name is redacted whatever its last label.
-_FILENAME_EXTENSIONS = frozenset(
-    {
-        "cfg",
-        "conf",
-        "csv",
-        "ini",
-        "iso",
-        "json",
-        "log",
-        "toml",
-        "txt",
-        "xml",
-        "yaml",
-        "yml",
-    }
-)
-_ABSOLUTE_PATH_RE = re.compile(r"(?<![:\w])/(?:[^\s/]+/)*[^\s,;:'\")]+")
-
-
-def _redact_hostname(match: re.Match[str]) -> str:
-    stem, _, extension = match.group().rpartition(".")
-    if "." not in stem and extension.lower() in _FILENAME_EXTENSIONS:
-        return match.group()
-    return "<REDACTED-HOST>"
-
-
-class _FailureRedactionLimit(Exception):
-    """Stop collection before its bounded diagnostic work can be exceeded."""
-
-
-def _remember_session(value: str, secrets: set[str], *, cookie: bool) -> None:
-    def retain(value: str, *, encoded_quotes: bool) -> str:
-        raw = value.strip()
-        inner = raw
-        quote_char = raw[:1]
-        if len(raw) > 1 and quote_char in {'"', "'"} and raw[-1] == quote_char:
-            inner = raw[1:-1]
-        else:
-            first = _SESSION_ENTITY_RE.match(raw) if encoded_quotes else None
-            last = raw.rfind("&")
-            quote_char = html.unescape(first.group()) if first else ""
-            if (
-                first
-                and last >= first.end()
-                and quote_char in {'"', "'"}
-                and html.unescape(raw[last:]) == quote_char
-            ):
-                inner = raw[first.end() : last]
-            else:
-                quote_char = ""
-        value = raw
-        if quote_char:
-            try:
-                value = json.loads(quote_char + inner + quote_char)
-            except json.JSONDecodeError:
-                value = re.sub(r"\\(.)", r"\1", inner)
-        if value:
-            secrets.update((raw, inner, value))
-            if len(secrets) > 256:
-                raise _FailureRedactionLimit
-        return value
-
-    raw_value = retain(value, encoded_quotes=True)
-    decoded_value = retain(html.unescape(raw_value), encoded_quotes=False)
-    if not cookie:
-        return
-    # Decode named source entities once, without decoding its component values again.
-    for source, encoded_quotes in {raw_value: True, decoded_value: False}.items():
-        parsed = SimpleCookie()
-        try:
-            # Entity semicolons are value data; preserve literal percent bytes too.
-            protected = _SESSION_ENTITY_RE.sub(
-                lambda match: quote(match.group(), safe=""), source.replace("%", "%25")
-            )
-            parsed.load(protected)
-        except CookieError:
-            continue  # Raw named values still protect exact echoes of malformed cookies.
-        for item in parsed.values():
-            if item.value:
-                retain(unquote(item.value), encoded_quotes=encoded_quotes)
-                retain(unquote(item.coded_value), encoded_quotes=encoded_quotes)
-
-
-def _raw_session_header_value(fragment: str, match: re.Match[str]) -> str:
-    start, end = match.span("value")
-    raw_start, raw_end = start, end
-    removed = 0
-    # Each ampersand-delimited chunk can undergo only one stdlib entity replacement.
-    for part in re.finditer(r"&[^&]*", fragment):
-        raw = part.group()
-        decoded = html.unescape(raw)
-        difference = len(raw) - len(decoded)
-        if not difference:
-            continue
-        suffix = 0
-        while suffix < len(decoded) and raw[-suffix - 1] == decoded[-suffix - 1]:
-            suffix += 1
-        decoded_start = part.start() - removed
-        decoded_end = decoded_start + len(decoded) - suffix
-        if start > decoded_end or (
-            start == decoded_end and decoded_start < decoded_end
-        ):
-            raw_start += difference
-        elif start > decoded_start:
-            raw_start = part.start()
-        if end >= decoded_end:
-            raw_end += difference
-        elif end > decoded_start:
-            raw_end = part.end() - suffix
-        removed += difference
-    return fragment[raw_start:raw_end]
-
-
-def _session_xml_text(match: re.Match[str]) -> str:
-    token = match.group()
-    if not token.startswith("<![CDATA["):
-        return ""
-    return token[9:-3] if token.endswith("]]>") else token[9:]
-
-
-def _redact_session_xml(value: str, secrets: set[str]) -> str:
-    parts: list[str] = []
-    stack: list[tuple[str, int, str]] = []
-    cursor = 0
-
-    def remember_region(start: int, end: int, field: str) -> None:
-        if (
-            start < 0
-            or field == "requestheaders"
-            or not _SESSION_FIELD_RE.fullmatch(field)
-        ):
-            return
-        content = _SESSION_XML_TOKEN_RE.sub(_session_xml_text, value[start:end])
-        _remember_session(content, secrets, cookie=field in {"cookie", "set-cookie"})
-
-    for match in _SESSION_XML_TOKEN_RE.finditer(value):
-        tag = match["tag"]
-        if tag is None:
-            continue
-        tag = tag.lower()
-        field = tag.rsplit(":", 1)[-1]
-        if field == "header":
-            attrs = [
-                (name.rsplit(":", 1)[-1].lower(), double or single)
-                for name, double, single in _SESSION_XML_ATTR_RE.findall(match.group())
-            ]
-            fields = {
-                html.unescape(value).lower()
-                for name, value in attrs
-                if name == "name" and _SESSION_FIELD_RE.fullmatch(html.unescape(value))
-            }
-            cookie = bool(fields & {"cookie", "set-cookie"})
-            field = (
-                "cookie"
-                if cookie
-                else next(
-                    iter(sorted(fields - {"requestheaders"})),
-                    "requestheaders" if fields else "",
-                )
-            )
-            if match["closing"] and stack and stack[-1][0] == tag:
-                field = stack[-1][2]
-            if fields:
-                for name, attribute in attrs:
-                    if name == "value":
-                        _remember_session(attribute, secrets, cookie=cookie)
-        # Ordinary nested Header elements balance without splitting the outer value.
-        sensitive = bool(_SESSION_FIELD_RE.fullmatch(field))
-        if not sensitive and not (tag.rsplit(":", 1)[-1] == "header" and stack):
-            continue
-        if match["closing"]:
-            if not stack or stack[-1][0] != tag:
-                continue
-            _, start, field = stack.pop()
-            remember_region(start, match.start(), field)
-        else:
-            if not stack:
-                parts.append(value[cursor : match.start()])
-            if sensitive:
-                for index in range(len(stack) - 1, -1, -1):
-                    parent, start, parent_field = stack[index]
-                    if _SESSION_FIELD_RE.fullmatch(parent_field):
-                        remember_region(start, match.start(), parent_field)
-                        stack[index] = (parent, -1, parent_field)
-                        break
-            if not match.group().endswith("/>"):
-                if len(stack) >= 32:
-                    raise _FailureRedactionLimit
-                stack.append((tag, match.end(), field))
-                continue
-        if sensitive:
-            for index in range(len(stack) - 1, -1, -1):
-                parent, start, parent_field = stack[index]
-                if _SESSION_FIELD_RE.fullmatch(parent_field):
-                    stack[index] = (parent, match.end(), parent_field)
-                    break
-        if not stack:
-            parts.append("<REDACTED-SECRET>")
-            cursor = match.end()
-    for _, start, field in stack:
-        remember_region(start, len(value), field)
-    parts.append("<REDACTED-SECRET>" if stack else value[cursor:])
-    return "".join(parts)
-
-
-def _redact_failure_data(data: Any) -> Any:
-    secrets: set[str] = set()
-    remaining_chars = 65_536
-    remaining_nodes = 4096
-    remaining_source_work = 1_000_000
-    prepared_chars = 0
-
-    # None is outside a named source; False learns exact values, True also parses cookies.
-    def prepare(value: Any, depth: int = 0, cookie: bool | None = None) -> Any:
-        nonlocal remaining_chars, remaining_nodes, prepared_chars, remaining_source_work
-        remaining_nodes -= 1
-        if depth > 32 or remaining_nodes < 0:
-            raise _FailureRedactionLimit
-        if isinstance(value, dict):
-            prepared = {}
-            for key, child in value.items():
-                remaining_chars -= len(str(key))
-                if remaining_chars < 0:
-                    raise _FailureRedactionLimit
-                named = bool(_SESSION_FIELD_RE.fullmatch(str(key)))
-                child_cookie = cookie
-                if named and str(key).lower() != "requestheaders":
-                    child_cookie = bool(cookie) or str(key).lower() in {
-                        "cookie",
-                        "set-cookie",
-                    }
-                safe_child = prepare(child, depth + 1, child_cookie)
-                if named:
-                    safe_child = "<REDACTED-SECRET>"
-                    prepared_chars += len(safe_child)
-                prepared[key] = safe_child
-            return prepared
-        if isinstance(value, list):
-            return [prepare(child, depth + 1, cookie) for child in value]
-        text = str(value)
-        remaining_chars -= len(text)
-        if remaining_chars < 0:
-            raise _FailureRedactionLimit
-        if cookie is not None and isinstance(value, str):
-            _remember_session(value, secrets, cookie=cookie)
-        fragments = [text]
-        cursor = 0
-        for token in _SESSION_XML_TOKEN_RE.finditer(text):
-            fragments.append(text[cursor : token.start()])
-            if token.group().startswith("<![CDATA["):
-                fragments.append(_session_xml_text(token))
-            elif token.group().startswith("<!--"):
-                fragments.append(token.group()[4:].removesuffix("-->"))
-            elif token.group().startswith("<?"):
-                fragments.append(token.group()[2:].removesuffix("?>"))
-            cursor = token.end()
-        fragments.append(text[cursor:])
-        for fragment in fragments:
-            for source in {fragment, html.unescape(fragment)}:
-                for matcher in (_SESSION_VALUE_RE, _SESSION_HEADER_VALUE_RE):
-                    for match in matcher.finditer(source):
-                        value = match["value"]
-                        if source != fragment:
-                            remaining_source_work -= len(fragment)
-                            if remaining_source_work < 0:
-                                raise _FailureRedactionLimit
-                            value = _raw_session_header_value(fragment, match)
-                        _remember_session(
-                            value,
-                            secrets,
-                            cookie=match["name"].lower() in {"cookie", "set-cookie"},
-                        )
-        text = _redact_session_xml(text, secrets)
-        text = _SESSION_HEADER_RE.sub("<REDACTED-SECRET>", text)
-        prepared_chars += len(text)
-        return text
-
-    try:
-        prepared = prepare(data)
-        if sum(map(len, secrets)) > 65_536 or len(secrets) * prepared_chars > 1_000_000:
-            raise _FailureRedactionLimit
-    except _FailureRedactionLimit:
-        # Discard the complete object: an uncollected value may have earlier echoes.
-        return "<REDACTED-FAILURE-DATA>"
-    pattern = re.compile(
-        "|".join(re.escape(s) for s in sorted(secrets, key=len, reverse=True))
-        or r"(?!)"
-    )
-
-    def finish(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {key: finish(child) for key, child in value.items()}
-        if isinstance(value, list):
-            return [finish(child) for child in value]
-        value = pattern.sub("<REDACTED-SECRET>", value)
-        value = _SECRET_VALUE_RE.sub(r"\g<name>\g<separator><REDACTED-SECRET>", value)
-        value = _URL_USERINFO_RE.sub(r"\g<scheme><REDACTED-URL-USERINFO>@", value)
-        value = _HOSTNAME_RE.sub(_redact_hostname, value)
-        return _ABSOLUTE_PATH_RE.sub("<REDACTED-PATH>", value)
-
-    return finish(prepared)
-
-
-def _redact_failure_text(value: str) -> str:
-    return _redact_failure_data(value)
 
 
 #: The `HMC_*` names whose reader folds their casing: `HMCConfig`'s own fields,
@@ -587,7 +238,7 @@ def _bootstrap_config() -> bool:
         return True
     except ConfigError as exc:
         print(
-            f"  ⚠️  config.toml: {_redact_failure_text(str(exc))} — falling back to .env"
+            f"  ⚠️  config.toml: {redact_failure_text(str(exc))} — falling back to .env"
         )
 
     # Fallback: local .env
@@ -772,7 +423,7 @@ class RunState:
         reuse_gaps: bool = True,
         **kwargs: Any,
     ) -> tuple[str, Any]:
-        """Call a tool and return a PASS or FAIL result without raising."""
+        """Call a tool; normalize successful data and retain structured failures."""
         # FastMCP would reject an invalid dispatch anyway; checking here is what
         # gives the failure a stable reason instead of a pydantic rendering, and
         # keeps a harness defect from ever reaching the real HMC.
@@ -794,7 +445,7 @@ class RunState:
         try:
             result = await client.call_tool(tool, kwargs)
             if hasattr(result, "data") and result.data is not None:
-                return "PASS", result.data
+                return "PASS", plain_data(result.data)
             if hasattr(result, "content"):
                 parts = [
                     str(block.text) if hasattr(block, "text") else str(block)
@@ -832,12 +483,11 @@ class RunState:
             # Only the message is persisted: the traceback text stays on the
             # ``CallFailure`` for the caller that classifies it, and never reaches
             # the results document, whose redaction pass reads string leaves.
-            safe_data: Any = _redact_failure_text(data.message)
+            safe_data: Any = redact_failure_text(data.message)
         else:
             if is_dataclass(data) and not isinstance(data, type):
-                # FastMCP serves a dataclass tool result as a generated dataclass.
-                data = asdict(data)
-            safe_data = _redact_failure_data(data) if status == "FAIL" else data
+                data = plain_data(data)
+            safe_data = redact_failure_data(data) if status == "FAIL" else data
         entry = {
             "subtask": subtask,
             "tool": tool,
@@ -1027,6 +677,9 @@ SUBTASKS = {
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
+# New registrations require an explicit decision before joining the default run.
+DEFAULT_SUBTASKS = (*range(26), *range(37, 44), *range(47, 52))
+
 
 # Release-selectable scenarios; numbers are dispatcher subtasks, not result row IDs.
 RELEASE_SCENARIO_SUBTASKS = {
@@ -1109,6 +762,87 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
 }
 
 
+_PRIVATE_RESULT_GROUPS = {
+    "lpar-paging-switchover": "Paging switch",
+    "lpar-memory-statistics": "Statistics reset",
+    "lpar-memory-move": "Memory move",
+    "lpar-processor-move": "Processor move",
+    "lpar-accelerator-qos": "Accelerator QoS",
+}
+
+
+def _selected_tasks(subtask: int | None, group: str | None) -> list[int]:
+    if subtask is not None:
+        return [subtask]
+    if group is None:
+        return [number for number in DEFAULT_SUBTASKS if number in SUBTASKS]
+    tasks = SUBTASK_GROUPS.get(group, [])
+    if not tasks:
+        raise ValueError(
+            f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}"
+        )
+    return list(tasks)
+
+
+def _validate_private_results(
+    tasks: list[int], group: str | None, results_path: str
+) -> None:
+    for allowed, label in _PRIVATE_RESULT_GROUPS.items():
+        if not set(tasks).intersection(SUBTASK_GROUPS[allowed]):
+            continue
+        try:
+            if group != allowed:
+                raise ValueError("named opt-in group required")
+            private_destination(results_path)
+        except (ValueError, OSError, RuntimeError) as exc:
+            raise ValueError(
+                f"{label} requires new canonical absolute private results outside repositories"
+            ) from exc
+
+
+def _fresh_results_required(
+    tasks: list[int], results_path: str, state: RunState | None
+) -> bool:
+    number = next((number for number in (66, 65, 58) if number in tasks), None)
+    if number is None:
+        return False
+    stale = False
+    if state is not None:
+        if number == 65:
+            stale = bool(
+                state.artifacts.creation_memory
+                or state.creation_memory_invocation is not None
+            )
+        elif number == 58:
+            stale = bool(state.artifacts.creation_memory_layout)
+    paths = [Path(results_path)]
+    if number in {65, 66}:
+        paths.append(evidence.observations_path(results_path))
+    if stale or any(path.exists() for path in paths):
+        raise ValueError(
+            f"Existing ST{number} context refused; use fresh private results"
+        )
+    return True
+
+
+def _prepare_selection(
+    subtask: int | None,
+    group: str | None,
+    results_path: str,
+    *,
+    state: RunState | None = None,
+) -> tuple[list[int], list[str]]:
+    """One selection gate for CLI startup and direct programmatic dispatch."""
+    tasks = _selected_tasks(subtask, group)
+    _validate_private_results(tasks, group, results_path)
+    if _fresh_results_required(tasks, results_path, state):
+        return tasks, []
+    prior_paths = [results_path]
+    if subtask is not None or group is not None:
+        prior_paths.extend(["test-results-vmedia.json", "test-results-round2.json"])
+    return tasks, prior_paths
+
+
 @dataclass(frozen=True)
 class RunnerArguments:
     """Validated live-run selection and result destination."""
@@ -1164,29 +898,36 @@ def _parse_arguments(argv: list[str] | None = None) -> RunnerArguments:
     )
 
 
+def _run_private_group(
+    group: str, description: str | None, argv: list[str] | None = None
+) -> int:
+    """Run a fixed opt-in group with private result custody and a restored umask."""
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--results-file", required=True)
+    args = parser.parse_args(argv)
+    try:
+        private_destination(args.results_file)
+    except (ValueError, OSError, RuntimeError):
+        parser.error(
+            "Use new canonical absolute results in a private mode0700 directory outside repositories"
+        )
+    previous = os.umask(0o077)
+    try:
+        return _run_from_arguments(
+            ["--group", group, "--results-file", args.results_file]
+        )
+    finally:
+        os.umask(previous)
+
+
 def _run_from_arguments(argv: list[str] | None = None) -> int:
     """Validate arguments, then bootstrap configuration and execute the live run."""
     arguments = _parse_arguments(argv)
-    if arguments.group == "lpar-paging-switchover" or arguments.subtask == 66:
-        try:
-            if arguments.group != "lpar-paging-switchover":
-                raise ValueError("Paging switch requires its named opt-in group")
-            private_destination(arguments.results_path)
-        except (ValueError, OSError, RuntimeError):
-            print(
-                "Paging switch requires new canonical absolute private results outside repositories"
-            )
-            return 1
-    if arguments.group == "lpar-memory-statistics" or arguments.subtask == 67:
-        try:
-            if arguments.group != "lpar-memory-statistics":
-                raise ValueError("Statistics reset requires its named opt-in group")
-            private_destination(arguments.results_path)
-        except (ValueError, OSError, RuntimeError):
-            print(
-                "Statistics reset requires new canonical absolute private results outside repositories"
-            )
-            return 1
+    try:
+        _prepare_selection(arguments.subtask, arguments.group, arguments.results_path)
+    except (ValueError, OSError, RuntimeError) as exc:
+        print(str(exc))
+        return 1
     try:
         config = LiveTestConfig.from_env_file()
         # Validated here, beside the rest of the configuration: `evidence.emit_observations`
@@ -1235,16 +976,6 @@ def _run_from_arguments(argv: list[str] | None = None) -> int:
     )
 
 
-def _hmc_identity(config: HMCConfig) -> dict[str, str | int | bool]:
-    """Return the non-secret HMC identity bound to a persisted artifact set."""
-    return {
-        "host": config.host,
-        "port": config.port,
-        "user": config.user,
-        "verify_ssl": config.verify_ssl,
-    }
-
-
 def _restore_artifacts_from_results(
     state: RunState,
     hmc_config: HMCConfig,
@@ -1286,7 +1017,7 @@ def _restore_artifacts_from_results(
         if decode_saved_config(saved["config"]) != state.config:
             raise ValueError("results configuration does not match this run")
         saved_hmc = saved["hmc"]
-        current_hmc = _hmc_identity(hmc_config)
+        current_hmc = hmc_identity(hmc_config)
         if not isinstance(saved_hmc, dict) or set(saved_hmc) != set(current_hmc):
             raise TypeError("results hmc identity must contain the expected fields")
         if any(
@@ -1368,7 +1099,7 @@ async def main(
         try:
             config = LiveTestConfig.from_env_file()
         except ValueError as exc:
-            print(f"❌ {_redact_failure_text(str(exc))}")
+            print(f"❌ {redact_failure_text(str(exc))}")
             return 1
     try:
         scenario_validation.validate_declared_outcomes(_SCENARIO_MODULES)
@@ -1377,7 +1108,7 @@ async def main(
             evidence.load_known_gaps(environment, repo_root) if repo_root else set()
         )
     except (OSError, ValueError) as exc:
-        print(f"❌ {_redact_failure_text(str(exc))}")
+        print(f"❌ {redact_failure_text(str(exc))}")
         return 1
     state = RunState(config=config, known_gaps=known_gaps, group=group)
     hmc_config = hmc_config or HMCConfig()
@@ -1385,9 +1116,8 @@ async def main(
     print(f"Starting live integration tests at {datetime.now(UTC).isoformat()}")
     schema_version = env_var_value("HMC_SCHEMA_VERSION") or "(not set)"
     print(f"HMC_SCHEMA_VERSION={schema_version}")
-    if (
-        environment is not None
-        and not check_capability_inventory.SCHEMA_VERSION.fullmatch(schema_version)
+    if environment is not None and not capability_schema.SCHEMA_VERSION.fullmatch(
+        schema_version
     ):
         # A warning, not an exit: a run starts whatever the variable holds (#875),
         # and preflight predicts exactly that. Said here so the operator can stop
@@ -1397,68 +1127,14 @@ async def main(
             "observations will not be written"
         )
 
-    # Determine which sub-tasks to run
-    if subtask_filter is not None:
-        tasks = [subtask_filter]
-    elif group is not None:
-        tasks = SUBTASK_GROUPS.get(group, [])
-        if not tasks:
-            print(f"Unknown group {group!r}. Valid groups: {', '.join(SUBTASK_GROUPS)}")
-            return 1
-    else:
-        tasks = sorted(
-            n
-            for n in SUBTASKS
-            if n
-            not in {
-                44,
-                45,
-                46,
-                52,
-                53,
-                54,
-                55,
-                56,
-                57,
-                58,
-                59,
-                61,
-                64,
-                65,
-                66,
-                67,
-                70,
-                71,
-            }
+    try:
+        tasks, prior_paths = _prepare_selection(
+            subtask_filter, group, results_path, state=state
         )
+    except (ValueError, OSError, RuntimeError) as exc:
+        print(str(exc))
+        return 1
 
-    # Every invocation preserves its destination; only subsets borrow another arm's context.
-    prior_paths = [results_path]
-    if 66 in tasks:
-        if (
-            Path(results_path).exists()
-            or evidence.observations_path(results_path).exists()
-        ):
-            print("Existing ST66 context refused; use fresh private results")
-            return 1
-        prior_paths = []
-    elif 65 in tasks:
-        if (
-            state.artifacts.creation_memory
-            or state.creation_memory_invocation is not None
-            or Path(results_path).exists()
-            or evidence.observations_path(results_path).exists()
-        ):
-            print("Existing ST65 context refused; use fresh private results")
-            return 1
-        prior_paths = []
-    elif 58 in tasks:
-        if state.artifacts.creation_memory_layout or Path(results_path).exists():
-            print("Existing ST58 context refused; use fresh private results")
-            return 1
-        prior_paths = []
-    elif subtask_filter is not None or group is not None:
-        prior_paths.extend(["test-results-vmedia.json", "test-results-round2.json"])
     for prior in prior_paths:
         if Path(prior).exists():
             restored = _restore_artifacts_from_results(state, hmc_config, prior)
@@ -1483,7 +1159,7 @@ async def main(
                         detach_probe=detach_probe,
                     ),
                     "config": asdict(state.config),
-                    "hmc": _hmc_identity(hmc_config),
+                    "hmc": hmc_identity(hmc_config),
                     "artifacts": asdict(state.artifacts),
                     "results": state.results,
                 },
@@ -1515,7 +1191,7 @@ async def main(
             print(f"Partial results written to {results_path}")
         except (OSError, TypeError, ValueError) as exc:
             print(
-                f"⚠️  Could not write partial results: {_redact_failure_text(str(exc))}"
+                f"⚠️  Could not write partial results: {redact_failure_text(str(exc))}"
             )
         raise
     finally:
@@ -1547,5 +1223,5 @@ async def main(
         for r in state.results:
             if r["status"] == "FAIL":
                 print(f"  ST{r['subtask']} {r['tool']}")
-                print(f"    {str(_redact_failure_data(r['data']))[:200]}")
+                print(f"    {str(redact_failure_data(r['data']))[:200]}")
     return 1 if failed else 0

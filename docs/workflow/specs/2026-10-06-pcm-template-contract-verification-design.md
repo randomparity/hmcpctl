@@ -103,7 +103,7 @@ authority/role changes (operator).
 5. **ST38, arm `pcm` (opt-in).** Group `pcm: [38]`. A bare run selects every `SUBTASKS` key and
    `live_test_runner.py 38` selects it positionally, so ST38 itself SKIPs ("runs only in the
    pcm arm") unless `state.group == "pcm"`, as the profiles arm gates its system-wide steps
-   (`scripts/live_test/lpar.py`). Dispatched by
+   (`scripts/live_test/arms/lpar.py`). Dispatched by
    `scripts/live_pcm.py` (tested by `tests/scripts/test_live_pcm.py`), disclosed by a
    `_pcm_verdict` in preflight: "PCM preferences on managed system X: each of the five
    collection flags toggled, then all five restored to the pre-run read". The scenario:

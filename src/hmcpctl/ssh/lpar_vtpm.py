@@ -8,7 +8,7 @@ import shlex
 
 from ..config import HMCConfig
 from ..documents.lpar_vtpm import LparVtpmSettings, VtpmState
-from .commands import build_attribute_record, build_filter
+from ..documents.native_records import build_attribute_record, build_filter
 from .transport import HMCCLIError, run_hmc_command
 
 

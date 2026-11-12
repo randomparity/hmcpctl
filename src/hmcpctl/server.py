@@ -76,8 +76,6 @@ from .authorization.connection_scope import ConnectionScopeError
 from .authorization.dispatch_scope import dispatch_authorizer
 from .authorization.target_scope import TargetScopeError
 from .operation_maturity_middleware import OperationMaturityMiddleware
-from .operations.logical.holds import HOLD_GUARD
-from .resource_identity import install_partition_guard
 from .server_tools.catalog import PRIMARY_TOOLS, TOOL_MODULES, TOOL_SECURITY
 from .server_tools.command import (
     configure_arbitrary_command_tool,
@@ -160,8 +158,6 @@ def create_mcp(
             "here or select it with 'hmcpctl serve --access-policy NAME'."
         )
     permits, authorize = _gates(policy)
-    # The server, like the CLI, enforces ADR 0193 holds; the library installs no guard.
-    install_partition_guard(HOLD_GUARD)
     application = _create_base_mcp(ceiling_aware_instructions(permits, TOOL_SECURITY))
     for module in TOOL_MODULES:
         module.register_tools(application, permits=permits, authorize=authorize)

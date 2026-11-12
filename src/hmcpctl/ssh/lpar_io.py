@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from hmcpctl.documents.lpar_io import validate_capacity_percent
+
 from ..documents.lpar_io import LparPhysicalIO, decimal_id, drc
-from ..operations.virtualization.validation import validate_capacity_percent
 
 if TYPE_CHECKING:
-    from ..operations.lpar.assignments import SriovLogicalPortAssignment
+    from hmcpctl.documents.lpar_io import SriovLogicalPortAssignment
 
 
 def creation_io_record(

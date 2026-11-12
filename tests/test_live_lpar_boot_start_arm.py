@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_boot_start as arm
+from live_test.arms import lpar_boot_start as arm
 
 from hmcpctl.config import HMCConfig
 
@@ -84,7 +84,7 @@ def test_pre_session_config_preserves_identity_and_stricter_limit():
     bounded = arm.bounded_config(c)
     assert bounded.max_response_bytes == 262144
     assert c.max_response_bytes == 32 * 1024 * 1024
-    assert arm.serial.connection(c) == arm.serial.connection(bounded)
+    assert arm.files.connection(c) == arm.files.connection(bounded)
     assert (
         arm.bounded_config(
             c.model_copy(update={"max_response_bytes": 100})
@@ -95,7 +95,7 @@ def test_pre_session_config_preserves_identity_and_stricter_limit():
 
 def test_current_grant_and_invocation_cannot_be_restored(monkeypatch):
     p = packet()
-    monkeypatch.setattr(arm.serial, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     c = HMCConfig.from_mapping(p["candidate"]["hmc_identity"])
     w = arm.Window(p, "digest", "digest", True)
     w.check(c, w.invocation)
@@ -318,7 +318,7 @@ async def test_actual_stamp_journal_separates_acknowledgment_and_marker(
         }
     )
     h = arm.CountedHMC(arm.bounded_config(c), arm.Budget("run", p))
-    monkeypatch.setattr(arm.serial, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     h.window = arm.Window(p, "digest", "digest", True)
     e = fixture_entry()
     expected = f"[hmcpctl owner:test created:{arm.date.today().isoformat()}] [caller {p['caller_token']}]"
@@ -360,14 +360,14 @@ async def test_actual_stamp_journal_separates_acknowledgment_and_marker(
         "invocation": h.window.invocation,
         "baseline": {"system": {"SystemName": "system"}},
     }
-    arm.serial.write(path, j, fresh=True)
+    arm.files.write(path, j, fresh=True)
     try:
         if verification == "verified":
             await arm.stamp_fixture(h, p, j, path, e)
         else:
             with pytest.raises((ValueError, OSError)):
                 await arm.stamp_fixture(h, p, j, path, e)
-        stored = arm.serial.read(path)["vios_stamp"]
+        stored = arm.files.read(path)["vios_stamp"]
         assert stored["execution"] == execution
         assert stored["verification"] == verification
         assert stored["returned_description"] == (
@@ -396,7 +396,7 @@ def physical_world(monkeypatch, tmp_path):
     from hmcpctl.xmlutil import parse_feed
 
     tmp_path.chmod(0o700)
-    monkeypatch.setattr(arm.serial, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     p = packet()
     c = HMCConfig.from_mapping(
         p["candidate"]["hmc_identity"]
@@ -1064,7 +1064,7 @@ async def test_uncertain_or_changed_boot_never_restores_and_recovery_observes_re
                     Path("packet"),
                 )
     assert h.sent == {"test"} and h.closed
-    j = arm.serial.read(w.path)
+    j = arm.files.read(w.path)
     assert j["test"]["execution"] == ("unknown" if fault == "boot" else "acknowledged")
     j["session"] = {"closed": True, "local_closed": True}
     observed = {}
@@ -1117,7 +1117,7 @@ async def test_actual_creation_or_stamp_fault_forbids_delete_and_retains_named_f
                     Path("packet"),
                 )
     assert TARGET in w.entries and "delete" not in h.sent and h.closed
-    j = arm.serial.read(w.path)
+    j = arm.files.read(w.path)
     if fault == "create":
         assert j["create"]["execution"] == "unknown" and j["vios_stamp"] is None
     else:
@@ -1204,7 +1204,7 @@ async def test_pending_post_accepts_no_unregistered_path_or_query(monkeypatch, q
             )
         ),
     )
-    monkeypatch.setattr(arm.serial, "revision", lambda _: None)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     h.window = arm.Window(p, "digest", "digest", True)
     h.effect = "test"
     h.target = {"kind": "LogicalPartition", "uuid": TARGET}
@@ -1228,14 +1228,14 @@ async def test_phase_failure_or_cancellation_keeps_owned_closeout_and_original_e
     w = physical_world
     h = await w.client("preflight")
     document = {"mode": "preflight", "complete": False}
-    arm.serial.write(w.path, document, fresh=True)
+    arm.files.write(w.path, document, fresh=True)
 
     async def operation():
         raise failure
 
     with pytest.raises(type(failure)):
         await arm.phase(h, w.packet, document, w.path, operation)
-    stored = arm.serial.read(w.path)
+    stored = arm.files.read(w.path)
     assert stored["error"] == type(failure).__name__
     assert stored["session"] == {"opened": True, "closed": True, "local_closed": True}
     assert stored["transport"]["counts"][0] == 2 and not h.sent
@@ -1262,7 +1262,7 @@ async def test_actual_cli_three_phase_protocol_and_filtered_final_evidence(
     )
     packet_path = tmp_path / "packet.json"
     preflight_path = tmp_path / "preflight.json"
-    arm.serial.write(packet_path, w.packet, fresh=True)
+    arm.files.write(packet_path, w.packet, fresh=True)
     digest = hashlib.sha256(packet_path.read_bytes()).hexdigest()
     args = ["--packet", str(packet_path), "--packet-sha256", digest]
     # main owns asyncio.run: exercise it in a thread, with the real providers still fake.
@@ -1333,7 +1333,7 @@ async def test_actual_cli_three_phase_protocol_and_filtered_final_evidence(
         )
     assert reads == [8 * arm.MIB + 1]
     assert (w.path.read_bytes() == run_bytes) is (results_change is None)
-    recovered = arm.serial.read(w.path.with_name(w.path.name + ".recovery.json"))
+    recovered = arm.files.read(w.path.with_name(w.path.name + ".recovery.json"))
     assert recovered["clean"] and recovered["history_verified"]
     assert recovered["original_results_sha256"] == hashlib.sha256(run_bytes).hexdigest()
     public = live_test_evidence.render(recovered)
@@ -1447,55 +1447,55 @@ async def test_maximum_original_inventory_has_finite_physical_snapshot_and_zero_
 
 
 @pytest.mark.parametrize(
-    "maximum", [arm.serial.LIMIT, 4 * arm.serial.LIMIT, 8 * arm.serial.LIMIT]
+    "maximum", [arm.files.LIMIT, 4 * arm.files.LIMIT, 8 * arm.files.LIMIT]
 )
 def test_fixed_caps_roundtrip_private_mode_and_default_unchanged(tmp_path, maximum):
     tmp_path.chmod(0o700)
     p = tmp_path / "evidence.json"
     doc = {"complete": False, "text": "x" * (maximum // 2)}
-    arm.serial.write(p, doc, fresh=True, maximum=maximum)
+    arm.files.write(p, doc, fresh=True, maximum=maximum)
     assert p.stat().st_mode & 0o777 == 0o600
-    assert arm.serial.read(p, maximum=maximum) == doc
-    if p.stat().st_size > arm.serial.LIMIT:
+    assert arm.files.read(p, maximum=maximum) == doc
+    if p.stat().st_size > arm.files.LIMIT:
         with pytest.raises(ValueError):
-            arm.serial.read(p)
+            arm.files.read(p)
 
 
 @pytest.mark.parametrize(
     "maximum",
-    [True, 0, 2 * arm.serial.LIMIT, 32 * arm.serial.LIMIT, float(4 * arm.serial.LIMIT)],
+    [True, 0, 2 * arm.files.LIMIT, 32 * arm.files.LIMIT, float(4 * arm.files.LIMIT)],
 )
 def test_arbitrary_or_noninteger_ceiling_refused(tmp_path, maximum):
     tmp_path.chmod(0o700)
     with pytest.raises(ValueError):
-        arm.serial.private_path(tmp_path / "new", fresh=True, maximum=maximum)
+        arm.files.private_path(tmp_path / "new", fresh=True, maximum=maximum)
     with pytest.raises(ValueError):
-        arm.serial.write(tmp_path / "new", {}, fresh=True, maximum=maximum)
+        arm.files.write(tmp_path / "new", {}, fresh=True, maximum=maximum)
     assert not (tmp_path / "new").exists()
 
 
 def test_oversized_later_proof_preserves_exact_incomplete_intent(tmp_path):
     tmp_path.chmod(0o700)
     p = tmp_path / "intent.json"
-    arm.serial.write(
+    arm.files.write(
         p,
         {"complete": False, "phase": "intent"},
         fresh=True,
-        maximum=8 * arm.serial.LIMIT,
+        maximum=8 * arm.files.LIMIT,
     )
     before = p.read_bytes()
     with pytest.raises(ValueError):
-        arm.serial.write(
+        arm.files.write(
             p,
-            {"complete": True, "proof": "x" * (8 * arm.serial.LIMIT)},
-            maximum=8 * arm.serial.LIMIT,
+            {"complete": True, "proof": "x" * (8 * arm.files.LIMIT)},
+            maximum=8 * arm.files.LIMIT,
         )
     assert (
         p.read_bytes() == before
-        and arm.serial.read(p, maximum=8 * arm.serial.LIMIT)["complete"] is False
+        and arm.files.read(p, maximum=8 * arm.files.LIMIT)["complete"] is False
     )
     with pytest.raises(ValueError):
-        arm.serial.write(p, {}, fresh=True, maximum=8 * arm.serial.LIMIT)
+        arm.files.write(p, {}, fresh=True, maximum=8 * arm.files.LIMIT)
     assert p.read_bytes() == before
 
 
@@ -1506,13 +1506,13 @@ def test_read_is_physically_bounded_before_json_even_if_file_grows(
 
     tmp_path.chmod(0o700)
     p = tmp_path / "input.json"
-    arm.serial.write(p, {"complete": False}, fresh=True)
-    original_path, original_open = arm.serial.private_path, Path.open
+    arm.files.write(p, {"complete": False}, fresh=True)
+    original_path, original_open = arm.files.private_path, Path.open
 
     def grow(path, **kw):
         result = original_path(path, **kw)
         with original_open(result, "ab") as stream:
-            stream.write(b" " * (4 * arm.serial.LIMIT + 1))
+            stream.write(b" " * (4 * arm.files.LIMIT + 1))
         return result
 
     reads = []
@@ -1528,14 +1528,14 @@ def test_read_is_physically_bounded_before_json_even_if_file_grows(
 
             yield Reader()
 
-    monkeypatch.setattr(arm.serial, "private_path", grow)
+    monkeypatch.setattr(arm.files, "private_path", grow)
     monkeypatch.setattr(Path, "open", bounded_open)
     monkeypatch.setattr(
-        arm.serial.json, "loads", lambda *_: pytest.fail("JSON must not see overflow")
+        arm.files.json, "loads", lambda *_: pytest.fail("JSON must not see overflow")
     )
     with pytest.raises(ValueError, match="bound"):
-        arm.serial.read(p, maximum=4 * arm.serial.LIMIT)
-    assert reads == [4 * arm.serial.LIMIT + 1]
+        arm.files.read(p, maximum=4 * arm.files.LIMIT)
+    assert reads == [4 * arm.files.LIMIT + 1]
 
 
 def test_atomic_replace_failure_keeps_prior_intent_and_reaps_own_temp(
@@ -1543,15 +1543,15 @@ def test_atomic_replace_failure_keeps_prior_intent_and_reaps_own_temp(
 ):
     tmp_path.chmod(0o700)
     p = tmp_path / "intent.json"
-    arm.serial.write(p, {"complete": False}, fresh=True)
+    arm.files.write(p, {"complete": False}, fresh=True)
     before = p.read_bytes()
 
     def fail(*_):
         raise OSError("injected replace failure")
 
-    monkeypatch.setattr(arm.serial.os, "replace", fail)
+    monkeypatch.setattr(arm.files.os, "replace", fail)
     with pytest.raises(OSError):
-        arm.serial.write(p, {"complete": True}, maximum=4 * arm.serial.LIMIT)
+        arm.files.write(p, {"complete": True}, maximum=4 * arm.files.LIMIT)
     assert p.read_bytes() == before and list(tmp_path.glob(".st63-*")) == []
 
 
@@ -1587,8 +1587,8 @@ def test_recovery_original_overflow_refuses_before_json_credentials_or_hmc(
 ):
     tmp_path.chmod(0o700)
     path = tmp_path / "original.json"
-    arm.serial.write(path, {}, fresh=True)
-    original_path, original_open = arm.serial.private_path, Path.open
+    arm.files.write(path, {}, fresh=True)
+    original_path, original_open = arm.files.private_path, Path.open
 
     def grow():
         with original_open(path, "ab") as stream:
@@ -1602,7 +1602,7 @@ def test_recovery_original_overflow_refuses_before_json_credentials_or_hmc(
 
     if not grow_after_stat:
         grow()
-    monkeypatch.setattr(arm.serial, "private_path", checked_path)
+    monkeypatch.setattr(arm.files, "private_path", checked_path)
     monkeypatch.setattr(arm, "_json", lambda *_: pytest.fail("overflow reached JSON"))
     monkeypatch.setattr(
         arm, "load_profile", lambda: pytest.fail("overflow reached credentials")

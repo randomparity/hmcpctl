@@ -9,10 +9,11 @@ import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical import holds, store
 from hmcpctl.operations.logical.store import OperationRefused
 from hmcpctl.operations.lpar import handoff
@@ -23,7 +24,6 @@ from hmcpctl.operations.lpar.handoff import (
     prepare_handoff,
     release_handoff,
 )
-from hmcpctl.resource_identity import install_partition_guard
 
 SYS = "0000000a-0000-4000-8000-000000000000"
 LPAR = "0000000a-0000-4000-8000-0000000000aa"
@@ -72,8 +72,8 @@ class _HMC:
     async def get_vios_storage_detail(self, _uuid: str) -> dict[str, Any]:
         return {"Resource": {}}
 
-    async def _network_adapter_creation_feed(
-        self, _uuid: str, *, allow_empty: bool = False
+    async def list_adapters(
+        self, _uuid: str, adapter_type: str, *, allow_empty_network: bool = False
     ) -> list[dict[str, Any]]:
         if isinstance(self.adapters, Exception):
             raise self.adapters
@@ -88,8 +88,6 @@ def _system(monkeypatch: pytest.MonkeyPatch) -> None:
         return SYS.upper()
 
     monkeypatch.setattr(handoff, "resolve_system_uuid", resolve_system)
-    # The library leaves the hold guard unset; another module's create_mcp may have set it.
-    install_partition_guard(None)
 
 
 class _Admit:
@@ -365,3 +363,18 @@ def test_check_inputs_accepts_the_defined_combinations():
     check_inputs("prepare", True, "kdive", None)
     check_inputs("prepare", False, None, None)
     check_inputs("release", False, None, "x")
+
+
+@pytest.mark.parametrize("stage", ["resources", "adapters"])
+def test_pin_mismatch_prevents_handoff_hold(stage, monkeypatch):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    hmc = _HMC()
+    if stage == "resources":
+        monkeypatch.setattr(hmc, "list_vios", AsyncMock(side_effect=failure))
+    else:
+        hmc.adapters = failure
+    assert holds.find_hold(LPAR) is None
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        _prepare(hmc=hmc)
+    assert caught.value is failure
+    assert holds.find_hold(LPAR) is None

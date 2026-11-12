@@ -10,12 +10,14 @@ import re
 import shlex
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal, NotRequired, TypedDict, cast
 
 from defusedxml import ElementTree as ET
 
 from hmcpctl.client.core import HMCClient
-from hmcpctl.config import build_config
+from hmcpctl.config import HMCConfig, build_config
 from hmcpctl.resource_identity import is_uuid, resolve_vios_uuid
 from hmcpctl.ssh.commands import parse_hmc_result_rows
 from hmcpctl.ssh.io_inventory import list_dedicated_pcie_slot_rows
@@ -27,7 +29,7 @@ from hmcpctl.ssh.sriov import (
 )
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import ATOM_NS, parse_feed
-from live_test.storage_lifecycle import volume_listing
+from live_test.arms.storage_lifecycle import volume_listing
 
 # Each table has exact fields and a structural identity; row order is immaterial.
 TABLES = {
@@ -60,7 +62,25 @@ TABLES = {
 }
 
 
-def validate_backing(storage, target):
+class BaselineScope(TypedDict):
+    host: str
+    system: str
+    vios_ids: list[int]
+
+
+class BaselineSnapshot(TypedDict):
+    version: Literal[1]
+    scope: BaselineScope
+    tables: dict[str, list[dict[str, str]]]
+
+
+class _ResourceEntry(TypedDict):
+    ResourceType: str
+    Resource: dict[str, object]
+    UUID: NotRequired[object]
+
+
+def validate_backing(storage: object, target: object) -> None:
     """A present backing needs one known resource and its local identity."""
     if storage == {} and isinstance(target, dict):
         kinds = {key for key in target if not key.startswith("@")}
@@ -84,7 +104,7 @@ def validate_backing(storage, target):
         raise ValueError("VIOS mapping backing has no identity")
 
 
-def validate(document):
+def validate(document: object) -> BaselineSnapshot:
     """Reject partial documents before order-only canonicalization."""
     if (
         not isinstance(document, dict)
@@ -112,11 +132,15 @@ def validate(document):
     if not isinstance(tables, dict) or set(tables) != set(TABLES):
         raise ValueError("snapshot tables are incomplete")
     result = _normalize_tables(tables)
-    _validate_relationships(scope, result)
-    return {"version": 1, "scope": dict(scope, vios_ids=sorted(ids)), "tables": result}
+    _validate_relationships(cast(BaselineScope, scope), result)
+    return {
+        "version": 1,
+        "scope": cast(BaselineScope, dict(scope, vios_ids=sorted(ids))),
+        "tables": result,
+    }
 
 
-def _normalize_tables(tables):
+def _normalize_tables(tables: Mapping[str, object]) -> dict[str, list[dict[str, str]]]:
     """Validate each row and canonicalize table order without changing the input."""
     result = {}
     for name, (fields, keys) in TABLES.items():
@@ -162,7 +186,9 @@ def _normalize_tables(tables):
     return result
 
 
-def _validate_relationships(scope, result):
+def _validate_relationships(
+    scope: BaselineScope, result: Mapping[str, list[dict[str, str]]]
+) -> None:
     """Reject incomplete or out-of-scope relationships between normalized tables."""
     ids = scope["vios_ids"]
     if (
@@ -230,7 +256,7 @@ def _validate_relationships(scope, result):
             raise ValueError("VIOS row lies outside the selected scope")
 
 
-async def read_resources(hmc, path, kind):
+async def read_resources(hmc: HMCClient, path: str, kind: str) -> list[_ResourceEntry]:
     """Do not let permissive list projections turn absent evidence into []."""
     raw = await hmc._get(path, kind, include_schema_version=False)
     if not raw.strip():
@@ -267,10 +293,10 @@ async def read_resources(hmc, path, kind):
         for entry in entries
     ):
         raise ValueError("REST read has incomplete resources")
-    return entries
+    return cast(list[_ResourceEntry], entries)
 
 
-def mapping_rows(resource, vios_id):
+def mapping_rows(resource: Mapping[str, object], vios_id: str) -> list[dict[str, str]]:
     collection = resource.get("VirtualSCSIMappings")
     if not isinstance(collection, dict):
         raise ValueError("VIOS read has no mapping container")  # noqa: TRY004 — invalid external document
@@ -331,7 +357,7 @@ def mapping_rows(resource, vios_id):
     return rows
 
 
-def volume_rows(raw, group):
+def volume_rows(raw: str, group: str) -> list[dict[str, str]]:
     lines = [line.split() for line in raw.splitlines() if line.strip()]
     if (
         len(lines) < 2
@@ -358,7 +384,12 @@ def volume_rows(raw, group):
     return rows
 
 
-async def capture_vios(config, system, partitions, tables):
+async def capture_vios(
+    config: HMCConfig,
+    system: str,
+    partitions: Sequence[Mapping[str, str]],
+    tables: dict[str, list[dict[str, str]]],
+) -> None:
     if (
         system != system.strip()
         or is_uuid(system)
@@ -403,7 +434,9 @@ async def capture_vios(config, system, partitions, tables):
                 )
 
 
-async def capture(config, system, vios_ids):
+async def capture(
+    config: HMCConfig, system: str, vios_ids: list[int]
+) -> BaselineSnapshot:
     if (
         not isinstance(system, str)
         or not system.strip()
@@ -415,7 +448,7 @@ async def capture(config, system, vios_ids):
         vios_ids
     ):
         raise ValueError("VIOS IDs must be distinct positive integers")
-    tables = {name: [] for name in TABLES}
+    tables: dict[str, list[dict[str, str]]] = {name: [] for name in TABLES}
     for name, resource in (("system", "sys"), ("partitions", "lpar")):
         fields = TABLES[name][0].split(",")
         command = f"lssyscfg -r {resource} -m {shlex.quote(system)} -F {','.join(fields)} --header"
@@ -456,7 +489,7 @@ async def capture(config, system, vios_ids):
     )
 
 
-def write_snapshot(path, document):
+def write_snapshot(path: Path, document: object) -> None:
     data = json.dumps(validate(document), indent=2) + "\n"
     descriptor, temporary = tempfile.mkstemp(prefix=".baseline-", dir=path.parent)
     try:
@@ -469,14 +502,14 @@ def write_snapshot(path, document):
         Path(temporary).unlink()
 
 
-def _unique_object(pairs):
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result = dict(pairs)
     if len(result) != len(pairs):
         raise ValueError("duplicate JSON keys")
     return result
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     read = commands.add_parser("capture")

@@ -14,18 +14,23 @@ import binascii
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from ...errors import HMCError
+from hmcpctl.operations.lpar.decommission.core import resolve_target_lpar
+from hmcpctl.operations.lpar.workflow_contract import PARTITION_LEDGER
+
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import resolve_system_uuid
 from ..inventory.composite import optional_int, optional_text
 from ..logical import holds, store
 from ..logical.holds import Hold
-from .decommission import resolve_target_lpar
 from .inspect import Admit, Resources, SectionSource, read_resources
 from .ownership import lpar_ownership_entry
-from .provision_operation import PARTITION_LEDGER
-from .reconfigure_network import current_adapters
+from .reconfiguration.network import current_adapters
+
+if TYPE_CHECKING:
+    from hmcpctl.client.core import HMCClient
+
 
 ADAPTERS_TOOL = "hmc_list_adapters"
 _MAX_DETAIL = 500
@@ -181,7 +186,9 @@ def _view(hold: Hold | None, agent_id: str, *, reveal: bool) -> HoldView | None:
     )
 
 
-async def _resolve(hmc: Any, system: str, lpar: str) -> tuple[str, dict[str, Any]]:
+async def _resolve(
+    hmc: HMCClient, system: str, lpar: str
+) -> tuple[str, dict[str, Any]]:
     system_uuid = (await resolve_system_uuid(hmc, system)).lower()
     return system_uuid, await resolve_target_lpar(hmc, system_uuid, lpar)
 
@@ -191,7 +198,7 @@ def _failure(exc: Exception) -> str:
 
 
 async def _adapters(
-    hmc: Any, admit: Admit, system: str, lpar: str, lpar_uuid: str
+    hmc: HMCClient, admit: Admit, system: str, lpar: str, lpar_uuid: str
 ) -> Adapters:
     """Admitted with the caller's selectors, as inspect's refcodes are; read by UUID."""
     denial = admit(ADAPTERS_TOOL, {"lpar": lpar, "managed_system": system})
@@ -201,6 +208,8 @@ async def _adapters(
         )
     try:
         found = await current_adapters(hmc, lpar_uuid)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError) as exc:
         return Adapters(SectionSource("unavailable", ADAPTERS_TOOL, _failure(exc)), [])
     keep = ("mac", "port_vlan_id", "slot")
@@ -274,7 +283,7 @@ def read_declared(system_uuid: str, partition_uuid: str) -> Declared:
 
 
 async def prepare_handoff(
-    hmc: Any,
+    hmc: HMCClient,
     *,
     connection: str,
     agent_id: str,
@@ -328,7 +337,7 @@ async def prepare_handoff(
 
 
 async def release_handoff(
-    hmc: Any, *, agent_id: str, system: str, lpar: str, hold_id: str | None
+    hmc: HMCClient, *, agent_id: str, system: str, lpar: str, hold_id: str | None
 ) -> HandoffResult:
     """Drop the partition's hold; writes nothing to the HMC (ADR 0193 Decision 1)."""
     system_uuid, entry = await _resolve(hmc, system, lpar)

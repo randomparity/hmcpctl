@@ -20,11 +20,8 @@ from hmcpctl import cli
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
-from live_test import (  # noqa: E402
-    observation,
-    runner,
-    vmedia,
-)
+from live_test import http_fixture, observation, runner  # noqa: E402
+from live_test.arms import vmedia  # noqa: E402
 
 SYSTEM = "sys-A"
 LPAR = "sys-A-lp3"
@@ -1165,7 +1162,7 @@ def test_iso_http_fixture_serves_only_the_iso_once_and_releases_socket(
         iso_advertised_host="127.0.0.1",
         iso_http_port=0,
     )
-    fixture = vmedia.IsoHttpServer()
+    fixture = http_fixture.IsoHttpServer()
     try:
         fixture.start(config)
         first = fixture._server
@@ -1220,7 +1217,7 @@ def test_iso_http_fixture_releases_resources_after_thread_start_failure(
     stage,
     error_type,
 ):
-    fixture = vmedia.IsoHttpServer()
+    fixture = http_fixture.IsoHttpServer()
     config = replace(
         live_config.LiveTestConfig(),
         iso_path=str(tmp_path / "fixture.iso"),
@@ -1228,8 +1225,8 @@ def test_iso_http_fixture_releases_resources_after_thread_start_failure(
         iso_http_port=0,
     )
     servers, workers, delayed_starts, serving = [], [], [], []
-    real_server = vmedia.http.server.HTTPServer
-    real_thread = vmedia.threading.Thread
+    real_server = http_fixture.http.server.HTTPServer
+    real_thread = http_fixture.threading.Thread
 
     def server(*args, **kwargs):
         raw = real_server(*args, **kwargs)
@@ -1260,9 +1257,9 @@ def test_iso_http_fixture_releases_resources_after_thread_start_failure(
         monkeypatch.setattr(worker, "start", fail_start)
         return worker
 
-    monkeypatch.setattr(vmedia, "_allow_iso_host", lambda _config: None)
-    monkeypatch.setattr(vmedia.http.server, "HTTPServer", server)
-    monkeypatch.setattr(vmedia.threading, "Thread", thread)
+    monkeypatch.setattr(http_fixture, "_allow_iso_host", lambda _config: None)
+    monkeypatch.setattr(http_fixture.http.server, "HTTPServer", server)
+    monkeypatch.setattr(http_fixture.threading, "Thread", thread)
     try:
         with pytest.raises(error_type, match="thread startup refused"):
             fixture.start(config)

@@ -323,7 +323,7 @@ def processor_row(dedicated=False):
 
 
 def snapshot(dedicated=False):
-    from hmcpctl.operations.lpar.processors import _snapshot
+    from hmcpctl.operations.lpar.processors.current import _snapshot
 
     return _snapshot(processor_entry(dedicated), LPAR_UUID, processor_row(dedicated))
 
@@ -334,7 +334,7 @@ def snapshot(dedicated=False):
 )
 def test_targets_use_current_by_mode(dedicated, operation, quantity, target):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     expected = _targets(
         snapshot(dedicated),
@@ -351,7 +351,7 @@ def test_targets_use_current_by_mode(dedicated, operation, quantity, target):
 )
 def test_targets_decimal_entitlement(operation, amount, target):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     expected = _targets(
         snapshot(),
@@ -382,7 +382,7 @@ def test_targets_decimal_entitlement(operation, amount, target):
 )
 def test_capacity_and_ratio_refusals(values, field, value):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     system = processor_system()
     if field:
@@ -396,7 +396,7 @@ def processor_boundary(monkeypatch):
     from copy import deepcopy
     from types import SimpleNamespace
 
-    from hmcpctl.operations.lpar import processors
+    from hmcpctl.operations.lpar.processors import current as processors
 
     b = SimpleNamespace(
         before=processor_entry(),
@@ -442,7 +442,7 @@ def processor_boundary(monkeypatch):
 
 async def cpu_change(b, **values):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import change_lpar_processors
+    from hmcpctl.operations.lpar.processors.current import change_lpar_processors
 
     return await change_lpar_processors(
         b.hmc, "lpar-R1", LparProcessorChange(**values), system_name_or_uuid="sys-R1"
@@ -535,7 +535,7 @@ async def test_zero_noop_is_authorized_and_rechecked(
 )
 def test_zero_and_coupled_reset(state, values, reset):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     before = snapshot()
     before.update(state=state, rmc="active")
@@ -617,7 +617,7 @@ async def test_profile_and_deferred_warnings(processor_boundary):
     ],
 )
 def test_admission_native_evidence_refuses(field, value):
-    from hmcpctl.operations.lpar.processors import _snapshot
+    from hmcpctl.operations.lpar.processors.current import _snapshot
 
     row = processor_row()
     row[field] = value
@@ -640,7 +640,7 @@ def test_admission_native_evidence_refuses(field, value):
 )
 def test_admission_running_contexts(kind, rmc, capability, force, accepted):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     before = snapshot()
     before.update(
@@ -663,7 +663,7 @@ def test_independent_postconditions(damage):
     from copy import deepcopy
 
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _postconditions, _targets
+    from hmcpctl.operations.lpar.processors.current import _postconditions, _targets
 
     before = snapshot()
     before.update(state="running", rmc="active")
@@ -714,7 +714,7 @@ def test_zero_complete_reset_required(remaining):
     from copy import deepcopy
 
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _postconditions, _targets
+    from hmcpctl.operations.lpar.processors.current import _postconditions, _targets
 
     before = snapshot()
     expected = _targets(
@@ -840,7 +840,7 @@ async def test_ownership_precheck_overflow(
 @pytest.mark.parametrize("dedicated", [True, False])
 def test_targets_zero_unallocated_envelope_can_use_configured_bounds(dedicated):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     before = snapshot(dedicated)
     for key in list(before):
@@ -858,7 +858,7 @@ def test_targets_zero_unallocated_envelope_can_use_configured_bounds(dedicated):
 @pytest.mark.parametrize("quantity", ["processors", "processing_units"])
 def test_targets_subtraction_beyond_current_refuses(quantity):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     with pytest.raises(ValueError, match="subtraction"):
         _targets(
@@ -878,7 +878,7 @@ def test_targets_subtraction_beyond_current_refuses(quantity):
 )
 def test_capacity_dedicated_limits(field, value):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     system = processor_system()
     system["Resource"]["AssociatedSystemProcessorConfiguration"][field] = value
@@ -960,7 +960,7 @@ async def test_ownership_override_is_audited_and_skips_only_description(
     from unittest.mock import MagicMock
 
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import change_lpar_processors
+    from hmcpctl.operations.lpar.processors.current import change_lpar_processors
 
     b = processor_boundary
     audit = MagicMock()
@@ -1082,7 +1082,7 @@ async def test_independent_equivalent_decimal_spelling_is_unchanged(
 
 
 def test_independent_zero_units_have_one_canonical_spelling():
-    from hmcpctl.operations.lpar.processors import _snapshot
+    from hmcpctl.operations.lpar.processors.current import _snapshot
 
     entry, row = processor_entry(), processor_row()
     cpu = entry["Resource"]["PartitionProcessorConfiguration"][
@@ -1144,7 +1144,7 @@ def test_independent_zero_units_have_one_canonical_spelling():
 def test_numeric_representation_before_conversion(value, whole, accepted):
     import json
 
-    from hmcpctl.operations.lpar.processors import _number
+    from hmcpctl.operations.lpar.processors.current import _number
 
     if not accepted:
         with pytest.raises(ValueError):
@@ -1309,7 +1309,7 @@ def test_numeric_representation_result_budget_and_guard():
     import json
 
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _result, _snapshot, _targets
+    from hmcpctl.operations.lpar.processors.current import _result, _snapshot, _targets
 
     entry = processor_entry()
     entry["Resource"]["PartitionMemoryConfiguration"].update(
@@ -1360,7 +1360,7 @@ def test_numeric_representation_arithmetic_is_exact_and_local():
     from decimal import getcontext
 
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     before, system = large_processor_capacity()
     old_precision = getcontext().prec
@@ -1379,7 +1379,7 @@ def test_numeric_representation_respects_integer_json_limit():
     code = """
 import json
 from hmcpctl.documents.lpar_processors import LparProcessorChange
-from hmcpctl.operations.lpar.processors import _number
+from hmcpctl.operations.lpar.processors.current import _number
 assert len(json.dumps(_number('1e639', 'count', whole=True))) == 640
 for call in [lambda: _number('1e640', 'count', whole=True),
              lambda: LparProcessorChange(operation='add', processors=10**640)]:
@@ -1401,7 +1401,7 @@ for call in [lambda: _number('1e640', 'count', whole=True),
 @pytest.mark.parametrize("constraint", ["floor", "capacity"])
 def test_numeric_representation_arithmetic_constraints(constraint):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _targets
+    from hmcpctl.operations.lpar.processors.current import _targets
 
     before, system = large_processor_capacity()
     if constraint == "floor":
@@ -1422,7 +1422,7 @@ def test_numeric_representation_arithmetic_constraints(constraint):
 
 @pytest.mark.parametrize("site", ["current", "pending", "count-limit", "os-limit"])
 def test_numeric_representation_dedicated_readers(site):
-    from hmcpctl.operations.lpar.processors import _capacity, _snapshot
+    from hmcpctl.operations.lpar.processors.current import _capacity, _snapshot
 
     entry, row, system = processor_entry(True), processor_row(True), processor_system()
     if site in ("current", "pending"):
@@ -1451,7 +1451,7 @@ def test_numeric_representation_dedicated_readers(site):
 )
 def test_numeric_representation_result_rechecks_observations(field, value):
     from hmcpctl.documents.lpar_processors import LparProcessorChange
-    from hmcpctl.operations.lpar.processors import _result, _targets
+    from hmcpctl.operations.lpar.processors.current import _result, _targets
 
     before = snapshot()
     expected = _targets(
@@ -1466,7 +1466,7 @@ def test_numeric_representation_result_rechecks_observations(field, value):
 def test_numeric_representation_precedes_inherited_snapshot(monkeypatch, site):
     from unittest.mock import Mock
 
-    from hmcpctl.operations.lpar import processors
+    from hmcpctl.operations.lpar.processors import current as processors
 
     entry = processor_entry()
     resource = entry["Resource"]
@@ -1480,8 +1480,8 @@ def test_numeric_representation_precedes_inherited_snapshot(monkeypatch, site):
         ]
         field = "CurrentProcessingUnits"
     container[field] = "0" * 1057 + container[field]
-    inherited = Mock(wraps=processors.memory._snapshot)
-    monkeypatch.setattr(processors.memory, "_snapshot", inherited)
+    inherited = Mock(wraps=processors.observation.partition_snapshot)
+    monkeypatch.setattr(processors.observation, "partition_snapshot", inherited)
     with pytest.raises(ValueError):
         processors._snapshot(entry, LPAR_UUID, processor_row())
     inherited.assert_not_called()
@@ -1489,7 +1489,7 @@ def test_numeric_representation_precedes_inherited_snapshot(monkeypatch, site):
 
 @pytest.mark.parametrize("value,whole", [("1.001", False), ("1.5", True)])
 def test_numeric_representation_never_rounds(value, whole):
-    from hmcpctl.operations.lpar.processors import _number
+    from hmcpctl.operations.lpar.processors.current import _number
 
     with pytest.raises(ValueError):
         _number(value, "quantity", whole=whole)
@@ -1686,7 +1686,7 @@ async def test_independent_zero_envelope_running_refuses(processor_boundary, ded
 
 @pytest.mark.parametrize("guard", ["zero-target", "running", "reset"])
 def test_independent_zero_envelope_postcondition_guards(processor_boundary, guard):
-    from hmcpctl.operations.lpar.processors import _postconditions, _snapshot
+    from hmcpctl.operations.lpar.processors.current import _postconditions, _snapshot
 
     b = processor_boundary
     _, after_cpu = zero_processor_boundary(b, True)
@@ -1708,3 +1708,110 @@ def test_independent_zero_envelope_postcondition_guards(processor_boundary, guar
     before = _snapshot(b.before, LPAR_UUID, b.row)
     after = _snapshot(b.after, LPAR_UUID, b.after_row)
     assert not _postconditions(before, after, expected)
+
+
+@pytest.mark.parametrize("dedicated", [False, True])
+def test_location_stays_typed_until_result_serialization(dedicated):
+    import json
+    from dataclasses import asdict
+
+    from hmcpctl.documents.lpar_processors import LparProcessorChange
+    from hmcpctl.operations.lpar.processors.current import _result, _targets
+    from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+
+    before = snapshot(dedicated)
+    location = before["change_location"]
+    assert isinstance(location, ChangeLocation)
+    expected = _targets(
+        before, LparProcessorChange(operation="add", processors=0), processor_system()
+    )
+    result = _result(before, before, expected, "noop")
+    assert result["change_location"] == asdict(location)
+    assert result["before"]["change_location"] == asdict(location)
+    assert result["after"]["change_location"] == asdict(location)
+    assert ("current_processing_units" in before) is not dedicated
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["LogicalPartition", "VirtualIOServer"])
+@pytest.mark.parametrize("stage", ["lpar_feed", "vios_feed", "detail"])
+@pytest.mark.parametrize("uncertain", [False, True])
+@pytest.mark.parametrize("identity_failure", [False, True])
+async def test_processor_quantity_tls_readback_keeps_uncertainty_and_stops(
+    processor_boundary, kind, stage, uncertain, identity_failure
+):
+    from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
+
+    b = processor_boundary
+    if kind == "VirtualIOServer":
+        for entry in (b.before, b.after):
+            entry["Resource"]["PartitionType"] = "Virtual IO Server"
+        b.hmc.list_logical_partitions.return_value = []
+        b.hmc.list_vios.return_value = [b.before]
+    original_write = b.write.side_effect
+
+    async def submit(*args, **kwargs):
+        await original_write(*args, **kwargs)
+        if uncertain:
+            raise HMCError("submission uncertain")
+
+    b.write.side_effect = submit
+    reader = (
+        b.hmc.get_vios if kind == "VirtualIOServer" else b.hmc.get_logical_partition
+    )
+    methods = [
+        b.write,
+        b.read,
+        b.hmc.get_managed_system,
+        b.hmc.list_logical_partitions,
+        b.hmc.list_vios,
+        b.hmc.get_logical_partition,
+        b.hmc.get_vios,
+    ]
+    stopped = None
+
+    def fail():
+        nonlocal stopped
+        stopped = [method.await_count for method in methods]
+        raise (
+            HMCTLSFingerprintError("private-certificate-detail")
+            if identity_failure
+            else HMCError("ordinary read unavailable")
+        )
+
+    if stage == "detail":
+        original = reader.side_effect
+
+        async def read(*args, **kwargs):
+            if b.changed:
+                fail()
+            return await original(*args, **kwargs)
+
+        reader.side_effect = read
+    else:
+        feed = (
+            b.hmc.list_logical_partitions if stage == "lpar_feed" else b.hmc.list_vios
+        )
+
+        async def inventory(*args, **kwargs):
+            if b.changed:
+                fail()
+            return feed.return_value
+
+        feed.side_effect = inventory
+    result = await cpu_change(b, operation="add", processing_units="0.10")
+    expected_error = (
+        TLS_OBSERVATION_ABORTED if identity_failure else "ordinary read unavailable"
+    )
+    assert expected_error in result["warnings"]
+    assert (TLS_OBSERVATION_ABORTED in result["warnings"]) is identity_failure
+    assert result["outcome"] == "unverified" and result["workflow_completed"] is False
+    assert (
+        result["after"] is None
+        and result["before"]["current_processing_units"] == "0.50"
+    )
+    assert result["submission_error"] == ("submission uncertain" if uncertain else None)
+    assert "private-certificate-detail" not in str(result)
+    b.write.assert_awaited_once()
+    assert stopped is not None and stopped == [method.await_count for method in methods]

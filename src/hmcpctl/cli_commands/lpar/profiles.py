@@ -8,19 +8,11 @@ from typing import Annotated
 import typer
 from rich.markup import escape
 
-from ...client.client_profiles import PartitionKind
-from ...documents.boot import select_boot_string
-from ...documents.partition_profile import ProfilePatch
-from ...operations.lpar.boot_order import (
-    clear_lpar_boot_order,
-    read_lpar_boot_order,
-    set_lpar_boot_order,
-)
-from ...operations.lpar.profile_artifacts import (
+from hmcpctl.operations.lpar.profiles.artifacts import (
     delete_backup_profile_artifact,
     list_backup_profile_artifacts,
 )
-from ...operations.lpar.profiles import (
+from hmcpctl.operations.lpar.profiles.core import (
     PartitionProfileOutcome,
     delete_partition_profile,
     list_partition_profiles,
@@ -28,6 +20,15 @@ from ...operations.lpar.profiles import (
     save_current_partition_profile,
     set_default_partition_profile,
     update_partition_profile,
+)
+
+from ...client.client_profiles import PartitionKind
+from ...documents.boot import select_boot_string
+from ...documents.partition_profile import ProfilePatch
+from ...operations.lpar.boot_order import (
+    clear_lpar_boot_order,
+    read_lpar_boot_order,
+    set_lpar_boot_order,
 )
 from ..output import console, print_json, terminal_field
 from ..runtime import with_client
@@ -208,7 +209,10 @@ def lpars_list_partition_profiles(
     """List complete bounded saved profiles,including names,fields and opaque ETags."""
     result = with_client(
         lambda hmc: list_partition_profiles(
-            hmc, system_name, lpar_name_or_uuid, partition_type=_profile_kind(vios)
+            hmc=hmc,
+            system_name_or_uuid=system_name,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            partition_type=_profile_kind(vios),
         )
     )
     print_json(asdict(result))
@@ -230,10 +234,10 @@ def lpars_read_partition_profile(
     """Read one contained saved profile;connection selection uses the global --profile."""
     result = with_client(
         lambda hmc: read_partition_profile(
-            hmc,
-            system_name,
-            lpar_name_or_uuid,
-            profile_selector,
+            hmc=hmc,
+            system_name_or_uuid=system_name,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
             partition_type=_profile_kind(vios),
         )
     )
@@ -286,12 +290,12 @@ def lpars_update_partition_profile(
         ) from error
     result = with_client(
         lambda hmc: update_partition_profile(
-            hmc,
-            system_name,
-            lpar_name_or_uuid,
-            profile_selector,
-            expected_etag,
-            typed,
+            hmc=hmc,
+            system_name_or_uuid=system_name,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
+            expected_etag=expected_etag,
+            patch=typed,
             partition_type=_profile_kind(vios),
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,
@@ -366,10 +370,10 @@ def lpars_save_current_partition_profile(
     """
     result = with_client(
         lambda hmc: save_current_partition_profile(
-            hmc,
-            system_name,
-            lpar_name_or_uuid,
-            name,
+            hmc=hmc,
+            system_name_or_uuid=system_name,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            name=name,
             partition_type=_profile_kind(vios),
             overwrite=overwrite,
             expected_etag=expected_etag,
@@ -420,10 +424,10 @@ def lpars_set_default_partition_profile(
     """Select a contained default profile and verify native job/readback results."""
     result = with_client(
         lambda hmc: set_default_partition_profile(
-            hmc,
-            system_name,
-            lpar_name_or_uuid,
-            profile_selector,
+            hmc=hmc,
+            system_name_or_uuid=system_name,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
             partition_type=_profile_kind(vios),
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,
@@ -467,11 +471,11 @@ def lpars_delete_partition_profile(
     """Delete only unprotected profiles with an empty system-profile inventory."""
     result = with_client(
         lambda hmc: delete_partition_profile(
-            hmc,
-            system_name,
-            lpar_name_or_uuid,
-            profile_selector,
-            expected_etag,
+            hmc=hmc,
+            system_name_or_uuid=system_name,
+            lpar_name_or_uuid=lpar_name_or_uuid,
+            profile_selector=profile_selector,
+            expected_etag=expected_etag,
             partition_type=_profile_kind(vios),
             exclusive_writer_window=exclusive_writer_window,
             ownership_override=ownership_override,

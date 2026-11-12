@@ -207,9 +207,7 @@ def submit(
                 )
         if run:
             _start_worker(operation_id, body, continuation, execution_classifiers)
-    join(operation_id, wait_seconds)
-    with store.session() as conn:
-        return store.read_record(conn, operation_id)
+    return wait_for_record(operation_id, wait_seconds)
 
 
 def _admit_new(
@@ -361,6 +359,13 @@ def join(operation_id: str, timeout: float | None) -> None:
         joined = thread
 
 
+def wait_for_record(operation_id: str, timeout: float | None) -> OperationRecord:
+    """Wait for this process's worker, then read its latest persisted record."""
+    join(operation_id, timeout)
+    with store.session() as conn:
+        return store.read_record(conn, operation_id)
+
+
 def _work(
     operation_id: str,
     body: Body,
@@ -497,6 +502,7 @@ class OperationContext:
         self.operation_id: str = row["operation_id"]
         self.agent_id: str = row["agent_id"]
         self.connection: str = row["connection"]
+        self.host: str = row["host"]
         self.continuation = continuation
         self.arguments: Mapping[str, Any] = json.loads(row["request_json"])["arguments"]
         # The result an earlier run stored, which a body may extend rather than replace.

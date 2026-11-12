@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.profile_artifacts import (
+from hmcpctl.operations.lpar.profiles.artifacts import (
     delete_backup_profile_artifact,
     list_backup_profile_artifacts,
 )

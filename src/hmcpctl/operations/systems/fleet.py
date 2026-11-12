@@ -10,7 +10,7 @@ from typing import Any
 from hmcpctl.client.client_resolution import summary_for, system_operating
 from hmcpctl.client.core import HMCClient
 from hmcpctl.discovery_limits import MAX_PARENT_DISCOVERY_SYSTEMS
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.resource_identity import is_uuid
 
 _logger = logging.getLogger(__name__)
@@ -121,6 +121,8 @@ async def _stopped_operating(hmc: HMCClient, uuid: str) -> UnreadableSystem | No
     """The record for a system that left `operating` after the inventory read."""
     try:
         summaries = await hmc.list_system_summaries()
+    except HMCTLSFingerprintError:
+        raise
     except HMCError:
         return None
     for summary in summaries:
@@ -176,6 +178,8 @@ async def _read_each_system(
                     for entry in rows
                 )
                 continue
+            except HMCTLSFingerprintError:
+                raise
             except HMCError:
                 skipped = await _stopped_operating(hmc, system["UUID"])
                 if skipped is None:
@@ -232,6 +236,8 @@ async def _read_quick_all(
     """
     try:
         items = await hmc.list_quick_all(resource_type)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         cause = (
             f"HTTP {exc.status_code}"

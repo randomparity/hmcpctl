@@ -6,7 +6,7 @@ shell *word*; the HMC splits the record itself afterwards, so quoting does
 nothing about the record's own delimiters.  A caller value containing ``,`` or
 ``=`` therefore used to add or override attributes the caller was never given.
 
-:func:`hmcpctl.ssh.commands.build_attribute_record` owns the record grammar.
+:func:`hmcpctl.documents.native_records.build_attribute_record` owns the record grammar.
 These tests pin three things: the grammar itself, a per-site refusal for every
 function that builds a record, and the coupling — a new ``-i`` site that skips
 the builder fails here rather than waiting for a reviewer.
@@ -22,12 +22,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hmcpctl.config import HMCConfig
+from hmcpctl.documents.native_records import build_attribute_record, build_filter
 from hmcpctl.ssh import io_inventory, sriov, vnic
 from hmcpctl.ssh import profiles as ssh_profiles
-from hmcpctl.ssh.commands import (
-    build_attribute_record,
-    build_filter,
-)
 from hmcpctl.ssh.description_validation import validate_lpar_description
 from hmcpctl.ssh.io_inventory import list_fc_ports
 from hmcpctl.ssh.lpar import create_lpar_via_cli
@@ -703,13 +700,46 @@ def _unguarded_i_values(
 ) -> list[str]:
     # C09's source-qualified two-cell CSV is a distinct fixed dialect, never a
     # generic escape from the shared scalar grammar or a function-name whitelist.
+    if (source_path, func.name) == (
+        _REPO_ROOT / "scripts/live_test/arms/vios_boot_source.py",
+        "_native",
+    ):
+        tree = ast.parse(source_path.read_text())
+        helper = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_record"
+        )
+        returns = [
+            node.value for node in ast.walk(helper) if isinstance(node, ast.Return)
+        ]
+        if not returns or any(not _is_builder_call(value) for value in returns):
+            return ["VIOS creation helper does not return the shared builder record"]
+        problems = []
+        for literal in _selected_literals(func, _is_an_i_record_literal):
+            # Creation uses scalar attributes; ordered boot uses its fixed CSV dialect.
+            builder = (
+                "_record"
+                if isinstance(literal, ast.JoinedStr)
+                and _static_text(literal.values[0]).startswith("mksyscfg ")
+                else "encode_boot_record"
+            )
+            problems.extend(
+                _flag_payload_problems(
+                    literal, _builder_bound_names(func, builder), "-i", builder
+                )
+            )
+        return problems
     builder = BUILDER_NAME
     if (source_path, func.name) in {
         (
             _REPO_ROOT / "src/hmcpctl/operations/vios/boot_order.py",
             "set_vios_boot_order",
         ),
-        (_REPO_ROOT / "scripts/live_test/lpar_boot_start.py", "admit_boot_payloads"),
+        (
+            _REPO_ROOT / "scripts/live_test/arms/lpar_boot_start.py",
+            "admit_boot_payloads",
+        ),
     }:
         builder = "_encode_boot_record"
     return _unguarded_payloads_for(func, _is_an_i_record_literal, "-i", builder)
@@ -721,7 +751,7 @@ def _unguarded_a_values(
     """Trace the vNIC preflight helper's returned record through the same builder."""
     builder = BUILDER_NAME
     vnic_source = _REPO_ROOT / "src/hmcpctl/ssh/vnic.py"
-    harness = _REPO_ROOT / "scripts/live_test/vnic_creation_policy.py"
+    harness = _REPO_ROOT / "scripts/live_test/arms/vnic_creation_policy.py"
     helpers = {
         (vnic_source, "add_vnic_backing"): "build_vnic_add_attributes",
         (vnic_source, "update_vnic_slot_policy"): "build_vnic_update_attributes",
@@ -1147,7 +1177,7 @@ def test_vios_csv_encoder_does_not_exempt_hoisted_commands():
 
 
 def test_st68_size_admission_uses_only_the_actual_fixed_encoder_at_exact_site():
-    path = _REPO_ROOT / "scripts/live_test/lpar_boot_start.py"
+    path = _REPO_ROOT / "scripts/live_test/arms/lpar_boot_start.py"
     tree = ast.parse(path.read_text())
     imports = [
         n
@@ -1203,7 +1233,7 @@ def test_nontrailing_opt_in_keeps_default_closed():
 
 @pytest.mark.parametrize("site", [0, 1])
 def test_fixture_record_sites_independently_require_builder(site):
-    path = _REPO_ROOT / "scripts/live_test/vnic_creation_policy.py"
+    path = _REPO_ROOT / "scripts/live_test/arms/vnic_creation_policy.py"
     tree = ast.parse(path.read_text())
     function = next(
         node
@@ -1218,3 +1248,48 @@ def test_fixture_record_sites_independently_require_builder(site):
     assert len(records) == 2
     records[site].value = ast.Constant("name=unguarded")
     assert _unguarded_i_values(function)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "none",
+        "creation-bypass",
+        "boot-bypass",
+        "creation-dialect",
+        "helper-bypass",
+        "wrong-owner",
+    ],
+)
+def test_vios_source_records_trace_each_dialect_and_the_creation_helper(
+    tmp_path, monkeypatch, fault
+):
+    relative = "scripts/live_test/arms/vios_boot_source.py"
+    source = (_REPO_ROOT / relative).read_text()
+    if fault == "creation-bypass":
+        source = source.replace('_record(p["fixture"])', 'p["fixture"]')
+    elif fault == "boot-bypass":
+        source = source.replace(
+            'encode_boot_record(ident["partition_id"], index)', "index"
+        )
+    elif fault == "creation-dialect":
+        source = source.replace('_record(p["fixture"])', "encode_boot_record(1, 0)")
+    elif fault == "helper-bypass":
+        source = source.replace(
+            "return build_attribute_record(pairs)", "return str(pairs)"
+        )
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_text(source)
+    monkeypatch.setattr(f"{__name__}._REPO_ROOT", tmp_path)
+    tree = ast.parse(source)
+    native = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_native"
+    )
+    problems = _unguarded_i_values(
+        native,
+        source_path=path.with_name("other.py") if fault == "wrong-owner" else path,
+    )
+    assert bool(problems) is (fault != "none")

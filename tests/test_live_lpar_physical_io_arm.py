@@ -12,7 +12,8 @@ from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_physical_io as arm
+from live_test.arms import lpar_config
+from live_test.arms import lpar_physical_io as arm
 
 
 @pytest.mark.asyncio
@@ -40,7 +41,9 @@ async def test_arm_always_tears_down_and_compares(monkeypatch, failure):
         )
     )
     monkeypatch.setattr(
-        arm, "_read_pools", AsyncMock(return_value=(SimpleNamespace(names=[]), 256))
+        lpar_config,
+        "_read_pools",
+        AsyncMock(return_value=(SimpleNamespace(names=[]), 256)),
     )
 
     async def teardown(client, state, run, **kwargs):
@@ -109,7 +112,9 @@ async def test_arm_reads_actual_served_typed_result(monkeypatch, verified):
     state.record = Mock()
     state.record_verified = Mock()
     monkeypatch.setattr(
-        arm, "_read_pools", AsyncMock(return_value=(SimpleNamespace(names=[]), 256))
+        lpar_config,
+        "_read_pools",
+        AsyncMock(return_value=(SimpleNamespace(names=[]), 256)),
     )
 
     async def teardown(client, state, run, **kwargs):

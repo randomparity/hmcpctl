@@ -18,9 +18,11 @@ from hmcpctl.documents.lpar import (
     validate_sharing_update,
 )
 from hmcpctl.errors import MAX_ERROR_BODY_BYTES, HMCError, LparUpdateError
+from hmcpctl.operations.lpar.profiles.sync import (
+    change_location_of,
+    resource_with_change_location,
+)
 from hmcpctl.xmlutil import element_to_dict
-
-from .profile_sync import change_location_of, resource_with_change_location
 
 _PPC = "PartitionProcessorConfiguration"
 _EXACT_PATHS = {f"{_PPC}/SharingMode", f"{_PPC}/HasDedicatedProcessors"}

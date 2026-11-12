@@ -7,8 +7,8 @@ Issue #655 (W22 of epic #620). Decision record: [ADR 0246](../../adr/0246-caller
 `run_hmc_command` (`src/hmcpctl/ssh/transport.py`) quotes the command in its timeout,
 connection and process-failure messages, quotes remote stdout/stderr verbatim, chains the
 asyncssh exception (which repeats the command and output), and asyncssh logs the command at
-INFO. `build_attribute_record` (`src/hmcpctl/ssh/commands.py`) quotes a refused value. A
-command carrying a password, activation code or private key would leak it through any of
+INFO. `build_attribute_record` (`src/hmcpctl/documents/native_records.py`) quotes a refused
+value. A command carrying a password, activation code or private key would leak it through any of
 these. This slice adds the seam; it adds no credential-bearing operation.
 
 ## Design

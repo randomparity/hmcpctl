@@ -13,6 +13,8 @@ from collections.abc import Callable, Mapping
 
 from fastmcp import FastMCP
 
+from hmcpctl.operations.lpar.provisioning.media import Boot, LparInstall
+
 from ..._app import with_client
 from ...authorization.connection_scope import ConnectionScopeError
 from ...authorization.target_scope import TargetScopeError
@@ -20,7 +22,6 @@ from ...documents.lpar import LparResources, PartitionType
 from ...operations.affinity.rest import ProvisionAffinityAssessment
 from ...operations.logical.store import connection_label
 from ...operations.lpar.assignments import LparPcieAssignments
-from ...operations.lpar.install_media import Boot, LparInstall
 from ...operations.lpar.plan import (
     LparPlan,
     Placement,

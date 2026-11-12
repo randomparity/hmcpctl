@@ -17,6 +17,8 @@ from hmcpctl.operations.affinity.rest import (
     assess_affinity,
 )
 from hmcpctl.operations.affinity.ssh import (
+    MinimumAffinityPolicyResult,
+    ResourceGroupAffinityResult,
     get_lpar_memopt_score,
     get_minimum_affinity_policy,
     get_system_memopt_score,
@@ -317,13 +319,13 @@ def _placement(resource: dict[str, Any]) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class _AffinityObservations:
-    current_lpar: Any
-    current_system: Any
-    predicted_lpars: Any
-    predicted_system: Any
-    current_groups: Any
-    predicted_groups: Any
-    minimum_policy: Any
+    current_lpar: dict[str, object]
+    current_system: dict[str, object]
+    predicted_lpars: list[dict[str, object]]
+    predicted_system: dict[str, object]
+    current_groups: ResourceGroupAffinityResult
+    predicted_groups: ResourceGroupAffinityResult
+    minimum_policy: MinimumAffinityPolicyResult
 
 
 async def _collect_affinity_observations(

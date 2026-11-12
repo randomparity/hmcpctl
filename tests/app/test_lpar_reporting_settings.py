@@ -32,9 +32,17 @@ def test_mcp_read_update_create_forward_values(monkeypatch):
             module, "with_client", lambda f, **kw: asyncio.run(f("hmc"))
         )
     monkeypatch.setattr(lifecycle_create, "create_lpar", create)
-    assert hmc_configure_lpar_reporting("s", "l", settings) == result
+    assert (
+        hmc_configure_lpar_reporting(
+            system_name_or_uuid="s", lpar_name_or_uuid="l", settings=settings
+        )
+        == result
+    )
     assert call.await_args.args[2] == settings
-    assert hmc_get_lpar_reporting_settings("s", "l") == settings
+    assert (
+        hmc_get_lpar_reporting_settings(system_name_or_uuid="s", lpar_name_or_uuid="l")
+        == settings
+    )
     lifecycle_create.hmc_create_lpar(
         "s", "l", partition_type="OS400", reporting_settings=settings
     )

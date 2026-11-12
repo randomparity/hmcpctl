@@ -52,7 +52,9 @@ def test_get_lpar_description_runs_correct_command(monkeypatch, mock_hmc):
     conn_mock = _make_ssh_mock("production database server\n")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_description(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_get_lpar_description(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     expected_cmd = (
         f"lssyscfg -r lpar -m {SYSTEM_NAME} "
@@ -69,7 +71,9 @@ def test_get_lpar_description_returns_empty_when_none_set(monkeypatch, mock_hmc)
     conn_mock = _make_ssh_mock("\n")
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
-        result = hmc_get_lpar_description(SYSTEM_UUID, LPAR_UUID)
+        result = hmc_get_lpar_description(
+            system_name_or_uuid=SYSTEM_UUID, lpar_name_or_uuid=LPAR_UUID
+        )
 
     assert result == "\n"
 
@@ -88,8 +92,8 @@ def test_get_lpar_description_resolves_uuids_to_names(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
         hmc_get_lpar_description(
-            "22222222-2222-4222-8222-222222222222",
-            "11111111-1111-4111-8111-111111111111",
+            system_name_or_uuid="22222222-2222-4222-8222-222222222222",
+            lpar_name_or_uuid="11111111-1111-4111-8111-111111111111",
         )
 
     called_cmd = conn_mock.run.call_args[0][0]
@@ -110,7 +114,10 @@ def test_set_lpar_description_runs_correct_command(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
         result = hmc_set_lpar_description(
-            SYSTEM_UUID, LPAR_UUID, "new description", ownership_override=True
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            description="new description",
+            ownership_override=True,
         )
 
     expected_cmd = (
@@ -130,7 +137,10 @@ def test_set_lpar_description_returns_cli_output(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
         result = hmc_set_lpar_description(
-            SYSTEM_UUID, LPAR_UUID, "some desc", ownership_override=True
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            description="some desc",
+            ownership_override=True,
         )
 
     assert result == RAW_OUTPUT
@@ -150,9 +160,9 @@ def test_set_lpar_description_embeds_description(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
         hmc_set_lpar_description(
-            "22222222-2222-4222-8222-222222222222",
-            "11111111-1111-4111-8111-111111111111",
-            "owner alice - prod",
+            system_name_or_uuid="22222222-2222-4222-8222-222222222222",
+            lpar_name_or_uuid="11111111-1111-4111-8111-111111111111",
+            description="owner alice - prod",
             ownership_override=True,
         )
 
@@ -177,7 +187,11 @@ def test_set_lpar_description_rejects_record_delimiters_in_description(
     _hmc_env(monkeypatch)
     for bad in ["owner=alice env=prod", "web tier, prod"]:
         with pytest.raises(ValueError, match="comma|equals sign"):
-            hmc_set_lpar_description(SYSTEM_UUID, LPAR_UUID, bad)
+            hmc_set_lpar_description(
+                system_name_or_uuid=SYSTEM_UUID,
+                lpar_name_or_uuid=LPAR_UUID,
+                description=bad,
+            )
     assert {call.request.url.path for call in mock_hmc.calls} == {"/rest/api/web/Logon"}
 
 
@@ -192,7 +206,11 @@ def test_set_lpar_description_rejects_non_ascii(monkeypatch, mock_hmc):
     """hmc_set_lpar_description raises ValueError for non-ASCII descriptions."""
     _hmc_env(monkeypatch)
     with pytest.raises(ValueError, match="non-ASCII or non-printable"):
-        hmc_set_lpar_description(SYSTEM_UUID, LPAR_UUID, "em\u2014dash")
+        hmc_set_lpar_description(
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            description="em\u2014dash",
+        )
 
 
 def test_set_lpar_description_rejects_non_ascii_various(monkeypatch, mock_hmc):
@@ -200,7 +218,11 @@ def test_set_lpar_description_rejects_non_ascii_various(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     for bad in ["\u2014", "\u00e9", "\u4e2d\u6587", "\u00a0"]:
         with pytest.raises(ValueError, match="non-ASCII or non-printable"):
-            hmc_set_lpar_description(SYSTEM_UUID, LPAR_UUID, f"desc{bad}")
+            hmc_set_lpar_description(
+                system_name_or_uuid=SYSTEM_UUID,
+                lpar_name_or_uuid=LPAR_UUID,
+                description=f"desc{bad}",
+            )
 
 
 def test_set_lpar_description_rejects_control_characters(monkeypatch, mock_hmc):
@@ -208,7 +230,11 @@ def test_set_lpar_description_rejects_control_characters(monkeypatch, mock_hmc):
     _hmc_env(monkeypatch)
     for ctrl in ["\x00", "\n", "\r", "\x1b", "\x7f"]:
         with pytest.raises(ValueError, match="non-ASCII or non-printable"):
-            hmc_set_lpar_description(SYSTEM_UUID, LPAR_UUID, f"desc{ctrl}bad")
+            hmc_set_lpar_description(
+                system_name_or_uuid=SYSTEM_UUID,
+                lpar_name_or_uuid=LPAR_UUID,
+                description=f"desc{ctrl}bad",
+            )
 
 
 def test_set_lpar_description_accepts_empty_string(monkeypatch, mock_hmc):
@@ -225,7 +251,10 @@ def test_set_lpar_description_accepts_empty_string(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn_mock):
         result = hmc_set_lpar_description(
-            SYSTEM_UUID, LPAR_UUID, "", ownership_override=True
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            description="",
+            ownership_override=True,
         )
 
     conn_mock.run.assert_called_once()
@@ -255,7 +284,11 @@ def test_foreign_owned_description_overwrite_issues_no_write(monkeypatch, mock_h
         patch("hmcpctl.operations.lpar.ownership.set_lpar_description", new=write),
         pytest.raises(PermissionError, match="owned by 'other'"),
     ):
-        hmc_set_lpar_description(SYSTEM_NAME, LPAR_NAME, "replacement")
+        hmc_set_lpar_description(
+            system_name_or_uuid=SYSTEM_NAME,
+            lpar_name_or_uuid=LPAR_NAME,
+            description="replacement",
+        )
     write.assert_not_awaited()
 
 

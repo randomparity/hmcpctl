@@ -20,8 +20,8 @@ from hmcpctl.ssh.transport import HMCCLIError
 from hmcpctl.xmlutil import leaf_text, parse_feed
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import lpar_linux_roles as arm
 from live_test import runner
+from live_test.arms import lpar_linux_roles as arm
 from live_test.config import LiveTestConfig
 from live_test.observation import CallFailure
 
@@ -294,8 +294,8 @@ def external_hmc(monkeypatch):
     ):
         monkeypatch.setattr(module + ".run_hmc_command", remote)
     monkeypatch.setattr("hmcpctl.server_tools.command.run_hmc_cli", arbitrary)
-    monkeypatch.setattr("live_test.lpar_config._COMPARE_REREAD_DELAY_S", 0)
-    monkeypatch.setattr("live_test.lpar_config._ABSENCE_REREAD_DELAY_S", 0)
+    monkeypatch.setattr("live_test.arms.lpar_config._COMPARE_REREAD_DELAY_S", 0)
+    monkeypatch.setattr("live_test.arms.lpar_config._ABSENCE_REREAD_DELAY_S", 0)
     for name, value in {
         "HMC_HOST": "hmc.test",
         "HMC_USER": "user",
@@ -358,7 +358,7 @@ async def exercise(b, *, group=arm.GROUP):
 
 
 async def recovery_findings():
-    import live_test_recovery as recovery
+    from live_test.recovery import partition
 
     state = runner.RunState()
     async with runner.served_client() as client:
@@ -366,8 +366,8 @@ async def recovery_findings():
         async def call(tool, **kwargs):
             return await state.call(client, tool, **kwargs)
 
-        return await recovery.check_lpar_config(
-            call, recovery.LparConfigInputs("sys-R1")
+        return await partition.check_lpar_config(
+            call, partition.LparConfigInputs("sys-R1")
         )
 
 

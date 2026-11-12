@@ -22,7 +22,21 @@ def test_help_never_bootstraps(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "fault", ["checkout", "parent", "owner", "public", "result", "sidecar"]
+    "fault",
+    [
+        "checkout",
+        "parent",
+        "owner",
+        "public",
+        "result",
+        "sidecar",
+        "relative",
+        "noncanonical",
+        "repository-file",
+        "repository-dir",
+        "result-symlink",
+        "sidecar-symlink",
+    ],
 )
 def test_wrapper_requires_fresh_private_result_and_sidecar(
     tmp_path, monkeypatch, fault
@@ -31,13 +45,35 @@ def test_wrapper_requires_fresh_private_result_and_sidecar(
 
     dispatch = Mock()
     monkeypatch.setattr(wrapper.runner, "_run_from_arguments", dispatch)
+    tmp_path.chmod(0o700)
     path = tmp_path / "results.json"
+    if fault == "relative":
+        monkeypatch.chdir(tmp_path)
+        path = Path("results.json")
+    if fault == "noncanonical":
+        link = tmp_path / "linked"
+        link.symlink_to(tmp_path, target_is_directory=True)
+        path = link / path.name
+    if fault == "repository-file":
+        (tmp_path / ".git").write_text("gitdir: /unavailable")
+    if fault == "repository-dir":
+        (tmp_path / ".git").mkdir()
+    if fault == "result-symlink":
+        path.symlink_to(tmp_path / "missing.json")
+    if fault == "sidecar-symlink":
+        wrapper.runner.evidence.observations_path(str(path)).symlink_to(
+            tmp_path / "missing.json"
+        )
     if fault == "checkout":
         path = Path(wrapper.__file__).resolve().parent / "never-created.json"
     if fault == "parent":
         path = tmp_path / "absent" / "results.json"
     if fault == "owner":
-        monkeypatch.setattr(wrapper.os, "getuid", lambda: os.stat(tmp_path).st_uid + 1)
+        from live_test.arms import memory_statistics
+
+        monkeypatch.setattr(
+            memory_statistics.os, "getuid", lambda: tmp_path.stat().st_uid + 1
+        )
     if fault == "public":
         tmp_path.chmod(0o755)
     if fault in {"result", "sidecar"}:
@@ -61,3 +97,36 @@ def test_wrapper_dispatches_only_assigned_group(tmp_path, monkeypatch):
     dispatch.assert_called_once_with(
         ["--group", "creation-memory-layout", "--results-file", str(path)]
     )
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_wrapper_dispatches_with_private_umask_and_restores_it(
+    tmp_path, monkeypatch, raises
+):
+    import live_creation_memory_layout as wrapper
+
+    tmp_path.chmod(0o700)
+    observed = []
+
+    def dispatch(args):
+        mask = os.umask(0o077)
+        os.umask(mask)
+        observed.append(mask)
+        if raises:
+            raise RuntimeError("dispatch interrupted")
+        return 3
+
+    monkeypatch.setattr(wrapper.runner, "_run_from_arguments", dispatch)
+    original = os.umask(0o027)
+    try:
+        args = ["--results-file", str(tmp_path / "results.json")]
+        if raises:
+            with pytest.raises(RuntimeError, match="dispatch interrupted"):
+                wrapper.main(args)
+        else:
+            assert wrapper.main(args) == 3
+        restored = os.umask(0o027)
+        assert restored == 0o027
+        assert observed == [0o077]
+    finally:
+        os.umask(original)

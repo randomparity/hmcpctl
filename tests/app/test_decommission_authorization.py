@@ -12,7 +12,10 @@ from hmcpctl.authorization.connection_scope import ConnectionScopeError
 from hmcpctl.authorization.target_scope import TargetScopeError
 from hmcpctl.config import HMCConfig
 from hmcpctl.operations.logical import engine, store
-from hmcpctl.operations.lpar.decommission_operation import DEFAULT_ARGUMENTS, TOOL_NAME
+from hmcpctl.operations.lpar.decommission.operation import (
+    DEFAULT_ARGUMENTS,
+    TOOL_NAME,
+)
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar import decommission as tool
 

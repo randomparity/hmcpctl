@@ -220,9 +220,9 @@ def test_mcp_fail_closed_surface_returns_stable_companion(
     )
 
     result = hmc_migrate_lpar_with_affinity_preflight(
-        "lpar-1",
-        "target-1",
-        _request(destination_estimated_score=70, response="fail"),
+        lpar_name_or_uuid="lpar-1",
+        target_system_name_or_uuid="target-1",
+        affinity_preflight=_request(destination_estimated_score=70, response="fail"),
     )
 
     assert set(asdict(result)) == {"lpar_uuid", "preflight", "job"}

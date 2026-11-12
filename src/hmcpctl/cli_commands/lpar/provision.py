@@ -10,25 +10,26 @@ from typing import Any, cast
 import typer
 from rich.text import Text
 
-from ...client.core import HMCClient
-from ...documents.lpar import PARTITION_TYPES, LparResources, validate_partition_type
-from ...documents.storage import STORAGE_KINDS, StorageKind
-from ...operations.logical import engine, store
-from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
-from ...operations.lpar.provision import (
+from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
     ProvisionResult,
     ProvisionStorage,
     preview_provision,
     validate_provision_assignments,
 )
-from ...operations.lpar.provision_operation import (
+from hmcpctl.operations.lpar.provisioning.operation import (
     json_value,
     provision_body,
     provision_classifiers,
     request_from_arguments,
     result_from_record,
 )
+
+from ...client.core import HMCClient
+from ...documents.lpar import PARTITION_TYPES, LparResources, validate_partition_type
+from ...documents.storage import STORAGE_KINDS, StorageKind
+from ...operations.logical import engine, store
+from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
 from ..output import (
     VerbatimTable,
     console,
@@ -248,6 +249,7 @@ def _run(
             if arguments is None:
                 usage_error(f"no operation has request_id {request_id}")
         system, request = request_from_arguments(arguments)
+        # Workers reuse this admitted config instead of resolving the profile again.
         record = engine.submit(
             OperationRequest(
                 TOOL,
@@ -257,17 +259,17 @@ def _run(
                 request_id,
                 arguments if continuation == "none" else given,
             ),
-            provision_body(system, request, lambda _connection: HMCClient(config)),
+            provision_body(
+                system, request, lambda _connection, _host: HMCClient(config)
+            ),
             classifiers=provision_classifiers(
-                request, lambda _connection: HMCClient(config)
+                request, lambda _connection, _host: HMCClient(config)
             ),
             continuation=continuation,
             wait_seconds=MAX_WAIT_SECONDS,
         )
         # The worker dies with this process, so wait for it rather than return early.
-        engine.join(record.operation_id, None)
-        with store.session() as conn:
-            record = store.read_record(conn, record.operation_id)
+        record = engine.wait_for_record(record.operation_id, None)
     except ValueError as exc:
         fail(exc)
     result = result_from_record(record)

@@ -137,7 +137,7 @@ def no_ambient_hmc_settings(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def uninstall_partition_guard():
-    """Leave no ADR 0193 hold hook behind: create_mcp and the CLI install it process-wide."""
+    """Clear explicit test-installed ADR 0193 guards after each case."""
     yield
     from hmcpctl.resource_identity import install_partition_guard
 
@@ -568,6 +568,37 @@ def mock_hmc():
         yield router
 
 
+@pytest.fixture
+def creation_mock():
+    """Build a canonical creation handoff from a consumer test's step scenario."""
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.lpar.creation.core import (
+        LparCreationResult,
+        _creation_feature_inputs,
+    )
+    from hmcpctl.operations.partition_creation import _CreationObservations
+
+    def make_mock(result):
+        async def create(_hmc, _system, creation, **_kwargs):
+            observations = _CreationObservations.selected(
+                _creation_feature_inputs(creation)
+            )
+            for name, _ in observations.public_items():
+                observations = observations.record(name, getattr(result, name))
+            metadata = LparCreationResult(
+                result.resource_created,
+                result.lpar,
+                result.ownership_stamped,
+                result.warnings,
+            )
+            return metadata, observations
+
+        return AsyncMock(side_effect=create)
+
+    return make_mock
+
+
 def mock_change_location(router, lpar_uuid: str, sync: str = "Disabled"):
     """Register the partition GET adapter and mapping commands read first (#981)."""
     entry = (
@@ -775,3 +806,29 @@ def volume_group_with_repository(*, media: bool = True) -> str:
         )
     entry = live_fixture("rest-volume-group")["body"]
     return entry.replace("<PhysicalVolumes ", f"{repository}\n    <PhysicalVolumes ", 1)
+
+
+@pytest.fixture
+def redirected_git_checkout(tmp_path, monkeypatch, request, isolated_git):
+    """A physical checkout whose inherited Git routing may name a foreign index."""
+    import subprocess
+
+    root = tmp_path / "physical checkout"
+    foreign = tmp_path / "foreign checkout"
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    for directory, name in ((root, "physical.py"), (foreign, "foreign.py")):
+        (directory / "src").mkdir(parents=True)
+        (directory / "src" / name).write_text("# fixture\n")
+        subprocess.run(
+            ["git", "init", "--quiet", str(directory)], env=environment, check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(directory), "add", "src"], env=environment, check=True
+        )
+    if request.param:
+        monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(root))
+    return root

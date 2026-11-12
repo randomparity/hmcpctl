@@ -13,8 +13,8 @@ from conftest import (
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.storage.resources import (
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+from hmcpctl.operations.storage.optical import (
     get_media_repository,
     list_optical_media,
     unmount_optical_media,
@@ -31,7 +31,7 @@ def _authorize_lpar_mutations(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "hmcpctl.operations.storage.resources.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.storage.optical.resolve_and_authorize_lpar_mutation",
         authorize,
     )
 
@@ -313,6 +313,9 @@ async def test_unmount_optical_media_removes_the_named_mapping_for_that_lpar(moc
         )
 
     assert result.change_location == ChangeLocation("Disabled", "current-configuration")
+    assert result.raw is None
+    assert result.resource is None
+    assert result.job is None
     body = _posted_document(post)
     assert "vtopt0" not in body
     assert "vtscsi0" in body
@@ -429,7 +432,7 @@ async def test_unmount_optical_media_resolves_vios_and_lpar_names(mock_hmc):
 
 def test_detach_optical_mapping_alias_is_gone():
     """Issue #362: the duplicate name is removed outright, with no shim."""
-    import hmcpctl.operations.storage.resources as ops
+    import hmcpctl.operations.storage.optical as ops
 
     assert not hasattr(ops, "detach_optical_mapping")
 

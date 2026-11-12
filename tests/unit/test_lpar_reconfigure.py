@@ -17,10 +17,11 @@ from lpar.test_partition_profiles import profile as profile_document
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.partition_profile import ProfilePatch, apply_profile_patch, one
 from hmcpctl.errors import HMCError, LparUpdateError
-from hmcpctl.operations.logical import engine, profile_write
+from hmcpctl.operations.logical import engine
 from hmcpctl.operations.logical.engine import OperationFailed, OperationRequest
-from hmcpctl.operations.lpar import reconfigure
-from hmcpctl.operations.lpar.reconfigure import ReconfigurePatch, plan_changes
+from hmcpctl.operations.lpar.profiles import write as profile_write
+from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
+from hmcpctl.operations.lpar.reconfiguration.core import ReconfigurePatch, plan_changes
 from hmcpctl.xmlutil import element_to_dict
 
 SYS = "0000000a-0000-4000-8000-000000000000"
@@ -39,21 +40,21 @@ def _view(state="running", rmc="active", sync="disabled", **values):
         "default_profile": "default",
         "last_profile": "default",
         "dedicated": False,
-        "memory": [512, 768, 1024],
-        "processors": [1, 2, 4],
-        "units": [0.05, 0.1, 1.0],
+        "memory": (512, 768, 1024),
+        "processors": (1, 2, 4),
+        "units": (0.05, 0.1, 1.0),
     }
-    return view | values
+    return view | {
+        key: tuple(value)
+        if key in {"memory", "processors", "units"} and value is not None
+        else value
+        for key, value in values.items()
+    }
 
 
 def _saved(**values):
-    saved = {
-        "dedicated": False,
-        "memory": [512, 768, 1024],
-        "processors": [1, 2, 4],
-        "units": [0.05, 0.1, 1.0],
-    }
-    return saved | values
+    view = _view(**values)
+    return {key: view[key] for key in ("dedicated", "memory", "processors", "units")}
 
 
 def _plan(patch, view=None, saved=None, allow_disruption=False):
@@ -310,19 +311,33 @@ class FakeHMC:
 
     # Seams for operations.lpar.profiles, monkeypatched into the reconfigure module.
 
-    async def read_partition_profile(self, hmc, system, lpar, name):
-        assert (system, lpar, name) == (SYS, LPAR, "default")
+    async def read_partition_profile(
+        self, hmc, lpar_name_or_uuid, profile_selector, *, system_name_or_uuid
+    ):
+        assert (system_name_or_uuid, lpar_name_or_uuid, profile_selector) == (
+            SYS,
+            LPAR,
+            "default",
+        )
         fields = element_to_dict(self.profile)
         return SimpleNamespace(
             uuid=PROFILE, name="default", etag=f"E{self.etag}", fields=fields
         )
 
     async def update_partition_profile(
-        self, hmc, system, lpar, selector, etag, patch, *, exclusive_writer_window
+        self,
+        hmc,
+        lpar_name_or_uuid,
+        profile_selector,
+        expected_etag,
+        patch,
+        *,
+        system_name_or_uuid,
+        exclusive_writer_window,
     ):
         assert exclusive_writer_window is True
         self.calls.append("profile")
-        if etag != f"E{self.etag}":
+        if expected_etag != f"E{self.etag}":
             raise ValueError("expected_etag must match a fresh contained profile ETag")
         self.profile = apply_profile_patch(self.profile, patch)
         self.etag += 1
@@ -354,7 +369,7 @@ def hmc(monkeypatch):
         return None
 
     fake.owner_error = None
-    monkeypatch.setattr(reconfigure, "open_client", lambda _connection: fake)
+    monkeypatch.setattr(reconfigure, "open_client", lambda _connection, _host: fake)
     monkeypatch.setattr(reconfigure, "resolve_system_uuid", system_uuid)
     monkeypatch.setattr(reconfigure, "resolve_and_authorize_lpar_mutation", authorize)
     monkeypatch.setattr(reconfigure, "require_memory_within_selected_system", within)
@@ -490,8 +505,8 @@ def test_owner_refusal_fails_before_write(hmc):
 def test_stale_profile_fails_without_writing(hmc, monkeypatch):
     real = hmc.read_partition_profile
 
-    async def stale(*args):
-        record = await real(*args)
+    async def stale(*args, **kwargs):
+        record = await real(*args, **kwargs)
         hmc.etag += 1  # another writer changed the profile after this read
         return record
 
@@ -665,6 +680,45 @@ def test_resume_after_profile_applied_continues(hmc, monkeypatch):
     assert hmc.memory[1] == 1024
 
 
+@pytest.mark.parametrize(
+    "later_keys", [("networks",), ("boot", "media", "disks", "networks", "save")]
+)
+def test_resume_preserves_plans_recorded_before_later_legs(
+    hmc, monkeypatch, later_keys
+):
+    make_plan, resolve = reconfigure._make_plan, reconfigure._resolve
+    calls = 0
+
+    async def older_plan(*args):
+        plan = await make_plan(*args)
+        for key in later_keys:
+            plan.pop(key)
+        return plan
+
+    async def pause_after_profile(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise RuntimeError("process died before current write")
+        return await resolve(*args)
+
+    monkeypatch.setattr(reconfigure, "_make_plan", older_plan)
+    monkeypatch.setattr(reconfigure, "_resolve", pause_after_profile)
+    first = _run({"memory_mib": 1024})
+    assert first.outcome == "needs_attention"
+    original = next(e.identity for e in first.effects if e.key == reconfigure.PLAN_KEY)
+    assert all(key not in original for key in later_keys)
+    resumed = _run({"memory_mib": 1024}, continuation="resume")
+    assert (resumed.state, resumed.outcome) == ("terminal", "completed")
+    recorded = next(
+        e.identity for e in resumed.effects if e.key == reconfigure.PLAN_KEY
+    )
+    assert recorded == original
+    assert hmc.calls.count("profile") == 1
+    assert hmc.calls.count("the current configuration") == 1
+    assert hmc.memory[1] == 1024
+
+
 @pytest.mark.parametrize("state", ["running", "not activated"])
 def test_resume_after_the_current_write_renames(hmc, monkeypatch, state):
     hmc.state = state
@@ -778,10 +832,12 @@ def _await(coroutine):
 
 
 def _classify(fake, expected, before):
-    ctx = SimpleNamespace(partition=(SYS, LPAR), connection="<default>")
+    ctx = SimpleNamespace(
+        partition=(SYS, LPAR), host="hmc.test", connection="<default>"
+    )
     effect = SimpleNamespace(target=profile_write.target(LPAR, PROFILE))
     classify = profile_write.profile_write_classifier(
-        lambda _ctx, _effect: (expected, before), lambda _connection: fake
+        lambda _ctx, _effect: (expected, before), lambda _connection, _host: fake
     )
     return _await(classify(ctx, effect))
 
@@ -820,9 +876,43 @@ def test_profile_write_target_round_trips():
         profile_write.parse_target(f"lpar:{LPAR}")
 
 
+@pytest.mark.parametrize(
+    "rename",
+    [
+        None,
+        {},
+        {"before": "web1"},
+        {"after": "web2"},
+        {"before": None, "after": "web2"},
+        {"before": "web1", "after": 7},
+        "web2",
+    ],
+)
+def test_missing_recorded_rename_refuses_before_client_open(monkeypatch, rename):
+    calls = []
+
+    def unexpected_client(*_args):
+        calls.append("open-client")
+        pytest.fail("missing rename must refuse before opening a client")
+
+    monkeypatch.setattr(reconfigure, "open_client", unexpected_client)
+    ctx = SimpleNamespace(
+        connection="<default>",
+        host="hmc.test",
+        recorded=lambda _key: SimpleNamespace(
+            status="applied", identity={"rename": rename}
+        ),
+    )
+    effect = SimpleNamespace(target=f"lpar:{LPAR}")
+    with pytest.raises(ValueError, match="recorded rename plan is unavailable"):
+        _await(reconfigure._classify_rename(ctx, effect))
+    assert calls == []
+
+
 def test_rename_classifier(hmc):
     hmc.name = "web2"
     ctx = SimpleNamespace(
+        host="hmc.test",
         connection="<default>",
         recorded=lambda _key: SimpleNamespace(
             status="applied", identity={"rename": {"before": "web1", "after": "web2"}}
@@ -848,17 +938,21 @@ def _classify_named(monkeypatch, found):
         return found
 
     monkeypatch.setattr(profile_write, "profile_by_name", by_name)
-    ctx = SimpleNamespace(partition=(SYS, LPAR), connection="<default>")
+    ctx = SimpleNamespace(
+        partition=(SYS, LPAR), host="hmc.test", connection="<default>"
+    )
     effect = SimpleNamespace(target=profile_write.target_by_name(LPAR, "hmcpctl_abc"))
     classify = profile_write.profile_write_classifier(
         lambda _ctx, _effect: (ProfilePatch(desired_memory=1024),) * 2,
-        lambda _connection: FakeHMC(),
+        lambda _connection, _host: FakeHMC(),
     )
     return _await(classify(ctx, effect))
 
 
-def test_a_named_profile_that_is_absent_was_not_written(monkeypatch):
-    assert _classify_named(monkeypatch, None).status == "not_applied"
+def test_an_absent_named_profile_needs_attention_while_a_save_may_be_pending(
+    monkeypatch,
+):
+    assert _classify_named(monkeypatch, None).status == "needs_attention"
 
 
 @pytest.mark.parametrize(
@@ -912,3 +1006,126 @@ def test_holds_compares_a_profile_name_as_text():
 
     assert not profile_write.holds(element, ProfilePatch(name="7"))
     assert profile_write.holds(element, ProfilePatch(name="07"))
+
+
+@pytest.mark.parametrize("state", ["running", "not activated"])
+def test_normalized_resource_triples_preserve_the_persisted_basis(hmc, state):
+    import json
+
+    hmc.state = state
+    view = reconfigure.partition_view(_await(hmc.get_logical_partition(LPAR)))
+    _, profile = _await(reconfigure._read_profile(hmc, SYS, LPAR, "default"))
+    assert view["memory"] == (512, 768, 1024)
+    assert view["processors"] == (1, 2, 4)
+    assert view["units"] == (0.05, 0.1, 1.0)
+    assert profile["memory"] == (512, 768, 1024)
+    assert len(profile["processors"]) == 3
+    assert isinstance(profile["processors"], tuple)
+    assert isinstance(profile["units"], tuple)
+    persisted = reconfigure.basis(view)
+    assert persisted["memory"] == [512, 768, 1024]
+    assert persisted["processors"] == [1, 2, 4]
+    assert json.loads(json.dumps(persisted)) == persisted
+
+
+@pytest.mark.parametrize(
+    "subject,changes",
+    [
+        ("the partition name", {"name": "renamed"}),
+        (
+            "the current configuration",
+            {"resources": reconfigure.LparResources(desired_memory=1024)},
+        ),
+    ],
+)
+def test_partition_write_preserves_tls_failure_identity(hmc, subject, changes):
+    from hmcpctl.errors import HMCTLSFingerprintError
+
+    failure = HMCTLSFingerprintError("private-provider-detail")
+    hmc.partition_error = failure
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        _await(reconfigure._partition_write(hmc, LPAR, subject, **changes)())
+    assert caught.value is failure
+    assert hmc.calls == [subject]
+
+
+def test_reconfigure_tls_partition_write_retains_applied_profile_and_stops(
+    hmc, monkeypatch
+):
+    from hmcpctl.errors import HMCTLSFingerprintError
+
+    hmc.partition_error = HMCTLSFingerprintError("private-provider-detail")
+    read = hmc.get_logical_partition
+    update = hmc.update_logical_partition
+    attempted = False
+
+    async def before_failure_only(*args, **kwargs):
+        assert not attempted, "TLS failure was followed by a partition read"
+        return await read(*args, **kwargs)
+
+    async def failed_update(*args, **kwargs):
+        nonlocal attempted
+        assert not attempted, "TLS submission was replayed"
+        attempted = True
+        return await update(*args, **kwargs)
+
+    monkeypatch.setattr(hmc, "get_logical_partition", before_failure_only)
+    monkeypatch.setattr(hmc, "update_logical_partition", failed_update)
+    record = _run({"memory_mib": 1024})
+    assert (record.state, record.outcome) == ("paused", "needs_attention")
+    assert ("profile", "lpar.profile_write", "applied") in _effects(record)
+    assert ("current", "lpar.current_config", "uncertain") in _effects(record)
+    assert [call for call in hmc.calls if call != "authorize"] == [
+        "profile",
+        "the current configuration",
+    ]
+    assert record.result["changes"][0]["applied"] == "live"
+    assert "private-provider-detail" not in str(record)
+    assert any(
+        "HMCTLSFingerprintError" in warning for warning in record.result["warnings"]
+    )
+
+
+@pytest.mark.parametrize("phase", ["write", "verify", "apply"])
+def test_missing_recorded_profile_identity_refuses_before_profile_reads(
+    monkeypatch, phase
+):
+    hmc = FakeHMC()
+    calls = []
+    original_read = hmc.get_logical_partition
+
+    async def read_partition(uuid):
+        calls.append("partition")
+        return await original_read(uuid)
+
+    async def unexpected_profile_read(*_args, **_kwargs):
+        calls.append("profile")
+        pytest.fail("missing profile identity must refuse before profile queries")
+
+    monkeypatch.setattr(hmc, "get_logical_partition", read_partition)
+    monkeypatch.setattr(
+        hmc, "list_system_summaries", unexpected_profile_read, raising=False
+    )
+    plan = {
+        "system_uuid": SYS,
+        "lpar_uuid": LPAR,
+        "profile_uuid": None,
+        "profile_name": None,
+        "profile_etag": "etag",
+        "profile_patch": {"desired_memory": 1024},
+        "current": None,
+        "rename": None,
+        "disks": None,
+        "networks": None,
+        "boot": None,
+        "media": None,
+    }
+    with pytest.raises(OperationFailed, match="recorded profile .* is unavailable"):
+        if phase == "write":
+            _await(reconfigure._profile_write(hmc, plan)())
+        elif phase == "verify":
+            _await(reconfigure._verify(SimpleNamespace(), hmc, plan))
+        else:
+            ctx = SimpleNamespace(recorded=lambda _key: None)
+            _await(reconfigure._apply(ctx, hmc, plan))
+    assert calls == (["partition"] if phase == "verify" else [])

@@ -12,10 +12,8 @@ import pytest
 _RUNNER_PATH = Path(__file__).parents[1] / "scripts" / "live_test_runner.py"
 sys.path.insert(0, str(_RUNNER_PATH.parent))
 from live_test import config as live_config  # noqa: E402
-from live_test import (  # noqa: E402
-    network,
-    runner,
-)
+from live_test import runner  # noqa: E402
+from live_test.arms import network  # noqa: E402
 
 SYSTEM = "acmesys9"
 LPAR = "acmesys9-lp3"

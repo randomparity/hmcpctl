@@ -7,10 +7,16 @@ import contextlib
 import json
 import os
 import sys
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
+from hmcpctl.config import HMCConfig
 from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES
 
 from .observation import Assertion
+
+if TYPE_CHECKING:
+    from .runner import RunState
 
 LIMIT = 64 * 1024
 TIMEOUT = 120
@@ -26,7 +32,7 @@ class CLIError(ValueError):
     """Safe diagnostic for a CLI read which cannot support an observation."""
 
 
-def environment(config):
+def environment(config: HMCConfig | None) -> dict[str, str]:
     if config is None or not config.host:
         raise CLIError("CLI read requires the runner's resolved HMC configuration")
     env = {
@@ -45,7 +51,7 @@ def environment(config):
     return env
 
 
-async def execute(state, arguments):
+async def execute(state: RunState, arguments: Sequence[str]) -> str:
     env = environment(state.hmc_config)
     process = None
     try:
@@ -68,7 +74,7 @@ async def execute(state, arguments):
             process = await spawn
             raise
 
-        async def read():
+        async def read() -> str:
             assert process.stdout is not None
             output = bytearray()
             while chunk := await process.stdout.read(LIMIT + 1 - len(output)):
@@ -89,7 +95,13 @@ async def execute(state, arguments):
             await process.communicate()
 
 
-async def _read(state, operation, arguments, *, structured=False):
+async def _read(
+    state: RunState,
+    operation: str,
+    arguments: Sequence[str],
+    *,
+    structured: bool = False,
+) -> Any:
     try:
         output = await execute(state, arguments)
         return json.loads(output) if structured else output.strip()
@@ -101,7 +113,7 @@ async def _read(state, operation, arguments, *, structured=False):
         return None
 
 
-async def observe_state(state, uuid, expected):
+async def observe_state(state: RunState, uuid: str, expected: str) -> None:
     actual = await _read(state, "lpar.get_state", ["lpars", "state", uuid])
     state.record_verified(
         35,
@@ -120,7 +132,7 @@ async def observe_state(state, uuid, expected):
     )
 
 
-async def observe_refcodes(state, system, name):
+async def observe_refcodes(state: RunState, system: str, name: str) -> None:
     rows = await _read(
         state,
         "lpar.list_refcodes",
@@ -144,7 +156,7 @@ async def observe_refcodes(state, system, name):
     )
 
 
-async def observe_job(state, job_id):
+async def observe_job(state: RunState, job_id: str) -> None:
     job = await _read(state, "job.get", ["jobs", "show", job_id], structured=True)
     matches = (
         isinstance(job, dict)

@@ -459,6 +459,10 @@ class HMCClient(
     successful responses; HTTP 404 and other statuses outside 200/204 raise
     HMCError. Individual methods document exceptions to this contract.
 
+    Local argument validation raises ValueError when a method rejects an input
+    before submitting its request. HMC response and transport failures raise
+    HMCError or a subclass. Individual methods document their validation rules.
+
     Usage:
         async with HMCClient(config) as hmc:
             systems = await hmc.list_system_summaries()
@@ -1095,6 +1099,8 @@ class HMCClient(
                 return self._quick_property_names[resource_type]
             try:
                 names, _ = await self.list_quick_properties(resource_type)
+            except HMCTLSFingerprintError:
+                raise
             except HMCError:
                 # Covers HMCTransportError too, which subclasses it. Degrading
                 # is #799's fourth criterion: ADR 0139 records levels where the
@@ -1447,6 +1453,8 @@ class HMCClient(
                 return self._search_parameter_names[resource_type]
             try:
                 names, _ = await self.list_search_parameters(resource_type)
+            except HMCTLSFingerprintError:
+                raise
             except HMCError:
                 # Covers HMCTransportError too, which subclasses it. ADR 0142
                 # degrades rather than raising so a level that does not serve

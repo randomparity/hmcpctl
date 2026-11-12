@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from hmcpctl.operations.lpar.install_media import MAX_PRODUCER_RESULT_BYTES
-from hmcpctl.operations.lpar.media_build import BuildFailed, run_build_entry
+from hmcpctl.operations.lpar.provisioning.build import BuildFailed, run_build_entry
+from hmcpctl.operations.lpar.provisioning.media import MAX_PRODUCER_RESULT_BYTES
 
 REQUEST = b'{"format": "iso-chain-target-v1"}'
 

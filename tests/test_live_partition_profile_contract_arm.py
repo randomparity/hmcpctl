@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import partition_profile_contract as arm
+from live_test.arms import partition_profile_contract as arm
+from live_test.config import hmc_identity
+from live_test.recovery import procedures
 
 FIXTURE = (
     Path(__file__).parent / "fixtures/partition_profile_contract/normalized-profile.xml"
@@ -140,7 +142,7 @@ def experiment(tmp_path, monkeypatch, fault=None, originals=3):
     from types import SimpleNamespace
 
     import httpx
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
     from live_test.config import LiveTestConfig
 
     from hmcpctl.config import HMCConfig
@@ -559,7 +561,7 @@ def test_real_revision_check_rejects_other_commit_before_authentication():
 
 
 def test_strict_read_only_exempts_outer_published_text():
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     original = FIXTURE.read_text()
     before = {"xml": original, "etag": "same"}
@@ -682,6 +684,7 @@ async def test_error_capture_cannot_retain_echoed_authentication_tokens(
 async def test_independent_recovery_cannot_adopt_incomplete_dispatch(
     tmp_path, monkeypatch
 ):
+    from live_test.arms import profile_contract_run as flow
     from live_test.config import LiveTestConfig
 
     from hmcpctl.config import HMCConfig
@@ -691,7 +694,7 @@ async def test_independent_recovery_cannot_adopt_incomplete_dispatch(
         {"group": arm.GROUP, "subtasks": [arm.SUBTASK, 10], "tree_clean": True},
     ):
         with pytest.raises(ValueError, match="provenance"):
-            await arm.recover_document(
+            await flow.recover_document(
                 HMCConfig.from_mapping({}),
                 {"run": run, "config": LiveTestConfig().__dict__},
             )
@@ -716,7 +719,7 @@ async def test_expired_finalization_closes_locally_without_sending_logout(monkey
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     api = SimpleNamespace(
         _session_token="synthetic-session",
@@ -756,7 +759,7 @@ def test_interrupted_arm_has_pre_effect_checkpoint_for_independent_cli_recovery(
                     "tree_clean": True,
                 },
                 "config": asdict(config),
-                "hmc": runner._hmc_identity(hmc),
+                "hmc": hmc_identity(hmc),
                 "artifacts": {},
                 "results": [],
             },
@@ -782,13 +785,13 @@ def test_interrupted_arm_has_pre_effect_checkpoint_for_independent_cli_recovery(
     state.checkpoint = checkpoint
     monkeypatch.setattr(flow, "execute", stopped_after_durable_intent)
     with pytest.raises(SimulatedProcessTermination):
-        asyncio.run(arm.exercise(None, state))
+        asyncio.run(flow.exercise(None, state))
     assert results.is_file()
     saved = json.loads(results.read_text())
     assert saved["run"]["partial"] is True
     before = world.snapshots
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: hmc)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: hmc)
     assert recovery.main(["--results", str(results)]) == 2
     assert world.snapshots > before
     assert "CLEAN:" not in capsys.readouterr().out
@@ -831,7 +834,7 @@ async def test_failed_recovery_checkpoint_prevents_execute(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, Mock
 
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     execute = AsyncMock()
     monkeypatch.setattr(flow, "execute", execute)
@@ -842,7 +845,7 @@ async def test_failed_recovery_checkpoint_prevents_execute(monkeypatch):
         checkpoint=Mock(side_effect=OSError("private disk unavailable")),
         record=Mock(),
     )
-    await arm.exercise(None, state)
+    await flow.exercise(None, state)
     execute.assert_not_awaited()
     state.record.assert_called_once()
     assert state.record.call_args.args[2] == "FAIL"
@@ -1042,7 +1045,7 @@ async def test_cleanup_budget_refuses_before_observation_or_delete_and_logs_out(
 def test_pre_effect_reserve_includes_optional_cleanup_lookup():
     from types import SimpleNamespace
 
-    from live_test import profile_contract_run as flow
+    from live_test.arms import profile_contract_run as flow
 
     # The old post-preread allowance cannot also fund the next stage
     # snapshot and its two initial profile reads.

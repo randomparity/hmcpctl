@@ -18,7 +18,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Protocol
 
 from hmcpctl.client.client_resolution import system_operating
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.systems.fleet import UnreadableSystem, unreadable_system
 from hmcpctl.xmlutil import leaf_text, mtms_parts
 
@@ -453,6 +453,8 @@ async def _read_feed(
         return None
     try:
         return await read(uuid)
+    except HMCTLSFingerprintError:
+        raise
     except HMCError as exc:
         gaps.append(f"{label} feed: {exc}")
         return None
@@ -517,6 +519,8 @@ async def _partition_figures(
             continue
         try:
             claims.append(await _profile_claim(hmc, lpar, gaps))
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             gaps.append(f"LogicalPartitionProfile feed: {exc}")
             claims.append((None, None))
@@ -864,7 +868,7 @@ def rollup(readings: Iterable[SystemReading]) -> Rollup:
     )
 
 
-def allocated(configurable: Any, free: Any) -> Any:
+def allocated(configurable: float | None, free: float | None) -> int | float | None:
     """Configurable minus free capacity, or ``None`` when either is unknown."""
     return _less(configurable, free)
 

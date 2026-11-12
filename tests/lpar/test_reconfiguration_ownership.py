@@ -15,7 +15,6 @@ from hmcpctl.documents.lpar import LparResources
 from hmcpctl.operations.lpar.configuration import (
     configure_lpar_msp,
     configure_lpar_processor_compatibility,
-    synchronize_lpar_profile,
 )
 from hmcpctl.operations.lpar.migration import (
     LpmMigrationRequest,
@@ -25,13 +24,19 @@ from hmcpctl.operations.lpar.migration import (
     recover_lpar_migration,
     remote_restart_lpar,
 )
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
-from hmcpctl.operations.lpar.provision import ProvisionStorage, attach_disk_to_lpar
-from hmcpctl.operations.storage.resources import (
-    map_storage,
+from hmcpctl.operations.lpar.profiles.sync import (
+    ChangeLocation,
+    synchronize_lpar_profile,
+)
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionStorage,
+    attach_disk_to_lpar,
+)
+from hmcpctl.operations.storage.optical import (
     mount_optical_media,
     unmount_optical_media,
 )
+from hmcpctl.operations.storage.resources import map_storage
 from hmcpctl.operations.virtualization.adapters import (
     add_network_adapter,
     add_vfc_adapter,
@@ -86,15 +91,15 @@ CASES: tuple[tuple[str, Operation], ...] = (
         ),
     ),
     (
-        "hmcpctl.operations.storage.resources.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.storage.optical.resolve_and_authorize_lpar_mutation",
         lambda hmc: mount_optical_media(hmc, VIOS, LPAR, media_name="aix.iso"),
     ),
     (
-        "hmcpctl.operations.storage.resources.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.storage.optical.resolve_and_authorize_lpar_mutation",
         lambda hmc: unmount_optical_media(hmc, VIOS, LPAR, media_name="aix.iso"),
     ),
     (
-        "hmcpctl.operations.lpar.provision.resolve_and_authorize_lpar_mutation",
+        "hmcpctl.operations.lpar.provisioning.core.resolve_and_authorize_lpar_mutation",
         lambda hmc: attach_disk_to_lpar(
             hmc,
             LPAR,
@@ -258,7 +263,7 @@ def test_mcp_resource_modify_rejects_foreign_owner_before_hmc_write() -> None:
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
         server_lifecycle.hmc_modify_lpar(
-            LPAR,
+            lpar_name_or_uuid=LPAR,
             resources=LparResources(desired_memory=8192),
             system_name_or_uuid=SYSTEM_UUID,
         )
@@ -319,7 +324,7 @@ def test_resource_modify_override_skips_ownership_read_and_writes() -> None:
         ),
     ):
         server_lifecycle.hmc_modify_lpar(
-            LPAR,
+            lpar_name_or_uuid=LPAR,
             resources=LparResources(desired_memory=8192),
             ownership_override=True,
         )
@@ -348,7 +353,7 @@ async def test_config_operations_reject_foreign_owner_before_ssh_write(
             "hmcpctl.operations.lpar.ownership.get_lpar_description",
             new=AsyncMock(return_value=FOREIGN_OWNER),
         ),
-        patch(f"hmcpctl.operations.lpar.configuration.{write_name}", new=write),
+        patch(f"{operation.__module__}.{write_name}", new=write),
         pytest.raises(PermissionError, match="ownership_override=true"),
     ):
         await operation(hmc, LPAR, *args, system_name_or_uuid=SYSTEM_UUID)
@@ -376,7 +381,7 @@ async def test_config_operations_override_skips_ownership_read(
             "hmcpctl.operations.lpar.ownership.get_lpar_description",
             new=AsyncMock(return_value=FOREIGN_OWNER),
         ) as read,
-        patch(f"hmcpctl.operations.lpar.configuration.{write_name}", new=write),
+        patch(f"{operation.__module__}.{write_name}", new=write),
     ):
         await operation(
             hmc, LPAR, *args, system_name_or_uuid=SYSTEM_UUID, ownership_override=True
@@ -491,22 +496,30 @@ async def test_configure_lpar_msp_refuses_non_vios_before_any_ssh(
         (
             server_configuration.hmc_set_lpar_msp,
             "configure_lpar_msp",
-            (SYSTEM_UUID, LPAR, True),
+            {
+                "system_name_or_uuid": SYSTEM_UUID,
+                "lpar_name_or_uuid": LPAR,
+                "enabled": True,
+            },
         ),
         (
             server_configuration.hmc_set_lpar_proc_compat,
             "configure_lpar_processor_compatibility",
-            (SYSTEM_UUID, LPAR, "POWER9"),
+            {
+                "system_name_or_uuid": SYSTEM_UUID,
+                "lpar_name_or_uuid": LPAR,
+                "mode": "POWER9",
+            },
         ),
         (
             server_profiles.hmc_sync_lpar_profile,
             "synchronize_lpar_profile",
-            (SYSTEM_UUID, LPAR),
+            {"system_name_or_uuid": SYSTEM_UUID, "lpar_name_or_uuid": LPAR},
         ),
     ],
 )
 def test_mcp_config_tools_forward_ownership_override(
-    monkeypatch: pytest.MonkeyPatch, tool, operation: str, args: tuple[object, ...]
+    monkeypatch: pytest.MonkeyPatch, tool, operation: str, args: dict[str, object]
 ) -> None:
     """MCP wrappers expose and forward the explicit ownership override."""
     target_module = (
@@ -523,7 +536,7 @@ def test_mcp_config_tools_forward_ownership_override(
     monkeypatch.setattr(
         target_module, "with_client", lambda fn, **kwargs: asyncio.run(invoke(fn))
     )
-    result = tool(*args, ownership_override=True)
+    result = tool(**args, ownership_override=True)
 
     assert result == "ok"
     delegated.assert_awaited_once()

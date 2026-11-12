@@ -20,7 +20,7 @@ GROUP = "lpar-affinity-group"
 
 @pytest.fixture
 def target(monkeypatch):
-    from live_test import lpar_config
+    from live_test.arms import lpar_config
 
     for name in ("_ABSENCE_REREAD_DELAY_S", "_COMPARE_REREAD_DELAY_S"):
         monkeypatch.setattr(lpar_config, name, 0)
@@ -172,7 +172,7 @@ def target(monkeypatch):
 
 
 async def exercise(b, monkeypatch):
-    from live_test import lpar_affinity_group as arm
+    from live_test.arms import lpar_affinity_group as arm
 
     @asynccontextmanager
     async def session(config):

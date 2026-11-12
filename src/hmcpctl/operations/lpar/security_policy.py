@@ -13,19 +13,21 @@ from ...documents.lpar_security_policy import (
     SecurityPolicyResult,
     SecurityPolicyState,
 )
-from ...errors import HMCError
+from ...documents.native_records import build_attribute_record
+from ...errors import HMCError, HMCTLSFingerprintError
 from ...resource_identity import (
     resolve_lpar_uuid,
     resolve_system_uuid,
     resolve_vios_uuid,
 )
-from ...ssh.commands import build_attribute_record
 from ...ssh.lpar import set_lpar_security_policy
 from ...ssh.profiles import get_proc_compat_modes
 from ...xmlutil import console_version, leaf_text
 from ..partition_state import PARTITION_STATES
-from .configuration import _resolve_and_authorize_vios_names
-from .ownership import resolve_and_authorize_lpar_names
+from .ownership import (
+    _resolve_and_authorize_vios_names,
+    resolve_and_authorize_lpar_names,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,6 +483,8 @@ async def configure_lpar_security_policy(
         )
     try:
         _, after = await _policy_snapshot(hmc, uuid, vios=vios, expected_name=partition)
+    except HMCTLSFingerprintError:
+        raise
     except (HMCError, ValueError, TypeError):
         return SecurityPolicyResult(
             "readback-unavailable",

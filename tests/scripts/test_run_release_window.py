@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts"))
+
 from live_test import config as live_config
 from live_test import runner
 
@@ -36,21 +37,18 @@ def window(tmp_path):
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     git(root, "switch", "-c", "fixture-window")
-    for name in (
-        "baseline.py",
-        "cli.py",
-        "config.py",
-        "runner.py",
-        "creation_memory.py",
-        "partition_profiles.py",
-        "partition_profile_contract.py",
-        "profile_contract_run.py",
-        "evidence.py",
-        "scenario_validation.py",
-    ):
-        shutil.copyfile(
-            ROOT / "scripts/live_test" / name, root / "scripts/live_test" / name
-        )
+    shutil.copytree(
+        ROOT / "scripts/capability_evidence",
+        root / "scripts/capability_evidence",
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.rmtree(root / "scripts/live_test")
+    shutil.copytree(
+        ROOT / "scripts/live_test",
+        root / "scripts/live_test",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     for name in (
         "run_release_window.py",
         "live_test_baseline.py",
@@ -183,7 +181,8 @@ import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import check_capability_inventory as inventory
+from capability_evidence import registry as capability_registry
+from capability_evidence import closure as capability_closure
 from live_test import baseline
 from live_test import runner
 
@@ -219,8 +218,8 @@ def run(phase):
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
         now = datetime.now(UTC)
         observed = (now - timedelta(seconds=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        tool = next(tool for tool in inventory.discover_registry() if tool.operation == "system.get")
-        observation = {"id": "st1-hmc-get-system", "channel": "live", "result": "passed", "scenario": "st1-system-inventory", "tested_commit": head, "observed_at": observed, "hmc_release": "V10R3", "hardware_family": "POWER10", "schema_version": "V1_0", "cleanup": "not-required", "closure_fingerprint": inventory.closure_fingerprint(root, tool.handler.rsplit(".", 1)[0]), "assertions": ["response-validated"]}
+        tool = next(tool for tool in capability_registry.discover_registry() if tool.operation == "system.get")
+        observation = {"id": "st1-hmc-get-system", "channel": "live", "result": "passed", "scenario": "st1-system-inventory", "tested_commit": head, "observed_at": observed, "hmc_release": "V10R3", "hardware_family": "POWER10", "schema_version": "V1_0", "cleanup": "not-required", "closure_fingerprint": capability_closure.closure_fingerprint(root, tool.handler.rsplit(".", 1)[0]), "assertions": ["response-validated"]}
         result = {"run": {"tested_commit": head, "tree_clean": True, "group": "round2", "subtasks": runner.SUBTASK_GROUPS["round2"], "schema_version": "V1_0", "finished": now.isoformat(), "partial": False}, "config": {"private": "PRIVATE-CHILD-MARKER"}, "results": [{"subtask": 1, "tool": "hmc_get_system", "status": "PASS", "result": "passed", "timestamp": observed, "note": "", "data": {}}]}
         Path("test-results-round2.json").write_text(json.dumps(result))
         Path("test-results-round2-observations.json").write_text(json.dumps([{"operation": "system.get", "observation": observation}]))
@@ -856,3 +855,38 @@ def test_orchestration_failure_retains_bounded_private_context(
         assert not (tmp_path / "fault.log").exists()
     captured = capsys.readouterr()
     assert "private failure" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("redirected_git_checkout", [False, True], indirect=True)
+def test_repository_query_uses_physical_checkout(redirected_git_checkout):
+    root = redirected_git_checkout
+    import run_release_window as command
+
+    assert command.git(root, "rev-parse", "--absolute-git-dir") == str(root / ".git")
+
+
+@pytest.mark.parametrize("physical_default", [False, True])
+def test_dry_run_checks_the_physical_default_branch(window, tmp_path, physical_default):
+    root, _, output, environment = window
+    expected = git(root, "rev-parse", "HEAD")
+    if not physical_default:
+        git(root, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    foreign = tmp_path / "foreign checkout"
+    subprocess.run(["git", "init", "--quiet", str(foreign)], check=True)
+    environment.update(GIT_DIR=str(foreign / ".git"), GIT_WORK_TREE=str(root))
+
+    result = invoke(window, "--dry-run")
+
+    if physical_default:
+        assert result.returncode == 0, result.stdout + result.stderr
+        plan = json.loads(result.stdout)
+        assert plan["authorization"]["candidate"] == expected
+        assert plan["authorization"]["authorized"] is False
+    else:
+        assert result.returncode == 2
+        assert (
+            "release-window authorization, configuration or phase check failed"
+            in result.stderr
+        )
+    assert not list(output.iterdir())
+    assert not list(root.glob("test-results-*.json"))

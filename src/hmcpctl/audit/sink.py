@@ -113,7 +113,11 @@ class _StderrSink:
             if self._queue.qsize() >= self._capacity:
                 self._dropped += 1
                 return
-            self._start_writer()
+            try:
+                self._start_writer()
+            except Exception:  # noqa: BLE001 - diagnostics cannot change the caller
+                self._dropped += 1
+                return
             self._queue.put_nowait(line)
             self._pending += 1
 
@@ -161,10 +165,11 @@ class _StderrSink:
     def _start_writer(self) -> None:
         """Begin draining. Caller holds ``_state``; importing must start nothing."""
         if self._writer is None:
-            self._writer = threading.Thread(
+            writer = threading.Thread(
                 target=self._run, name="hmcpctl-audit-stderr", daemon=True
             )
-            self._writer.start()
+            writer.start()
+            self._writer = writer
 
     def _run(self) -> None:
         """Drain the queue onto stderr until the sentinel arrives."""

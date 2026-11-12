@@ -138,15 +138,15 @@ against that commit rather than maintained forward.
 
 | Operation | Location | Status | Tracking |
 |---|---|---|---|
-| `reset_lpar_memory_statistics` | `operations/lpar/memory_statistics.py::reset_lpar_memory_statistics` | guarded (`operations/lpar/memory_statistics.py::reset_lpar_memory_statistics`, via `authorize_lpar_mutation` after selected-system containment); ADR0288 narrowly supersedes the legacy resource-change-only scope and closed VIOS wording for this counter-history reset only; standard audited `ownership_override=False`; explicit override bypasses only the ownership guard; LPAR/VIOS union requires MCP all-targets | #1777 / ADR 0288 |
+| `reset_lpar_memory_statistics` | `operations/lpar/memory/statistics.py::reset_lpar_memory_statistics` | guarded (`operations/lpar/memory/statistics.py::reset_lpar_memory_statistics`, via `authorize_lpar_mutation` after selected-system containment); ADR0288 narrowly supersedes the legacy resource-change-only scope and closed VIOS wording for this counter-history reset only; standard audited `ownership_override=False`; explicit override bypasses only the ownership guard; LPAR/VIOS union requires MCP all-targets | #1777 / ADR 0288 |
 | `configure_lpar_security_policy` | `operations/lpar/security_policy.py::configure_lpar_security_policy` | guarded (`operations/lpar/security_policy.py::configure_lpar_security_policy`, via contained LPAR/VIOS authorization helpers); explicit settings plus existing operator confirmation declare consent | #1765 / ADR 0277 |
 | `configure_lpar_vtpm` | `operations/lpar/vtpm.py::configure_lpar_vtpm` | guarded (`operations/lpar/vtpm.py::configure_lpar_vtpm`, via contained LPAR/VIOS authorization helpers); destructive enabled disable additionally requires independent consent | #1764 / ADR 0276 |
 | `delete_lpar` | `operations/lpar/core.py::delete_lpar` | guarded (`operations/lpar/core.py::delete_lpar`) | — |
-| `decommission_lpar` | `operations/lpar/decommission.py::decommission_lpar` | guarded (`operations/lpar/decommission.py::decommission_lpar`, via `authorize_decommission_lpar_ownership_snapshot`) | — |
+| `decommission_lpar` | `operations/lpar/decommission/core.py::decommission_lpar` | guarded (`operations/lpar/decommission/core.py::decommission_lpar`, via `authorize_decommission_lpar_ownership_snapshot`) | — |
 | `rename_lpar` | `operations/lpar/core.py::rename_lpar` | guarded (`operations/lpar/core.py::rename_lpar`) | — |
 | `set_lpar_ownership_description` | `operations/lpar/ownership.py::set_lpar_ownership_description` | guarded (`operations/lpar/ownership.py::set_lpar_ownership_description`) | — |
-| `synchronize_lpar_profile` | `operations/lpar/configuration.py::synchronize_lpar_profile` | guarded (`operations/lpar/configuration.py::synchronize_lpar_profile`) | — |
-| `restore_system_lpar_profiles` | `operations/lpar/configuration.py::restore_system_lpar_profiles` | guarded before SSH by `_authorize_system_lpar_profile_restore` (`operations/lpar/ownership.py::_authorize_system_lpar_profile_restore`) | #449 |
+| `synchronize_lpar_profile` | `operations/lpar/profiles/sync.py::synchronize_lpar_profile` | guarded (`operations/lpar/profiles/sync.py::synchronize_lpar_profile`) | — |
+| `restore_system_lpar_profiles` | `operations/lpar/profiles/artifacts.py::restore_system_lpar_profiles` | guarded before SSH by `_authorize_system_lpar_profile_restore` (`operations/lpar/ownership.py::_authorize_system_lpar_profile_restore`) | #449 |
 
 `rename_lpar` is Destructive rather than Reconfiguring because the partition name
 is the identity every consumer addresses, and the ownership token itself is keyed
@@ -194,10 +194,10 @@ wildcard records the operation's actual scope.
 | `set_minimum_affinity_policy` | `operations/affinity/ssh.py::set_minimum_affinity_policy` | guarded (`operations/affinity/ssh.py::set_minimum_affinity_policy`) | — |
 | `set_lpar_processors` | `operations/lpar/dlpar.py::set_lpar_processors` | guarded (`operations/lpar/dlpar.py::set_lpar_processors`, via `_apply_dlpar_document` → `_resolve_and_authorize_lpar`) | — |
 | `set_lpar_memory` | `operations/lpar/dlpar.py::set_lpar_memory` | guarded (`operations/lpar/dlpar.py::set_lpar_memory`, via `_apply_dlpar_document`) | — |
-| `change_lpar_processors` | `operations/lpar/processors.py::change_lpar_processors` | guarded (`operations/lpar/processors.py::change_lpar_processors`, via `authorize_lpar_mutation` after selected-system containment) | #1778 / ADR 0296 |
-| `change_lpar_memory` | `operations/lpar/memory.py::change_lpar_memory` | guarded (`operations/lpar/memory.py::change_lpar_memory`, via `authorize_lpar_mutation` after selected-system containment) | #1774 / ADR 0285 |
-| `move_lpar_memory` | `operations/lpar/memory_move.py::move_lpar_memory` | guarded (`operations/lpar/memory_move.py::move_lpar_memory`, via `authorize_lpar_mutation` for both contained endpoints) | #1775 / ADR 0286 |
-| `switch_lpar_paging_vios` | `operations/lpar/paging.py::switch_lpar_paging_vios` | guarded (`operations/lpar/paging.py::switch_lpar_paging_vios`, via `authorize_lpar_mutation` for contained consumer and both paging providers); no ownership override (operation-only ADR0287 exception to §5) | #1776 / ADR 0287 |
+| `change_lpar_processors` | `operations/lpar/processors/current.py::change_lpar_processors` | guarded (`operations/lpar/processors/current.py::change_lpar_processors`, via `authorize_lpar_mutation` after selected-system containment) | #1778 / ADR 0296 |
+| `change_lpar_memory` | `operations/lpar/memory/current.py::change_lpar_memory` | guarded (`operations/lpar/memory/current.py::change_lpar_memory`, via `authorize_lpar_mutation` after selected-system containment) | #1774 / ADR 0285 |
+| `move_lpar_memory` | `operations/lpar/memory/move.py::move_lpar_memory` | guarded (`operations/lpar/memory/move.py::move_lpar_memory`, via `authorize_lpar_mutation` for both contained endpoints) | #1775 / ADR 0286 |
+| `switch_lpar_paging_vios` | `operations/lpar/memory/paging.py::switch_lpar_paging_vios` | guarded (`operations/lpar/memory/paging.py::switch_lpar_paging_vios`, via `authorize_lpar_mutation` for contained consumer and both paging providers); no ownership override (operation-only ADR0287 exception to §5) | #1776 / ADR 0287 |
 | `apply_lpar_pcie_assignments` | `operations/lpar/assignments.py::apply_lpar_pcie_assignments` | guarded via `apply_validated_lpar_pcie_assignments` delegates (`operations/virtualization/pcie.py::assign_dedicated_pcie_slot`, `operations/virtualization/pcie.py::assign_sriov_logical_port`, `operations/virtualization/vnic.py::add_vnic`) | — |
 | `add_network_adapter` | `operations/virtualization/adapters.py::add_network_adapter` | guarded (`operations/virtualization/adapters.py::add_network_adapter`) | #372 |
 | `update_network_adapter` | `operations/virtualization/adapters.py::update_network_adapter` | guarded (`operations/virtualization/adapters.py::update_network_adapter`, via contained resolver); standard audited override; one coordinated native Ethernet update | #638 / ADR 0310 |
@@ -205,11 +205,11 @@ wildcard records the operation's actual scope.
 | `add_vfc_adapter` | `operations/virtualization/adapters.py::add_vfc_adapter` | guarded (`operations/virtualization/adapters.py::add_vfc_adapter`) | #372 |
 | `delete_adapter` | `operations/virtualization/adapters.py::delete_adapter` | guarded (`operations/virtualization/adapters.py::delete_adapter`) | #372 |
 | `map_storage` | `operations/storage/resources.py::map_storage` | guarded (`operations/storage/resources.py::map_storage`) | #372 |
-| `attach_disk_to_lpar` | `operations/lpar/provision.py::attach_disk_to_lpar` | guarded (`operations/lpar/provision.py::attach_disk_to_lpar`) | #372 |
-| `mount_optical_media` | `operations/storage/resources.py::mount_optical_media` | guarded (`operations/storage/resources.py::mount_optical_media`) | — |
-| `unmount_optical_media` | `operations/storage/resources.py::unmount_optical_media` | guarded (`operations/storage/resources.py::unmount_optical_media`) | — |
-| `load_optical_media` | `operations/storage/resources.py::load_optical_media` | guarded via `operations/storage/resources.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
-| `unload_optical_media` | `operations/storage/resources.py::unload_optical_media` | guarded via `operations/storage/resources.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
+| `attach_disk_to_lpar` | `operations/lpar/provisioning/core.py::attach_disk_to_lpar` | guarded (`operations/lpar/provisioning/core.py::attach_disk_to_lpar`) | #372 |
+| `mount_optical_media` | `operations/storage/optical.py::mount_optical_media` | guarded (`operations/storage/optical.py::mount_optical_media`) | — |
+| `unmount_optical_media` | `operations/storage/optical.py::unmount_optical_media` | guarded (`operations/storage/optical.py::unmount_optical_media`) | — |
+| `load_optical_media` | `operations/storage/optical.py::load_optical_media` | guarded via `operations/storage/optical.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
+| `unload_optical_media` | `operations/storage/optical.py::unload_optical_media` | guarded via `operations/storage/optical.py::_change_optical_media`, which also requires the device to belong to that partition's mapping | #1285 / ADR 0317 |
 | `migrate_lpar` | `operations/lpar/migration.py::migrate_lpar` | guarded after optional validation and before migration submission (`operations/lpar/migration.py::migrate_lpar`) | #373 |
 | `migrate_lpar_with_affinity_preflight` | `operations/lpar/migration.py::migrate_lpar_with_affinity_preflight` | guarded (`operations/lpar/migration.py::migrate_lpar_with_affinity_preflight`) | #373 |
 | `abort_lpar_migration` | `operations/lpar/migration.py::abort_lpar_migration` | guarded (`operations/lpar/migration.py::abort_lpar_migration`) | #373 |
@@ -237,7 +237,7 @@ The remaining direct entry points and their guard state are:
 
 | Entry point | Location | Status | Tracking |
 |---|---|---|---|
-| `configure_lpar_msp` | `operations/lpar/configuration.py::configure_lpar_msp` | guarded (`operations/lpar/configuration.py::configure_lpar_msp`, via `operations/lpar/configuration.py::_resolve_and_authorize_vios_names`); targets a VIOS (§1) | #1318 |
+| `configure_lpar_msp` | `operations/lpar/configuration.py::configure_lpar_msp` | guarded (`operations/lpar/configuration.py::configure_lpar_msp`, via `operations/lpar/ownership.py::_resolve_and_authorize_vios_names`); targets a VIOS (§1) | #1318 |
 | `configure_lpar_processor_compatibility` | `operations/lpar/configuration.py::configure_lpar_processor_compatibility` | guarded (`operations/lpar/configuration.py::configure_lpar_processor_compatibility`) | — |
 | `hmc_modify_lpar` | `server_tools/lpar/lifecycle.py::hmc_modify_lpar` | guarded by `operations/lpar/dlpar.py::modify_lpar` before any write | — |
 | `hmc lpar modify` (CLI) | `cli_commands/lpar/modify.py::lpars_modify` | guarded by `operations/lpar/dlpar.py::modify_lpar` before any write | — |
@@ -281,11 +281,12 @@ LPAR-mutating exemption.
 
 | Operation | Reason |
 |---|---|
-| `create_and_stamp_lpar` (`operations/lpar/core.py::create_and_stamp_lpar`) | Creates the partition. No prior owner exists to authorize against; it stamps the token instead (ADR 0011). |
-| `provision_body` (`operations/lpar/provision_operation.py::provision_body`) | Composite create-and-stamp (ADR 0313). Its post-create legs act on the partition it just created and owns, inside one operation. |
+| `create_and_stamp_lpar` (`operations/lpar/creation/core.py::create_and_stamp_lpar`) | Creates the partition. No prior owner exists to authorize against; it stamps the token instead (ADR 0011). |
+| `provision_body` (`operations/lpar/provisioning/operation.py::provision_body`) | Composite create-and-stamp (ADR 0313). Its post-create legs act on the partition it just created and owns, inside one operation. |
 | `deploy_partition_template` (`operations/templates/core.py::deploy_partition_template`) | Creates the partition and stamps it per ADR 0014. |
 | `hmc_capture_lpar_console` (`server_tools/console.py::hmc_capture_lpar_console`) | Holds a console session and releases it. Changes no partition existence, configuration or run state. |
 | `hmc_backup_lpar_profiles` (`server_tools/lpar/profiles.py::hmc_backup_lpar_profiles`) | Reads every profile and writes an HMC-side backup file; it does not mutate a partition or profile. |
+| `delete_backup_profile_artifact` (`operations/lpar/profiles/artifacts.py::delete_backup_profile_artifact`) | Deletes one listed ManagedSystem backup artifact; changes no live partition or profile. The MCP destructive authorization and bounded inventory admission remain required. |
 | `hmc_migrate_validate_lpar` (`server_tools/lpar/migration.py::hmc_migrate_validate_lpar`) | Calls `validate_lpar_migration`, which submits an LPM validation job and changes nothing. The mutating migration operation has its own guard. |
 | `install_vios` (`operations/vios/install.py::install_vios`) | Added by #366. `installios` requires its `-p` partition to be a Virtual I/O Server, which ADR 0011 never stamps, so there is no ownership token to authorize against. After resolving through the `VirtualIOServer` feed, both name and UUID selectors are checked through the resolved `VirtualIOServer` resource for Virtual I/O Server type and `not activated` state before submission. |
 

@@ -252,7 +252,10 @@ def test_the_tool_forwards_resolved_names_and_the_count(monkeypatch):
     monkeypatch.setattr(lifecycle_boot, "ssh_with_client", fake_ssh_with_client)
 
     rows = lifecycle_boot.hmc_read_lpar_refcodes(
-        "22222222-2222-4222-8222-222222222222", "web01", 7, profile="lab"
+        system_name_or_uuid="22222222-2222-4222-8222-222222222222",
+        lpar_name_or_uuid="web01",
+        count=7,
+        profile="lab",
     )
 
     assert rows == []
@@ -291,6 +294,8 @@ def test_mcp_exposes_enrichment_from_the_real_reader(monkeypatch):
         "ssh_with_client",
         lambda fn, **_kwargs: _run(fn(_config(), "sys1", "web01")),
     )
-    rows = lifecycle_boot.hmc_read_lpar_refcodes("sys1", "web01")
+    rows = lifecycle_boot.hmc_read_lpar_refcodes(
+        system_name_or_uuid="sys1", lpar_name_or_uuid="web01"
+    )
     assert rows[0]["definition"]
     assert rows[0]["definition_source"]["pdf_pages"] == [100]

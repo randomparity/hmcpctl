@@ -15,7 +15,7 @@ Always exits 0: this step must never fail `just setup`.
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 from pathlib import Path
 
 REFERENCE_PATHS = ("docs/refs", "AGENTS.local.md")
@@ -54,8 +54,18 @@ def sync_reference_corpus(worktree_root: Path, main_root: Path) -> list[str]:
 
 
 def _run_git(args: list[str], cwd: Path | None = None) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+    # Callers pass fixed rev-parse queries for the physical checkout and common dir.
+    result = subprocess.run(  # nosec B603, B607
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
     )
     return result.stdout.strip()
 

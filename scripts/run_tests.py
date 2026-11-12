@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 import signal
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 import threading
@@ -275,7 +275,8 @@ def _group_arguments(group: str, root: Path = Path(".")) -> list[str]:
 
 
 def _coverage_command(arguments: list[str], environment: dict[str, str]) -> None:
-    subprocess.run(
+    # Only coverage json/combine/report verbs and private data paths reach here.
+    subprocess.run(  # nosec B603
         [
             sys.executable,
             "-m",
@@ -374,7 +375,8 @@ def _run_suite(parallel: bool) -> int:
         timed_out = False
         try:
             try:
-                process = subprocess.Popen(
+                # The pytest module and options come from validated groups and resource limits.
+                process = subprocess.Popen(  # nosec B603
                     command,
                     env=environment,
                     stdout=output,
@@ -434,6 +436,15 @@ def _run_suite(parallel: bool) -> int:
 def main() -> int:
     """Select a bounded execution mode and restore its process-level ownership."""
     try:
+        child_exit_signal = getattr(signal, "SIGCHLD", None)
+        if (
+            child_exit_signal is not None
+            and signal.getsignal(child_exit_signal) == signal.SIG_IGN
+        ):
+            raise OSError(
+                "SIGCHLD is ignored, so child exit statuses are unavailable; "
+                "restore default SIGCHLD handling in the launcher before verification"
+            )
         if COMBINE is not None:
             if GROUP is not None:
                 raise ValueError(

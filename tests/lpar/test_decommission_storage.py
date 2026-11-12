@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hmcpctl.errors import HMCError
+from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.models import EffectRecord, OperationRecord
-from hmcpctl.operations.lpar import decommission_storage as cleanup
-from hmcpctl.operations.lpar.decommission import EFFECT_KINDS, unmap_key
-from hmcpctl.operations.lpar.decommission_storage import (
+from hmcpctl.operations.lpar.decommission import storage as cleanup
+from hmcpctl.operations.lpar.decommission.core import EFFECT_KINDS, unmap_key
+from hmcpctl.operations.lpar.decommission.storage import (
     OwnedItem,
     clean_storage,
     delete_key,
@@ -38,7 +38,7 @@ MEDIA_ITEM = OwnedItem("installer_media", VIOS, "hmcpctl_0123456789ab.iso")
 
 def _factory(hmc: Any):
     @asynccontextmanager
-    async def opened(_connection: str):
+    async def opened(_connection: str, _host: str):
         yield hmc
 
     return opened
@@ -167,6 +167,26 @@ def test_only_a_ledgered_disk_is_deleted_and_its_entry_removed(hmc):
 
 def test_without_a_store_nothing_is_owned(hmc):
     assert cleanup.owned_items(SYSTEM, LPAR) == ((), ())
+
+
+@pytest.mark.parametrize("group", [None, "", 0])
+def test_disk_without_group_is_retained_without_hmc_reads(hmc, group):
+    identity = {**DISK, "vg_uuid": group}
+    _seed(("root_disk", "virtual_disk", LPAR, identity))
+
+    record = _run(hmc)
+
+    assert (record.state, record.outcome) == ("terminal", "completed")
+    assert record.result["retained"] == [
+        {
+            "kind": "virtual_disk",
+            "reason": "unreadable_record",
+            "ledger_identity": identity,
+        }
+    ]
+    assert record.effects == ()
+    assert hmc.mock_calls == []
+    assert _rows() == [(LPAR, identity)]
 
 
 def test_a_disk_mapped_to_another_client_is_retained_with_its_entry(hmc):
@@ -471,3 +491,27 @@ def test_the_journal_reads_applied_deletes_as_deleted_and_open_ones_as_pending()
     assert cleanup.pending_from_effects(effects) == (
         {"kind": "installer_media", "target": "vios:v/vg:g/media:m"},
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method,item",
+    [
+        ("list_vios", DISK_ITEM),
+        ("get_vios_storage_detail", DISK_ITEM),
+        ("get_volume_group", DISK_ITEM),
+        ("list_volume_groups", MEDIA_ITEM),
+        ("list_optical_media", MEDIA_ITEM),
+    ],
+)
+async def test_assessment_preserves_fatal_tls_and_stops_reads(hmc, method, item):
+    failure = HMCTLSFingerprintError("pin mismatch")
+    getattr(hmc, method).side_effect = failure
+
+    with pytest.raises(HMCTLSFingerprintError) as caught:
+        await cleanup.assess(hmc, SYSTEM, LPAR, (item, DISK_ITEM, MEDIA_ITEM))
+
+    assert caught.value is failure
+    assert hmc.mock_calls[-1][0] == method
+    hmc.delete_virtual_disk.assert_not_awaited()
+    hmc.delete_optical_media.assert_not_awaited()

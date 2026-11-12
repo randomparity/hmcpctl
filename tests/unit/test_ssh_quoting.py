@@ -22,7 +22,6 @@ import pytest
 from conftest import mock_uuid_resolution
 
 from hmcpctl.config import HMCConfig
-from hmcpctl.operations.virtualization.validation import require_command_safe_text
 from hmcpctl.operations.virtualization.vnic import (
     VnicBackingSelector,
     _validate_vnic_backing_selector,
@@ -40,6 +39,7 @@ from hmcpctl.server_tools.vios.core import (
     hmc_backup_vios,
     hmc_restore_vios,
 )
+from hmcpctl.ssh.commands import require_command_safe_text
 from hmcpctl.ssh.io_inventory import list_io_slots
 
 SYSTEM_UUID = "22222222-2222-4222-8222-222222222222"
@@ -144,7 +144,10 @@ def test_set_lpar_description_quotes_hostile_description(monkeypatch, mock_hmc):
 
     with patch("hmcpctl.ssh.transport.asyncssh.connect", return_value=conn):
         hmc_set_lpar_description(
-            SYSTEM_UUID, LPAR_UUID, HOSTILE, ownership_override=True
+            system_name_or_uuid=SYSTEM_UUID,
+            lpar_name_or_uuid=LPAR_UUID,
+            description=HOSTILE,
+            ownership_override=True,
         )
 
     payload = f"name={LPAR_NAME},description={HOSTILE}"

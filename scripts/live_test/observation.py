@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 import traceback
-from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field, is_dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any
 
 #: Every value an observation's ``cleanup`` disposition may take. This ``not-run``
@@ -124,12 +124,16 @@ def classify_failure(exc: BaseException) -> CallFailure:
 
 
 def plain_data(data: Any) -> Any:
-    """*data* as plain data: a served typed result arrives as a generated dataclass.
-
-    Nested dataclasses, such as workflow steps, become dicts too (#1369).
-    """
+    """Normalize served records and nested collections to plain containers."""
     if is_dataclass(data) and not isinstance(data, type):
-        return asdict(data)
+        return {
+            item.metadata.get("alias", item.name): plain_data(getattr(data, item.name))
+            for item in fields(data)
+        }
+    if isinstance(data, Mapping):
+        return {key: plain_data(value) for key, value in data.items()}
+    if isinstance(data, (list, tuple)):
+        return [plain_data(value) for value in data]
     return data
 
 

@@ -44,7 +44,7 @@ own records (#630).
 ## Design
 
 1. **Arm `lpar-power`, subtask 41** (orchestrator-assigned). `SUBTASKS[41]`
-   dispatches `exercise_lpar_power` in a new `scripts/live_test/lpar_power.py`;
+   dispatches `exercise_lpar_power` in a new `scripts/live_test/arms/lpar_power.py`;
    `SUBTASK_GROUPS["lpar-power"] = [41]`, not in `all`. The subtask SKIPs unless
    `state.group == "lpar-power"` and `HMC_AUTHORIZE_POWER_OPERATIONS` is on
    (`bare_cec._power_operations_authorized`), so the power evidence covers the ADR 0092
@@ -202,7 +202,7 @@ Defects the run confirms in `src/hmcpctl/operations/lpar/` are fixed here; one i
   `provision.lpar`, `lpar.decommission`) carry one live observation each, copied with its
   emitted result; bare-cec emits none for the first five. The run is repeated when
   anything it executed changes afterwards — the `src/hmcpctl/` closure,
-  `scripts/live_test/lpar_power.py`, or the runner, preflight and recovery hunks;
+  `scripts/live_test/arms/lpar_power.py`, or the runner, preflight and recovery hunks;
   catalog and documentation commits after the run are exempt.
 - After the run every read of step 3 equals its pre-run read; no prefixed partition or
   volume exists (recovery exit 0 for subtask 41).

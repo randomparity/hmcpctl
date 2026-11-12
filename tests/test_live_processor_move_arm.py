@@ -17,13 +17,15 @@ from lpar.test_processor_move import SOURCE, SYSTEM, TARGET, boundary, set_curre
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_processors import LparProcessorMove
 from hmcpctl.errors import HMCError
-from hmcpctl.operations.lpar import processor_move as operation
+from hmcpctl.operations.lpar.processors import move as operation
 from hmcpctl.ssh.processors import _FIELDS
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from live_test import memory_move, runner
-from live_test import processor_move as arm
+from live_test import runner
+from live_test.arms import memory_move
+from live_test.arms import processor_move as arm
 from live_test.config import LiveTestConfig
+from live_test.recovery import procedures
 
 CONFIG = HMCConfig.from_mapping({})
 
@@ -106,7 +108,7 @@ def live_boundary(monkeypatch, boundary):  # noqa: F811 — fixture imported abo
     command = AsyncMock(side_effect=cli)
     monkeypatch.setattr(arm, "run_hmc_command", command)
     monkeypatch.setattr(memory_move, "run_hmc_command", command)
-    root = Path(arm.__file__).resolve().parents[2]
+    root = Path(arm.__file__).resolve().parents[3]
 
     def git(repo, *args):
         stdout = (
@@ -561,7 +563,7 @@ def test_incomplete_saved_proof_cannot_clean_matching_live_baselines(
     path = tmp_path / "result.json"
     path.write_text(json.dumps(doc))
     monkeypatch.setattr(recovery.runner, "_bootstrap_config", lambda: True)
-    monkeypatch.setattr(recovery, "HMCConfig", lambda: CONFIG)
+    monkeypatch.setattr(procedures, "HMCConfig", lambda: CONFIG)
     assert recovery.main(["--results", str(path)]) == 2
     captured = capsys.readouterr()
     assert "CLEAN:" not in captured.out and "unconfirmed" in captured.err
@@ -793,3 +795,18 @@ def test_independent_memory_row_refusal(live_boundary, monkeypatch, row):
     monkeypatch.setattr(arm, "run_hmc_command", command)
     observed = asyncio.run(arm.oracle(f.boundary.hmc, "sys-R1", peers))
     assert all(o["error"] and o["memory"] is None for o in observed)
+
+
+@pytest.mark.parametrize("dedicated", [False, True])
+def test_checkpoint_serializes_internal_profile_location(dedicated):
+    from dataclasses import asdict
+
+    from lpar.test_processor_quantities import snapshot
+
+    from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+
+    before = snapshot(dedicated)
+    assert isinstance(before["change_location"], ChangeLocation)
+    checkpoint = arm._encoded(before)
+    assert checkpoint["change_location"] == asdict(before["change_location"])
+    json.dumps(checkpoint, allow_nan=False)

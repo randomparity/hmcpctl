@@ -16,7 +16,7 @@ from typer.core import TyperCommand, TyperGroup, TyperOption
 
 from ..call_context import CallContext, calling
 from ..operations.logical.holds import HOLD_GUARD
-from ..resource_identity import install_partition_guard
+from ..resource_identity import guarding_partitions
 from ..server_tools.catalog import TOOL_SECURITY
 from ..tool_registry import hold_guarded
 from .capabilities import capabilities
@@ -295,8 +295,7 @@ def main(
         for name in option_names
         if ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE
     )
-    # The CLI, like the server, enforces ADR 0193 holds; the library installs no guard.
-    install_partition_guard(HOLD_GUARD)
+    ctx.with_resource(guarding_partitions(HOLD_GUARD))
     ctx.obj = GlobalOpts(
         host=host,
         user=user,

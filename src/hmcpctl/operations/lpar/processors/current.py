@@ -1,0 +1,727 @@
+"""Guarded native current-processor quantities and independent outcomes (ADR 0296)."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from decimal import Decimal, localcontext
+from typing import Any, Literal, NotRequired, TypedDict, cast, overload
+
+import asyncssh
+
+from hmcpctl.client.core import HMCClient
+from hmcpctl.documents.lpar_processors import (
+    PROCESSOR_NUMERIC_TOKEN_BYTES,
+    LparProcessorChange,
+    bounded_processor_number,
+)
+from hmcpctl.errors import TLS_OBSERVATION_ABORTED, HMCError, HMCTLSFingerprintError
+from hmcpctl.operations.lpar import observation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+from hmcpctl.operations.resource_reading import resource_container
+from hmcpctl.resource_identity import (
+    is_uuid,
+    resolve_system_uuid,
+    system_name_from_uuid,
+)
+from hmcpctl.ssh.processors import (
+    change_lpar_processor_quantity,
+    read_lpar_processor_quantities,
+)
+from hmcpctl.xmlutil import leaf_text
+
+from ..ownership import authorize_lpar_mutation
+
+_OS = {
+    "AIX/Linux": "AIXOrLinux",
+    "OS400": "IBMi",
+    "Virtual IO Server": "VirtualIOServer",
+}
+_MEMORY = ("current_minimum_mib", "current_memory_mib", "current_maximum_mib")
+
+
+_DEDICATED_CURRENT_FIELDS = (
+    ("curr_min_procs", "CurrentMinimumProcessors", "current_minimum_processors"),
+    ("curr_procs", "CurrentProcessors", "current_processors"),
+    ("curr_max_procs", "CurrentMaximumProcessors", "current_maximum_processors"),
+)
+
+_DEDICATED_PENDING_FIELDS = (
+    ("pend_min_procs", "MinimumProcessors", "pending_minimum_processors"),
+    ("pend_procs", "DesiredProcessors", "pending_processors"),
+    ("pend_max_procs", "MaximumProcessors", "pending_maximum_processors"),
+)
+
+_SHARED_CURRENT_PROCESSORS = (
+    ("curr_min_procs", "CurrentMinimumVirtualProcessors", "current_minimum_processors"),
+    ("curr_procs", "AllocatedVirtualProcessors", "current_processors"),
+    ("curr_max_procs", "CurrentMaximumVirtualProcessors", "current_maximum_processors"),
+)
+
+_SHARED_CURRENT_UNITS = (
+    (
+        "curr_min_proc_units",
+        "CurrentMinimumProcessingUnits",
+        "current_minimum_processing_units",
+    ),
+    ("curr_proc_units", "CurrentProcessingUnits", "current_processing_units"),
+    (
+        "curr_max_proc_units",
+        "CurrentMaximumProcessingUnits",
+        "current_maximum_processing_units",
+    ),
+)
+
+_SHARED_PENDING_PROCESSORS = (
+    ("pend_min_procs", "MinimumVirtualProcessors", "pending_minimum_processors"),
+    ("pend_procs", "DesiredVirtualProcessors", "pending_processors"),
+    ("pend_max_procs", "MaximumVirtualProcessors", "pending_maximum_processors"),
+)
+
+_SHARED_PENDING_UNITS = (
+    (
+        "pend_min_proc_units",
+        "MinimumProcessingUnits",
+        "pending_minimum_processing_units",
+    ),
+    ("pend_proc_units", "DesiredProcessingUnits", "pending_processing_units"),
+    (
+        "pend_max_proc_units",
+        "MaximumProcessingUnits",
+        "pending_maximum_processing_units",
+    ),
+)
+
+
+class _ProcessorSnapshot(observation.PartitionSnapshot):
+    processor_mode: Literal["ded", "shared"]
+    dynamic_processor: object
+    current_minimum_processors: int
+    current_processors: int
+    current_maximum_processors: int
+    pending_minimum_processors: int
+    pending_processors: int
+    pending_maximum_processors: int
+    current_minimum_processing_units: NotRequired[Decimal]
+    current_processing_units: NotRequired[Decimal]
+    current_maximum_processing_units: NotRequired[Decimal]
+    pending_minimum_processing_units: NotRequired[Decimal]
+    pending_processing_units: NotRequired[Decimal]
+    pending_maximum_processing_units: NotRequired[Decimal]
+    runtime_processors: int
+    runtime_processing_units: Decimal | None
+
+
+class _ProcessorCapacity(TypedDict):
+    total: Decimal
+    available: Decimal
+    count_limit: int
+    os_limit: int
+    floor: NotRequired[Decimal]
+    uuid: object
+    name: object
+    state: object
+
+
+class _ProcessorQuantities(TypedDict):
+    processors: int | None
+    processing_units: Decimal | None
+
+
+class _ProcessorTargets(_ProcessorQuantities):
+    reset: bool
+    deferred: bool
+    noop: bool
+
+
+class _ProcessorQuantity(TypedDict):
+    minimum: int | Decimal
+    current: int | Decimal
+    maximum: int | Decimal
+    pending_minimum: int | Decimal
+    pending_maximum: int | Decimal
+    runtime: int | Decimal | None
+
+
+def _quantity(
+    snapshot: _ProcessorSnapshot, quantity: Literal["processors", "processing_units"]
+) -> _ProcessorQuantity:
+    if quantity == "processors":
+        return {
+            "minimum": snapshot["current_minimum_processors"],
+            "current": snapshot["current_processors"],
+            "maximum": snapshot["current_maximum_processors"],
+            "pending_minimum": snapshot["pending_minimum_processors"],
+            "pending_maximum": snapshot["pending_maximum_processors"],
+            "runtime": snapshot["runtime_processors"],
+        }
+    return {
+        "minimum": snapshot["current_minimum_processing_units"],
+        "current": snapshot["current_processing_units"],
+        "maximum": snapshot["current_maximum_processing_units"],
+        "pending_minimum": snapshot["pending_minimum_processing_units"],
+        "pending_maximum": snapshot["pending_maximum_processing_units"],
+        "runtime": snapshot["runtime_processing_units"],
+    }
+
+
+@overload
+def _number(value: object, label: str, *, whole: Literal[True]) -> int: ...
+
+
+@overload
+def _number(value: object, label: str, *, whole: Literal[False] = False) -> Decimal: ...
+
+
+@overload
+def _number(value: object, label: str, *, whole: bool) -> Decimal | int: ...
+
+
+def _number(value: object, label: str, *, whole: bool = False) -> Decimal | int:
+    try:
+        return bounded_processor_number(leaf_text(value), whole=whole)
+    except ValueError as error:
+        raise ValueError(f"Processor change requires valid {label}: {error}") from error
+
+
+def _mode(value: object) -> Literal["ded", "shared"]:
+    value = leaf_text(value)
+    if value in (True, "true", "1"):
+        return "ded"
+    if value in (False, "false", "0"):
+        return "shared"
+    raise ValueError("Processor change requires explicit processor mode")
+
+
+def _bounded_memory_snapshot(
+    entry: dict[str, Any] | None, uuid: str
+) -> observation.PartitionSnapshot:
+    resource = resource_container(entry or {}, "Resource")
+    _number(resource.get("PartitionID"), "PartitionID", whole=True)
+    memory_config = resource_container(resource, "PartitionMemoryConfiguration")
+    for field in observation.MEMORY_FIELDS.values():
+        _number(memory_config.get(field), field, whole=True)
+    for field in ("CurrentEntitledMemory", "RuntimeEntitledMemory"):
+        value = leaf_text(memory_config.get(field))
+        if value not in (None, "auto"):
+            _number(value, field, whole=True)
+    config = resource_container(resource, "PartitionProcessorConfiguration")
+    dedicated = _mode(config.get("CurrentHasDedicatedProcessors")) == "ded"
+    current = resource_container(
+        config,
+        "CurrentDedicatedProcessorConfiguration"
+        if dedicated
+        else "CurrentSharedProcessorConfiguration",
+    )
+    fields = (
+        ("CurrentMinimumProcessors", "CurrentProcessors", "CurrentMaximumProcessors")
+        if dedicated
+        else (
+            "CurrentMinimumVirtualProcessors",
+            "AllocatedVirtualProcessors",
+            "CurrentMaximumVirtualProcessors",
+            "CurrentMinimumProcessingUnits",
+            "CurrentProcessingUnits",
+            "CurrentMaximumProcessingUnits",
+        )
+    )
+    for field in fields:
+        _number(current.get(field), field, whole="Units" not in field)
+    return observation.partition_snapshot(entry, uuid)
+
+
+def _snapshot(
+    entry: dict[str, Any] | None, uuid: str, row: dict[str, str]
+) -> _ProcessorSnapshot:
+    before: dict[str, Any] = dict(_bounded_memory_snapshot(entry, uuid))
+    resource = resource_container(entry or {}, "Resource")
+    progress = leaf_text(resource.get("IsOperationInProgress"))
+    if progress not in (True, False, "true", "false", "1", "0"):
+        raise ValueError(
+            "Processor change requires explicit operation-in-progress evidence"
+        )
+    before["operation_in_progress"] = progress in (True, "true", "1")
+    config = resource_container(resource, "PartitionProcessorConfiguration")
+    mode = _mode(config.get("CurrentHasDedicatedProcessors"))
+    if (
+        row.get("curr_proc_mode") != mode
+        or row.get("pend_proc_mode") != mode
+        or _mode(config.get("HasDedicatedProcessors")) != mode
+    ):
+        raise ValueError("Current and pending processor modes disagree")
+    if (
+        row.get("lpar_id") != str(before["partition_id"])
+        or row.get("lpar_name") != before["name"]
+    ):
+        raise ValueError("Processor read identity differs from contained partition")
+    before.update(
+        processor_mode=mode,
+        dynamic_processor=leaf_text(
+            resource_container(resource, "PartitionCapabilities").get(
+                "DynamicLogicalPartitionProcessorCapable"
+            )
+        ),
+    )
+    dedicated = mode == "ded"
+    current = resource_container(
+        config,
+        "CurrentDedicatedProcessorConfiguration"
+        if dedicated
+        else "CurrentSharedProcessorConfiguration",
+    )
+    pending = resource_container(
+        config,
+        "DedicatedProcessorConfiguration"
+        if dedicated
+        else "SharedProcessorConfiguration",
+    )
+    groups = (
+        (
+            (current, True, _DEDICATED_CURRENT_FIELDS),
+            (pending, True, _DEDICATED_PENDING_FIELDS),
+        )
+        if dedicated
+        else (
+            (current, True, _SHARED_CURRENT_PROCESSORS),
+            (current, False, _SHARED_CURRENT_UNITS),
+            (pending, True, _SHARED_PENDING_PROCESSORS),
+            (pending, False, _SHARED_PENDING_UNITS),
+        )
+    )
+    for container, whole, fields in groups:
+        values = []
+        for native_field, rest_field, snapshot_field in fields:
+            value = _number(row.get(native_field), native_field, whole=whole)
+            if value != _number(container.get(rest_field), rest_field, whole=whole):
+                raise ValueError("REST and native processor quantities disagree")
+            before[snapshot_field] = value
+            values.append(value)
+        if not values[0] <= values[1] <= values[2]:
+            raise ValueError(
+                "Processor minimum/current/maximum bounds are contradictory"
+            )
+    before["runtime_processors"] = _number(
+        row.get("run_procs"), "run_procs", whole=True
+    )
+    before["runtime_processing_units"] = (
+        None if dedicated else _number(row.get("run_proc_units"), "run_proc_units")
+    )
+    # The inherited vector participates in equality too; XML decimal spelling
+    # must not turn unchanged quantities into a partial outcome.
+    before["processors"] = {
+        name: f"{_number(value, name):.2f}"
+        if "Units" in name
+        else str(_number(value, name, whole=True))
+        for name, value in before["processors"].items()
+    }
+    return cast(_ProcessorSnapshot, before)
+
+
+def _capacity(system: dict[str, Any], before: _ProcessorSnapshot) -> _ProcessorCapacity:
+    resource = resource_container(system, "Resource")
+    if resource.get("State") != "operating":
+        raise ValueError("Processor change requires an operating managed system")
+    config = resource_container(resource, "AssociatedSystemProcessorConfiguration")
+    kind = _OS.get(before["partition_type"])
+    if kind is None:
+        raise ValueError(
+            "Processor change requires a supported reported partition type"
+        )
+    dedicated = before["processor_mode"] == "ded"
+    maximum = (
+        f"CurrentMaximum{'' if dedicated else 'Virtual'}ProcessorsPer{kind}Partition"
+    )
+    fields = {
+        "total": "ConfigurableSystemProcessorUnits",
+        "available": "CurrentAvailableSystemProcessorUnits",
+        "count_limit": "CurrentMaximumAllowedProcessorsPerPartition"
+        if dedicated
+        else "MaximumAllowedVirtualProcessorsPerPartition",
+        "os_limit": maximum,
+    }
+    if not dedicated:
+        fields["floor"] = "MinimumProcessorUnitsPerVirtualProcessor"
+    values = {
+        key: _number(config.get(field), field, whole=key in ("count_limit", "os_limit"))
+        for key, field in fields.items()
+    }
+    if (
+        values["total"] <= 0
+        or values["available"] > values["total"]
+        or min(values["count_limit"], values["os_limit"]) <= 0
+    ):
+        raise ValueError("System processor capacity or limits are contradictory")
+    if not dedicated and not 0 < values["floor"] <= 1:
+        raise ValueError("System minimum units per virtual processor is invalid")
+    return cast(
+        _ProcessorCapacity,
+        {
+            **values,
+            "uuid": system.get("UUID"),
+            "name": resource.get("SystemName"),
+            "state": resource.get("State"),
+        },
+    )
+
+
+def _targets(
+    before: _ProcessorSnapshot, change: LparProcessorChange, system: dict[str, Any]
+) -> _ProcessorTargets:
+    capacity = _capacity(system, before)
+    if (
+        before["state"] not in ("running", "not activated")
+        or before["operation_in_progress"]
+    ):
+        raise ValueError(
+            "Processor change requires a stable running or not activated partition"
+        )
+    aix = before["partition_type"] in ("AIX/Linux", "Virtual IO Server")
+    if change.force and not aix:
+        raise ValueError("force is supported only for AIX/Linux/VIOS processor changes")
+    inactive = before["state"] == "not activated"
+    if not inactive and before["dynamic_processor"] not in (
+        True,
+        False,
+        "true",
+        "false",
+        "1",
+        "0",
+    ):
+        raise ValueError("Running processor change requires reported DLPAR capability")
+    deferred = inactive or aix and before["rmc"] != "active" and change.force
+    if (
+        not inactive
+        and not deferred
+        and (
+            before["dynamic_processor"] not in (True, "true", "1")
+            or aix
+            and before["rmc"] != "active"
+        )
+    ):
+        raise ValueError(
+            "Running processor change requires DLPAR capability and active RMC, or explicit no-RMC force"
+        )
+    if before["processor_mode"] == "ded" and change.processing_units is not None:
+        raise ValueError("Processing units apply only to shared processors")
+    targets: dict[str, Any] = {
+        "processors": before["current_processors"],
+        "processing_units": before.get("current_processing_units"),
+        "reset": False,
+        "deferred": deferred,
+        "noop": False,
+    }
+    for quantity in ("processors", "processing_units"):
+        amount = getattr(change, quantity)
+        if amount is None:
+            continue
+        observed = _quantity(before, quantity)
+        current = observed["current"]
+        with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
+            target = {
+                "add": current + amount,
+                "remove": current - amount,
+                "set": amount,
+            }[change.operation]
+        if target < 0:
+            raise ValueError("Processor subtraction exceeds current quantity")
+        minimum, maximum = (
+            observed["minimum"],
+            observed["maximum"],
+        )
+        if inactive and maximum == 0:
+            minimum, maximum = (
+                observed["pending_minimum"],
+                observed["pending_maximum"],
+            )
+        if target > min(maximum, observed["pending_maximum"]):
+            raise ValueError("Requested processor target exceeds partition maximum")
+        reset = (
+            change.operation == "set"
+            and target == 0
+            or target < current
+            and target < minimum
+        )
+        if reset and not inactive:
+            raise ValueError("Running processors cannot be reduced below their minimum")
+        if not reset and target < minimum and target != current:
+            raise ValueError("Requested processor target is below its minimum")
+        targets[quantity] = target
+        targets["reset"] |= reset
+    if targets["reset"]:
+        if any(
+            targets[key] is not None
+            and targets[key] > _quantity(before, key)["current"]
+            for key in ("processors", "processing_units")
+        ):
+            raise ValueError("Processor reset contradicts simultaneous positive growth")
+        targets.update(
+            processors=0,
+            processing_units=Decimal(0)
+            if before["processor_mode"] == "shared"
+            else None,
+        )
+    else:
+        count, units = targets["processors"], targets["processing_units"]
+        if count > min(capacity["count_limit"], capacity["os_limit"]):
+            raise ValueError(
+                "Processor target exceeds applicable system or OS count limit"
+            )
+        if units is not None:
+            with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
+                minimum_units = capacity["floor"] * count
+            if not minimum_units <= units <= count:
+                raise ValueError(
+                    "Shared processor entitlement violates units per virtual processor bounds"
+                )
+        allocated = count if units is None else units
+        previous = (
+            before["current_processors"]
+            if units is None
+            else before["current_processing_units"]
+        )
+        with localcontext(prec=2 * PROCESSOR_NUMERIC_TOKEN_BYTES + 2):
+            additional = allocated - previous
+        if allocated > capacity["total"] or additional > capacity["available"]:
+            raise ValueError("Processor target exceeds available system capacity")
+        targets["noop"] = all(
+            targets[key] == before.get(f"current_{key}")
+            for key in ("processors", "processing_units")
+        )
+    for quantity in ("processors", "processing_units"):
+        if targets[quantity] is not None:
+            targets[quantity] = _number(
+                targets[quantity], quantity, whole=quantity == "processors"
+            )
+    return cast(_ProcessorTargets, targets)
+
+
+def _postconditions(
+    before: _ProcessorSnapshot, after: _ProcessorSnapshot, expected: _ProcessorTargets
+) -> bool:
+    if any(
+        before[key] != after[key]
+        for key in (
+            "uuid",
+            "name",
+            "partition_id",
+            "state",
+            "partition_type",
+            "processor_mode",
+            "shared",
+        )
+    ):
+        raise ValueError("Processor readback identity, state or mode changed")
+    checks = [not after["operation_in_progress"]]
+    for key in ("processors", "processing_units"):
+        wanted = expected[key]
+        if wanted is None:
+            continue
+        original, observed = _quantity(before, key), _quantity(after, key)
+        checks.append(observed["current"] == wanted)
+        if not expected["deferred"]:
+            checks.append(observed["runtime"] == wanted)
+        initializes = (
+            before["state"] == "not activated"
+            and not expected["reset"]
+            and wanted > 0
+            and all(original[bound] == 0 for bound in ("minimum", "current", "maximum"))
+        )
+        for bound in ("minimum", "maximum"):
+            checks.append(
+                initializes
+                or observed[bound] == (0 if expected["reset"] else original[bound])
+            )
+    checks.extend(
+        after[key] == (0 if expected["reset"] else before[key]) for key in _MEMORY
+    )
+    return all(checks)
+
+
+def _result(
+    before: _ProcessorSnapshot,
+    after: _ProcessorSnapshot | None,
+    expected: _ProcessorTargets,
+    outcome: str,
+    submission_error: str | None = None,
+    read_error: str | None = None,
+) -> dict[str, Any]:
+    location = (after or before)["change_location"]
+    warnings = (
+        []
+        if location.lives_in == "current-configuration-and-profile"
+        else [location.summary()]
+    )
+    if expected["deferred"]:
+        warnings.append(
+            "Inactive current configuration only; no running-guest effect or later activation is verified."
+            if before["state"] == "not activated"
+            else "Forced no-RMC processor change requires an operating-system restart; running-guest effect is unverified."
+        )
+    if expected["reset"]:
+        warnings.append(
+            "Shutdown processor reset clears CPU and memory assignments; inspect both before activation."
+        )
+    if read_error:
+        warnings.append(read_error[:2048])
+
+    def render(
+        values: _ProcessorSnapshot | _ProcessorTargets | None,
+    ) -> dict[str, Any] | None:
+        return (
+            None
+            if values is None
+            else {
+                key: asdict(value)
+                if isinstance(value, ChangeLocation)
+                else f"{_number(value, key):.2f}"
+                if isinstance(value, Decimal)
+                else _number(value, key, whole=True)
+                if type(value) is int
+                else value
+                for key, value in values.items()
+            }
+        )
+
+    return {
+        "UUID": before["uuid"],
+        "outcome": outcome,
+        "workflow_completed": outcome in ("applied", "noop"),
+        "before": render(before),
+        "after": render(after),
+        "expected": render(expected),
+        "submission_error": submission_error,
+        "change_location": asdict((after or before)["change_location"]),
+        "warnings": warnings,
+    }
+
+
+async def change_lpar_processors(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    change: LparProcessorChange,
+    *,
+    system_name_or_uuid: str,
+    ownership_override: bool = False,
+) -> dict[str, Any]:
+    """Authorize, recheck and submit once; independently classify current CPU/memory state.
+
+    Raises:
+        TypeError: The request is not the required typed change model.
+        ValueError: Input, containment, capacity or fresh admission evidence is invalid.
+        PermissionError: Ownership authorization refuses the change.
+        HMCError: An HMC or native read fails before submission, including TLS identity
+            failures. Submission HMCError is captured instead; cancellation propagates.
+
+    Returns:
+        A result with before/after evidence, expected targets, submission_error and
+        warnings. outcome is applied, noop, partial, rejected or unverified;
+        workflow_completed is true only for applied or noop. A normal return alone
+        does not establish completion. Post-submission HMCError or ValueError,
+        including TLS identity failures, yields unverified rather than an exception.
+        Matching independent readback can establish applied despite submission_error.
+        Deferred current-configuration verification does not verify guest restart.
+        Inspect incomplete or uncertain outcomes before retrying; no automatic replay
+        or compensation is performed.
+    """
+    if not isinstance(change, LparProcessorChange):
+        raise TypeError("change must be a typed LparProcessorChange")
+    if not system_name_or_uuid or not system_name_or_uuid.strip():
+        raise ValueError(
+            "system_name_or_uuid is required for native processor quantities"
+        )
+    system_uuid = await resolve_system_uuid(hmc, system_name_or_uuid)
+    kind, uuid = await observation.contained_partition(
+        hmc, system_uuid, lpar_name_or_uuid
+    )
+    read = hmc.get_vios if kind == "VirtualIOServer" else hmc.get_logical_partition
+    entry = await read(uuid)
+    identity = _bounded_memory_snapshot(entry, uuid)
+    if not is_uuid(lpar_name_or_uuid) and identity["name"] != lpar_name_or_uuid:
+        raise ValueError("Processor target name changed after containment resolution")
+    if (identity["partition_type"] == "Virtual IO Server") != (
+        kind == "VirtualIOServer"
+    ):
+        raise ValueError(
+            "Processor target partition kind disagrees with contained feed"
+        )
+    if not isinstance(identity["name"], str) or not identity["name"].strip():
+        raise ValueError("Processor target requires a nonempty partition name")
+    system_name = await system_name_from_uuid(hmc, system_uuid)
+    if (
+        not system_name
+        or (await resolve_system_uuid(hmc, system_name)).lower() != system_uuid.lower()
+    ):
+        raise ValueError("Processor target system has no unique CLI name")
+    await authorize_lpar_mutation(
+        hmc,
+        system_name,
+        identity["name"],
+        ownership_override=ownership_override,
+        max_output_bytes=65536,
+    )
+
+    async def evidence(current_entry: dict[str, Any] | None) -> _ProcessorSnapshot:
+        row = await read_lpar_processor_quantities(
+            hmc.config, system_name, identity["partition_id"]
+        )
+        return _snapshot(current_entry, uuid, row)
+
+    before = await evidence(entry)
+    system = await hmc.get_managed_system(system_uuid)
+    capacity = _capacity(system or {}, before)
+    if (
+        str(capacity["uuid"]).lower() != system_uuid.lower()
+        or capacity["name"] != system_name
+    ):
+        raise ValueError("Processor capacity identity differs from selected system")
+    expected = _targets(before, change, system or {})
+    if await observation.contained_partition(hmc, system_uuid, uuid) != (kind, uuid):
+        raise ValueError("Processor containment changed before submission")
+    if (await resolve_system_uuid(hmc, system_name)).lower() != system_uuid.lower():
+        raise ValueError("Processor system identity changed before submission")
+    fresh = await evidence(await read(uuid))
+    fresh_capacity = _capacity(await hmc.get_managed_system(system_uuid) or {}, fresh)
+    if fresh != before or fresh_capacity != capacity:
+        raise ValueError(
+            "Processor decision evidence changed before submission; nothing was sent"
+        )
+    if expected["noop"]:
+        return _result(before, fresh, expected, "noop")
+    error = None
+    rejected = False
+    try:
+        await change_lpar_processor_quantity(
+            hmc.config, system_name, identity["partition_id"], change
+        )
+    except HMCError as exc:
+        error = str(exc)[:2048]
+        cause = exc.__cause__
+        rejected = (
+            isinstance(cause, asyncssh.ProcessError)
+            and cause.exit_status is not None
+            and cause.exit_status > 0
+            and not cause.exit_signal
+        )
+    try:
+        if await observation.contained_partition(hmc, system_uuid, uuid) != (
+            kind,
+            uuid,
+        ):
+            raise ValueError("Processor readback containment changed")
+        after = await evidence(await read(uuid))
+        matched = _postconditions(before, after, expected)
+    except HMCTLSFingerprintError:
+        return _result(
+            before, None, expected, "unverified", error, TLS_OBSERVATION_ABORTED
+        )
+    except (HMCError, ValueError) as exc:
+        return _result(before, None, expected, "unverified", error, str(exc))
+    outcome = (
+        "applied"
+        if matched
+        else "partial"
+        if after != before
+        else "rejected"
+        if rejected
+        else "unverified"
+    )
+    return _result(before, after, expected, outcome, error)

@@ -7,17 +7,17 @@ from typing import Literal
 
 from ...client.core import HMCClient
 from ...documents.lpar_vtpm import LparVtpmSettings, VtpmState
+from ...documents.native_records import build_attribute_record
 from ...errors import HMCError
 from ...resource_identity import resolve_system_uuid, resolve_vios_uuid
-from ...ssh.commands import build_attribute_record
 from ...ssh.lpar_vtpm import (
     get_lpar_vtpm_state,
     get_vtpm_advertisement,
     set_lpar_vtpm_settings,
 )
 from ...xmlutil import leaf_text
-from .configuration import _resolve_and_authorize_vios_names
 from .ownership import (
+    _resolve_and_authorize_vios_names,
     _resolve_contained_lpar_names,
     _resolve_system_name,
     resolve_and_authorize_lpar_names,

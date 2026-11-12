@@ -301,8 +301,20 @@ def enforce_system_hold(system_uuid: str) -> None:
         )
 
 
+def _unresolved_partition_name(name: str, error: Exception) -> None:
+    if isinstance(error, OperationRefused):
+        raise error
+    raise HoldRefused(
+        "partition_hold_unverified",
+        f"partitions on this host are held and LPAR {name!r} could not be identified "
+        f"to check for a hold ({type(error).__name__}); name it by UUID or retry when the "
+        "HMC REST API answers",
+    ) from error
+
+
 HOLD_GUARD = PartitionGuard(
     check=enforce_hold,
     names_need_resolution=_names_need_resolution,
     check_system=enforce_system_hold,
+    unresolved_name=_unresolved_partition_name,
 )

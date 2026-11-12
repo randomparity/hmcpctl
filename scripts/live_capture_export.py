@@ -1502,7 +1502,7 @@ def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, A
     """Enum types from the captured `Enumerations.xsd`, bindings from any captured XSD."""
     types: dict[str, list[str]] = {}
     elements: dict[str, str] = {}
-    for record in corpus:
+    for index, record in enumerate(corpus, 1):
         body = record.get("body") or ""
         if (
             record.get("kind") != "rest"
@@ -1513,7 +1513,7 @@ def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, A
         try:
             root = ET.fromstring(body.encode("utf-8"))
         except (ET.ParseError, DefusedXmlException):
-            continue
+            raise ExportError(f"schema record {index} is not safe, valid XML") from None
         for simple in root.iter(f"{_XSD}simpleType"):
             name = simple.get("name") or ""
             if name.endswith(".Enum"):
@@ -1585,10 +1585,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "tokenize":
             corpus = tokenize_records(load_raw(args.raw), args.private)
-            fd = os.open(
-                args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-            )
+            fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                # An existing corpus keeps its mode on open.
+                os.fchmod(fd, 0o600)
+                handle.truncate(0)
                 json.dump(corpus, handle, indent=1)
             print(f"{len(corpus)} records tokenized -> {args.out}")
             return 0

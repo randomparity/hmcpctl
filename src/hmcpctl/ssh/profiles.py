@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import csv
-import re
 import shlex
-from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic import ConfigDict, StrictBool
-
 from ..config import HMCConfig
-from .commands import build_attribute_record, build_filter, parse_hmc_result_rows
+from ..documents.lpar_io import DRC_INDEX_PATTERN, ProfileIoSlot
+from ..documents.native_records import build_attribute_record, build_filter
+from .commands import parse_hmc_result_rows
 from .description_validation import validate_lpar_description
 from .transport import HMCCLIError, run_hmc_command
 
@@ -436,28 +434,6 @@ async def _change_profile_io_slot(
 
 
 PROFILE_IO_SLOT_FIELDS = ("lpar_name", "name", "io_slots")
-
-#: The DRC-index form every captured and documented `io_slots` index takes (ADR 0166).
-DRC_INDEX_PATTERN = re.compile(r"[0-9A-F]{8}")
-
-
-@dataclass(frozen=True)
-class ProfileIoSlot:
-    """One `io_slots` entry in the ADR 0165-admitted read rendering."""
-
-    __pydantic_config__ = ConfigDict(extra="forbid")
-
-    drc_index: str = field(
-        metadata={
-            "description": "Physical slot DRC index: eight uppercase hexadecimal digits."
-        }
-    )
-    pool_id: str | None = field(
-        metadata={"description": "Decimal I/O pool ID, or null for no pool."}
-    )
-    is_required: StrictBool = field(
-        metadata={"description": "Whether the slot is required for profile activation."}
-    )
 
 
 def profile_io_slot_rows_command(system_name: str) -> str:

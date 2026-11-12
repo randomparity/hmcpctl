@@ -79,7 +79,9 @@ def test_profile_tool_delegation_and_security(
     )
     assert result == "bounded-result" and connections == [{"profile": "connection"}]
     call = domain.call_args
-    assert call.args[:3] == (hmc, "system", "partition")
+    assert call.kwargs["hmc"] is hmc
+    assert call.kwargs["system_name_or_uuid"] == "system"
+    assert call.kwargs["lpar_name_or_uuid"] == "partition"
     assert call.kwargs["partition_type"] == (
         "VirtualIOServer" if vios else "LogicalPartition"
     )
@@ -102,7 +104,7 @@ async def test_mcp_serializes_profile_records_and_truthful_outcomes(
 
     from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN
     from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
-    from hmcpctl.operations.lpar.profiles import (
+    from hmcpctl.operations.lpar.profiles.core import (
         PartitionProfileInventory,
         PartitionProfileOutcome,
         PartitionProfileRecord,

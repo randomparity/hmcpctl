@@ -9,13 +9,36 @@ import pytest
 from hmcpctl.client.client_parse import _parse_feed
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
+from hmcpctl.operations.storage.optical import list_optical_media
 from hmcpctl.operations.storage.resources import (
-    list_optical_media,
+    StorageMutationResult,
     list_storage_mappings,
     list_volume_groups,
 )
 
 VIOS_UUID = "00000000-0000-0000-0000-000000000001"
+
+
+@pytest.mark.parametrize(
+    "raw,resource",
+    [
+        (None, None),
+        ({"resource": None}, {"resource": None}),
+        ({"name": "disk"}, {"name": "disk"}),
+        ({"Resource": {"name": "disk"}}, {"name": "disk"}),
+        (
+            {"resource": {"Resource": {"name": "disk"}}},
+            {"resource": {"Resource": {"name": "disk"}}},
+        ),
+    ],
+)
+def test_storage_mutation_exposes_resource_without_changing_raw(raw, resource):
+    result = StorageMutationResult.from_raw(raw)
+    assert result.raw is raw
+    assert result.resource == resource
+    assert result.job is None
+
+
 _OBSERVED_FEED = (
     '<feed xmlns="http://www.w3.org/2005/Atom"><entry><content>'
     '<VirtualIOServer xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">'
@@ -251,11 +274,7 @@ async def test_storage_mapping_without_adapter_name_is_listed_with_null_id() -> 
             "RUNNING",
         ),
         (
-            {
-                "resource": {
-                    "Resource": {"JobID": "job-id", "Status": "COMPLETED_WITH_ERROR"}
-                }
-            },
+            {"Resource": {"JobID": "job-id", "Status": "COMPLETED_WITH_ERROR"}},
             "job-id",
             "COMPLETED_WITH_ERROR",
         ),
@@ -410,3 +429,158 @@ async def test_mcp_mutation_wire_and_schema_exclude_internal_result(monkeypatch,
             assert response.structured_content == {"result": None}
         else:
             assert json.loads(response.content[0].text) == raw
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["map", "mount"])
+@pytest.mark.parametrize(
+    "provider,expected_resource,job_id",
+    [
+        (None, None, None),
+        ({"UUID": "disk-id"}, {"UUID": "disk-id"}, None),
+        ({"Resource": {"DiskName": "disk"}}, {"DiskName": "disk"}, None),
+        (
+            {"JobID": "job-id", "Status": "RUNNING"},
+            {"JobID": "job-id", "Status": "RUNNING"},
+            "job-id",
+        ),
+        (
+            {"UUID": "entry-id", "Resource": {"Status": "COMPLETED_OK"}},
+            {"Status": "COMPLETED_OK"},
+            "entry-id",
+        ),
+        (
+            {"Resource": {"JobID": "job-id", "Status": "COMPLETED_WITH_ERROR"}},
+            {"JobID": "job-id", "Status": "COMPLETED_WITH_ERROR"},
+            "job-id",
+        ),
+    ],
+)
+async def test_mapping_operation_retains_provider_and_typed_facts(
+    monkeypatch, operation, provider, expected_resource, job_id
+):
+    from unittest.mock import AsyncMock, Mock, call
+
+    from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+    from hmcpctl.operations.storage import optical
+    from hmcpctl.operations.storage import resources as storage
+
+    resources = optical if operation == "mount" else storage
+
+    lpar_uuid = "00000000-0000-0000-0000-000000000002"
+    location = ChangeLocation("Disabled", "current-configuration")
+    client = AsyncMock(spec=HMCClient)
+    timeline = Mock()
+    for name, value in (
+        ("resolve_vios_uuid", VIOS_UUID),
+        ("resolve_and_authorize_lpar_mutation", lpar_uuid),
+        ("read_change_location", location),
+    ):
+        boundary = AsyncMock(return_value=value)
+        monkeypatch.setattr(resources, name, boundary)
+        timeline.attach_mock(boundary, name)
+    timeline.attach_mock(client, "client")
+    if operation == "map":
+        client.map_storage_to_lpar.return_value = provider
+        result = await resources.map_storage(
+            client, "vios", "lpar", kind="VirtualDisk", storage_name="disk"
+        )
+        request = call.client.map_storage_to_lpar(
+            VIOS_UUID, "VirtualDisk", "disk", lpar_uuid, None
+        )
+    else:
+        client.create_optical_mapping.return_value = (
+            {"Resource": provider} if provider is not None else None
+        )
+        result = await resources.mount_optical_media(
+            client, "vios", "lpar", media_name="install.iso"
+        )
+        request = call.client.create_optical_mapping(
+            VIOS_UUID, "install.iso", lpar_uuid, None
+        )
+    assert result.raw is provider
+    assert result.resource == expected_resource
+    assert result.lpar_uuid == lpar_uuid
+    assert result.change_location is location
+    assert (result.job.job_id if result.job else None) == job_id
+    assert timeline.mock_calls == [
+        call.resolve_vios_uuid(client, "vios", system_name_or_uuid=None),
+        call.resolve_and_authorize_lpar_mutation(
+            client, "lpar", ownership_override=False, system_name_or_uuid=None
+        ),
+        call.read_change_location(client, lpar_uuid),
+        request,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mount_preserves_malformed_provider_entry_error(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.storage import optical as resources
+
+    client = AsyncMock(spec=HMCClient)
+    client.create_optical_mapping.return_value = {}
+    monkeypatch.setattr(
+        resources, "resolve_vios_uuid", AsyncMock(return_value=VIOS_UUID)
+    )
+    monkeypatch.setattr(
+        resources,
+        "resolve_and_authorize_lpar_mutation",
+        AsyncMock(return_value=VIOS_UUID),
+    )
+    monkeypatch.setattr(resources, "read_change_location", AsyncMock())
+    with pytest.raises(KeyError, match="Resource"):
+        await resources.mount_optical_media(
+            client, VIOS_UUID, VIOS_UUID, media_name="install.iso"
+        )
+    client.create_optical_mapping.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["detach", "unmount"])
+async def test_mapping_removal_has_only_typed_location(monkeypatch, operation):
+    from unittest.mock import AsyncMock
+
+    from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
+    from hmcpctl.operations.storage import optical
+    from hmcpctl.operations.storage import resources as storage
+
+    resources = optical if operation == "unmount" else storage
+
+    lpar_uuid = "00000000-0000-0000-0000-000000000002"
+    location = ChangeLocation("Disabled", "current-configuration")
+    mapping = {
+        "ServerAdapter": {"AdapterName": "vhost0"},
+        "TargetDevice": {"VirtualOpticalTargetDevice": {"TargetName": "vtopt1"}},
+        "AssociatedLogicalPartition": {
+            "href": f"/rest/api/uom/LogicalPartition/{lpar_uuid}"
+        },
+        "Storage": {"VirtualOpticalMedia": {"MediaName": "install.iso"}},
+    }
+    client = AsyncMock(spec=HMCClient)
+    client.list_storage_mappings.return_value = [mapping]
+    client.list_optical_mappings.return_value = [mapping]
+    for name, value in (
+        ("resolve_vios_uuid", VIOS_UUID),
+        ("resolve_and_authorize_lpar_mutation", lpar_uuid),
+        ("read_change_location", location),
+    ):
+        monkeypatch.setattr(resources, name, AsyncMock(return_value=value))
+    if operation == "detach":
+        result = await resources.detach_storage_mapping(client, "vios", "vhost0/vtopt1")
+        client.list_storage_mappings.assert_awaited_once_with(VIOS_UUID)
+        client.list_optical_mappings.assert_not_called()
+    else:
+        result = await resources.unmount_optical_media(
+            client, "vios", "lpar", media_name="install.iso"
+        )
+        client.list_optical_mappings.assert_awaited_once_with(VIOS_UUID, lpar_uuid)
+        client.list_storage_mappings.assert_not_called()
+    assert result.raw is None
+    assert result.resource is None
+    assert result.job is None
+    assert result.change_location is location
+    client.delete_storage_mapping.assert_awaited_once_with(
+        VIOS_UUID, "vhost0/vtopt1", lpar_uuid
+    )

@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from hmcpctl.authorization.access_policy import compile_access_policy
 from hmcpctl.cli import app
 from hmcpctl.cli_commands.virtualization import adapters as cli_adapters
-from hmcpctl.operations.lpar.profile_sync import ChangeLocation
+from hmcpctl.operations.lpar.profiles.sync import ChangeLocation
 from hmcpctl.operations.virtualization.adapters import AdapterResult
 from hmcpctl.server import TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.virtualization import adapters as tools
@@ -85,7 +85,15 @@ def policy(tool="hmc_add_network_adapter"):
 
 def test_existing_tool_shape_and_profile_tail_remain_compatible(adapter):
     returned = tools.hmc_add_network_adapter(
-        "part-R1", 100, None, None, False, None, "profile-R1", None, False
+        lpar_name_or_uuid="part-R1",
+        port_vlan_id=100,
+        slot_number=None,
+        virtual_switch_id=None,
+        tagged=False,
+        mac_address=None,
+        profile="profile-R1",
+        system_name_or_uuid=None,
+        ownership_override=False,
     )
     assert returned["UUID"] == CREATED
     assert "change_location" in returned
@@ -96,7 +104,9 @@ def test_existing_tool_shape_and_profile_tail_remain_compatible(adapter):
 
 def test_tool_forwards_six_fields_and_adds_metadata_without_wrapping_identity(adapter):
     adapter.operation.return_value = result(verification())
-    returned = tools.hmc_add_network_adapter("part-R1", 100, tagged=True, **FIELDS)
+    returned = tools.hmc_add_network_adapter(
+        lpar_name_or_uuid="part-R1", port_vlan_id=100, tagged=True, **FIELDS
+    )
     assert returned["UUID"] == CREATED
     assert returned["creation_verification"] == verification()
     assert returned["change_location"]["lives_in"] == "current-configuration"

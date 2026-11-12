@@ -229,7 +229,10 @@ def test_no_hand_written_scenario_uses_the_reserved_number():
     reserved = f"st{definitions.SCENARIO_NUMBER}-"
     sources = [
         path
-        for path in (ROOT / "scripts" / "live_test").glob("*.py")
+        for path in [
+            *(ROOT / "scripts" / "live_test").glob("*.py"),
+            *(ROOT / "scripts" / "live_test" / "arms").glob("*.py"),
+        ]
         if reserved in path.read_text(encoding="utf-8")
         and path.name != "definitions.py"
     ]

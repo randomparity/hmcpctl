@@ -44,9 +44,13 @@ from hmcpctl.authorization.access_policy import (
 from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
 from hmcpctl.operations.logical import engine
 from hmcpctl.operations.lpar import inspect as inspect_module
-from hmcpctl.operations.lpar import power, provision_operation
-from hmcpctl.operations.lpar.provision import ProvisionAdapters, ProvisionStorage
-from hmcpctl.operations.lpar.provision_operation import json_value
+from hmcpctl.operations.lpar import power
+from hmcpctl.operations.lpar.provisioning import operation as provision_operation
+from hmcpctl.operations.lpar.provisioning.core import (
+    ProvisionAdapters,
+    ProvisionStorage,
+)
+from hmcpctl.operations.lpar.provisioning.operation import json_value
 from hmcpctl.server import PRIMARY_TOOLS, TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar import provision as provision_tool
 
@@ -151,8 +155,10 @@ class BootHMC(FakeHMC):
 class Boot(Writes):
     """Provision's writes plus the boot: the handoff code is the first read after power-on."""
 
-    def __init__(self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch) -> None:
-        super().__init__(hmc, monkeypatch)
+    def __init__(
+        self, hmc: BootHMC, monkeypatch: pytest.MonkeyPatch, creation_mock
+    ) -> None:
+        super().__init__(hmc, monkeypatch, creation_mock)
         self.hmc: BootHMC = hmc
         patch = monkeypatch.setattr
         patch(provision_operation, "list_lpar_refcodes", self.read_refcodes)
@@ -178,22 +184,22 @@ class Boot(Writes):
 
 
 @pytest.fixture
-def boot(monkeypatch: pytest.MonkeyPatch) -> Boot:
+def boot(monkeypatch: pytest.MonkeyPatch, creation_mock) -> Boot:
     """Serve hmc_provision_lpar against a boot fake, bound where the tool builds its body."""
     monkeypatch.setenv("HMC_USER", "u")
     monkeypatch.setenv("HMC_PASSWORD", "p")
     hmc = BootHMC()
-    writes = Boot(hmc, monkeypatch)
+    writes = Boot(hmc, monkeypatch, creation_mock)
     body, classifiers = (
         provision_tool.provision_body,
         provision_tool.provision_classifiers,
     )
 
     def bound_body(system: str, request: Any, *, wait_seconds: int = 0) -> Any:
-        return body(system, request, lambda _c: hmc, wait_seconds=wait_seconds)
+        return body(system, request, lambda _c, _host: hmc, wait_seconds=wait_seconds)
 
     def bound_classifiers(request: Any) -> Any:
-        return classifiers(request, lambda _c: hmc)
+        return classifiers(request, lambda _c, _host: hmc)
 
     monkeypatch.setattr(provision_tool, "provision_body", bound_body)
     monkeypatch.setattr(provision_tool, "provision_classifiers", bound_classifiers)
@@ -342,7 +348,9 @@ def test_s5_decommission_retaining_storage_completes(monkeypatch: pytest.MonkeyP
     _patch_common(monkeypatch, calls)
     hmc = _client()
     _serve(monkeypatch, hmc)
-    monkeypatch.setattr(power, "client_from_env", _opened(hmc))
+    monkeypatch.setattr(
+        "hmcpctl.client.client_factory.HMCClient", lambda _config: _opened(hmc)()
+    )
     arguments = {
         "request_id": "s5",
         "system_name_or_uuid": "system-a",
@@ -389,7 +397,7 @@ def test_s7_a_withheld_specialist_denies_its_primary_and_is_invisible(
     monkeypatch: pytest.MonkeyPatch,
 ):
     hmc = PowerHMC()
-    monkeypatch.setattr(power, "open_client", lambda _connection: hmc)
+    monkeypatch.setattr(power, "open_client", lambda _connection, _host: hmc)
     monkeypatch.setattr(power, "POLL_SECONDS", 0)
     app = create_mcp(_policy(_grant(SEARCH, INVOKE, POWER, POWER_OFF)))
     start = {

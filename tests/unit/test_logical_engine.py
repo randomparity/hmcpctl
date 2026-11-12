@@ -231,6 +231,29 @@ def test_wait_zero_returns_running_and_work_continues():
     assert (later.state, later.outcome) == ("terminal", "completed")
 
 
+def test_wait_for_record_refreshes_after_worker_completion():
+    release = threading.Event()
+
+    async def write():
+        if not await asyncio.to_thread(release.wait, 10):
+            raise TimeoutError("test did not release the worker")
+        return {"uuid": "u1"}
+
+    record = _submit(body=_body(write), wait_seconds=0)
+    try:
+        snapshot = engine.wait_for_record(record.operation_id, 0)
+        assert snapshot.state == "running"
+        release.set()
+        completed = engine.wait_for_record(record.operation_id, None)
+        assert completed.operation_id == record.operation_id
+        assert (completed.state, completed.outcome) == ("terminal", "completed")
+        assert completed.effects[0].identity == {"uuid": "u1"}
+        assert engine.wait_for_record(record.operation_id, 0) == completed
+    finally:
+        release.set()
+        engine.join(record.operation_id, 10)
+
+
 def _hold_first_end(monkeypatch):
     """Hold the first worker after its end state commits, before its thread exits."""
     real_end, ended, hold, held = engine._end, threading.Event(), threading.Event(), []

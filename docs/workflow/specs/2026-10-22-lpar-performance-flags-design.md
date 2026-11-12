@@ -118,7 +118,7 @@ recovery and deployed-HEAD check; hardware execution requires the root's exclusi
 
 ## Bounded named live arm
 
-Extend existing `scripts/live_test/lpar_config.py` with opt-in subtask47,
+Extend existing `scripts/live_test/arms/lpar_config.py` with opt-in subtask47,
 `lpar-settings`, registered in runner/preflight and the existing prefix-based
 recovery witness. It reuses the arm's baseline, unique-name/token, inactive
 teardown and resource comparison helpers, without the ST39 activation/configuration

@@ -9,13 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from ..config import HMCConfig
-from .commands import (
-    _parse_lshwres_output,
-    build_attribute_record,
-    build_filter,
-    hmc_error_code,
-    parse_hmc_result_rows,
-)
+from ..documents.native_records import build_attribute_record, build_filter
+from .commands import _parse_lshwres_output, hmc_error_code, parse_hmc_result_rows
 from .profiles import get_proc_compat_modes
 from .transport import HMCCLIError, run_hmc_command
 

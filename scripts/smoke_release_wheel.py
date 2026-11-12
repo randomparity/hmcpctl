@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 # Call sites document execution authority.
 import sys
 import tempfile
 from pathlib import Path
@@ -61,7 +61,8 @@ def environment_command(
 
 
 def _run(*arguments: str | Path, cwd: Path, quiet: bool = False) -> None:
-    subprocess.run(
+    # The smoke test deliberately installs and executes the selected local wheel.
+    subprocess.run(  # nosec B603
         [str(argument) for argument in arguments],
         cwd=cwd,
         check=True,
@@ -85,7 +86,8 @@ def smoke(artifact_dir: Path) -> None:
         root = Path(temporary)
         library_environment = root / "library"
         library_python = _create_environment(library_environment, wheel, app=False)
-        _run(library_python, "-c", LIBRARY_PROBE, cwd=root)
+        # Isolated mode keeps packaging assertions active under PYTHONOPTIMIZE.
+        _run(library_python, "-I", "-c", LIBRARY_PROBE, cwd=root)
 
         app_environment = root / "app"
         app_python = _create_environment(app_environment, wheel, app=True)

@@ -37,7 +37,7 @@ from hmcpctl.operations.inventory.utilization import (
     fleet_systems,
     survey_hmc,
 )
-from hmcpctl.operations.lpar.memory_bound import require_memory_within_system
+from hmcpctl.operations.lpar.memory.bounds import require_memory_within_system
 from hmcpctl.operations.lpar.ownership import _discover_owning_system
 from hmcpctl.operations.lpar.plan import _enumerate as plan_enumerate
 from hmcpctl.operations.systems.core import get_system, list_systems

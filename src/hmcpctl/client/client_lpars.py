@@ -13,8 +13,8 @@ from typing import Any
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 
-from ..documents.lpar import sharing_observation
-from ..errors import HMCError, LparUpdateError
+from ..documents.lpar import exact_partition_path, sharing_observation
+from ..errors import HMCError, HMCTLSFingerprintError, LparUpdateError
 from ..xmlutil import localname
 from .client_contracts import LparsClient, _reject_non_uuid_path_argument
 from .client_parse import _parse_feed
@@ -49,18 +49,6 @@ _WEIGHT_PATH = (
 _SHARED_PATH = "PartitionProcessorConfiguration/SharedProcessorConfiguration"
 
 
-def _exact_partition_path(lpar: ET.Element, path: str) -> ET.Element | None:
-    node = lpar
-    for part in path.split("/"):
-        matches = [child for child in node if localname(child.tag) == part]
-        if not matches:
-            return None
-        if len(matches) != 1 or matches[0].tag != f"{{{_UOM_NS}}}{part}":
-            raise HMCError(f"Ambiguous or wrong-namespace partition path {path}")
-        node = matches[0]
-    return node
-
-
 def _edit_logical_partition(
     lpar: ET.Element, changes: Mapping[str, str | None], subject: str
 ) -> None:
@@ -73,7 +61,7 @@ def _edit_logical_partition(
     for field, text in changes.items():
         if any(part.startswith(("Current", "Runtime")) for part in field.split("/")):
             raise HMCError(f"Refusing to write observed partition path {field}")
-        element = _exact_partition_path(lpar, field)
+        element = exact_partition_path(lpar, field)
         if element is None:
             if field == _WEIGHT_PATH:
                 missing_weight = True
@@ -84,12 +72,12 @@ def _edit_logical_partition(
         element.text = text
     if _WEIGHT_PATH not in changes:
         return
-    shared = _exact_partition_path(lpar, _SHARED_PATH)
+    shared = exact_partition_path(lpar, _SHARED_PATH)
     if shared is None:
         raise HMCError(
             f"GET partition has no {_SHARED_PATH}; refusing to write {subject}"
         )
-    anchor = _exact_partition_path(lpar, f"{_SHARED_PATH}/SharedProcessorPoolID")
+    anchor = exact_partition_path(lpar, f"{_SHARED_PATH}/SharedProcessorPoolID")
     if anchor is not None and len(anchor):
         raise HMCError("Expected a scalar SharedProcessorPoolID anchor")
     if not missing_weight:
@@ -198,6 +186,11 @@ class LparsMixin:
         returns the created partition entry.
 
         Omits the X-HMC-Schema-Version header; the write headers follow ADR 0178.
+
+        Returns:
+            The first parsed LogicalPartition response entry, or None when the
+            successful response has no body or entries. None leaves creation
+            unconfirmed; inspect the partition identity before retrying.
         """
         _reject_non_uuid_path_argument("system_uuid", system_uuid)
         path = f"/rest/api/uom/ManagedSystem/{system_uuid}/LogicalPartition"
@@ -280,7 +273,8 @@ class LparsMixin:
         """Edit a fresh whole partition and submit once under its original ETag.
 
         Only configured missing uncapped weight may be inserted. Failures before
-        edit validation refuse normally; later failures retain submission certainty.
+        edit validation refuse normally. TLS identity failures propagate unchanged;
+        other later failures retain submission certainty.
         The returned POST entry is not independent proof of configuration completion.
         """
         _reject_non_uuid_path_argument("lpar_uuid", lpar_uuid)
@@ -302,6 +296,8 @@ class LparsMixin:
                     "If-Match": etag,
                 },
             )
+        except HMCTLSFingerprintError:
+            raise
         except HMCError as exc:
             submission = "unknown"
             message = str(exc)

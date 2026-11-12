@@ -376,7 +376,7 @@ def test_processed_metrics_rejects_incomplete_feed_without_fetch(
     document = mock_hmc.get("/valid.json").mock(
         return_value=httpx.Response(200, json=METRICS_JSON)
     )
-    with pytest.raises(ValueError, match="PCM.*entry.*link.*href"):
+    with pytest.raises(HMCError, match="PCM.*entry.*link.*href"):
         hmc_processed_metrics(
             "ManagedSystem",
             "00000000-0000-0000-0000-000000000001",

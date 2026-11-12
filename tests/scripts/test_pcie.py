@@ -14,9 +14,10 @@ from hmcpctl.operations.lpar.assignments import LparPcieWorkflowResult
 
 LIVE_TEST_ROOT = Path(__file__).parents[2] / "scripts"
 sys.path.insert(0, str(LIVE_TEST_ROOT))
-from live_test import dedicated_pcie  # noqa: E402
-from live_test.config import LiveTestArtifacts, LiveTestConfig  # noqa: E402
-from live_test.observation import CLEANUP, Assertion, CallFailure  # noqa: E402
+from live_test.arms import dedicated_pcie  # noqa: E402
+from live_test.artifacts import LiveTestArtifacts  # noqa: E402
+from live_test.config import LiveTestConfig  # noqa: E402
+from live_test.observation import CLEANUP, Assertion, CallFailure, plain_data  # noqa: E402
 from live_test.runner import RunState  # noqa: E402
 
 #: The arm's own settings. Everything else on `LiveTestConfig` keeps its
@@ -109,7 +110,7 @@ class ScenarioState:
         )
         if callable(status):
             status = status(tool, kwargs, index)
-        return status, response
+        return status, plain_data(response) if status == "PASS" else response
 
     def record(
         self,

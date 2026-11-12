@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from typing import Any, Self
 
 import pytest
@@ -14,7 +16,7 @@ from hmcpctl.errors import HMCTransportError
 from hmcpctl.operations.logical import engine, holds
 from hmcpctl.operations.logical.engine import BodyResult, OperationRequest
 from hmcpctl.operations.logical.holds import HoldRefused
-from hmcpctl.operations.lpar import decommission
+from hmcpctl.operations.lpar.decommission import core as decommission
 from hmcpctl.resource_identity import PartitionGuard, install_partition_guard
 from hmcpctl.ssh import selectors
 
@@ -22,6 +24,42 @@ SYS = "0b3f9a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
 LPAR = "7d1e2f3a-4b5c-4d6e-8f70-819a2b3c4d5e"
 NAME = "lpar-a"
 MUTATION = CallContext("hmc_modify_lpar", read=False, hold_id=None)
+
+
+def test_ssh_selectors_do_not_import_the_logical_store():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import hmcpctl.ssh.selectors; "
+                "assert 'hmcpctl.operations.logical.holds' not in sys.modules; "
+                "assert 'hmcpctl.operations.logical.store' not in sys.modules"
+            ),
+        ],
+        check=True,
+        timeout=20,
+    )
+
+
+@pytest.mark.parametrize(
+    "module", ["hmcpctl.tool_registry", "hmcpctl.server_tools.permissions"]
+)
+def test_registry_metadata_does_not_load_application_guard_dependencies(module):
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                f"import importlib, sys; importlib.import_module({module!r}); "
+                "assert 'hmcpctl.operations.logical.holds' not in sys.modules; "
+                "assert 'hmcpctl.operations.logical.store' not in sys.modules; "
+                "assert 'hmcpctl.client.core' not in sys.modules"
+            ),
+        ],
+        check=True,
+        timeout=20,
+    )
 
 
 class FakeHMC:
@@ -94,6 +132,142 @@ def test_no_installed_guard_checks_nothing():
     _held()
     with calling(MUTATION):
         assert asyncio.run(resource_identity.resolve_lpar_uuid(FakeHMC(), LPAR)) == LPAR
+
+
+def test_composing_application_preserves_explicit_library_guard(spy):
+    from hmcpctl.cli_commands.legacy_policy import compile_legacy_policy
+    from hmcpctl.server import TOOL_SECURITY, create_mcp
+
+    policy = compile_legacy_policy(
+        TOOL_SECURITY, ("<default>",), include_arbitrary_command=False
+    )
+    create_mcp(policy)
+    resource_identity.guard_partition(LPAR)
+    assert spy == [LPAR]
+
+
+def test_cli_invocation_preserves_explicit_library_guard(spy):
+    from typer.testing import CliRunner
+
+    from hmcpctl.cli import app
+
+    result = CliRunner().invoke(app, ["lpars", "--help"])
+    assert result.exit_code == 0, result.output
+    resource_identity.guard_partition(LPAR)
+    assert spy == [LPAR]
+
+
+def test_partition_guard_scope_restores_after_failure(spy):
+    inner = []
+    with (
+        pytest.raises(RuntimeError, match="scope failed"),
+        resource_identity.guarding_partitions(
+            PartitionGuard(inner.append, lambda: False)
+        ),
+    ):
+        resource_identity.guard_partition(LPAR)
+        raise RuntimeError("scope failed")
+    resource_identity.guard_partition(LPAR)
+    assert inner == [LPAR]
+    assert spy == [LPAR]
+
+
+def test_concurrent_partition_guard_scopes_are_independent(spy):
+    left, right = [], []
+
+    async def run():
+        entered = [asyncio.Event(), asyncio.Event()]
+
+        async def check(index, seen):
+            with resource_identity.guarding_partitions(
+                PartitionGuard(seen.append, lambda: False)
+            ):
+                entered[index].set()
+                await entered[1 - index].wait()
+                resource_identity.guard_partition(LPAR)
+
+        await asyncio.gather(check(0, left), check(1, right))
+        resource_identity.guard_partition(LPAR)
+
+    asyncio.run(run())
+    assert left == right == spy == [LPAR]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("failure", ["authorization", "handler"])
+def test_authorized_call_scopes_guard_through_authorization_and_failure(
+    spy, monkeypatch, asynchronous, failure
+):
+    from hmcpctl.tool_registry import ToolSecurity, authorized
+
+    front = []
+    monkeypatch.setattr(
+        holds, "HOLD_GUARD", PartitionGuard(front.append, lambda: False)
+    )
+
+    def authorize(*args):
+        resource_identity.guard_partition(LPAR)
+        if failure == "authorization":
+            raise PermissionError("authorization failed")
+
+    def handler(lpar_name_or_uuid: str):
+        resource_identity.guard_partition(lpar_name_or_uuid)
+        raise RuntimeError("handler failed")
+
+    async def async_handler(lpar_name_or_uuid: str):
+        handler(lpar_name_or_uuid)
+
+    wrapped = authorized(
+        "hmc_test",
+        ToolSecurity(effect="mutate", operation="lpar.modify", target_kind="lpar"),
+        async_handler if asynchronous else handler,
+        authorize,
+    )
+
+    async def run():
+        error = PermissionError if failure == "authorization" else RuntimeError
+        with pytest.raises(error, match=f"{failure} failed"):
+            if asynchronous:
+                await wrapped(LPAR)
+            else:
+                wrapped(LPAR)
+        resource_identity.guard_partition(LPAR)
+        assert current_call() is None
+
+    asyncio.run(run())
+    assert front == [LPAR] * (1 if failure == "authorization" else 2)
+    assert spy == [LPAR]
+
+
+def test_unresolved_guard_callback_cannot_allow_an_unidentified_name():
+    seen = []
+    guard = PartitionGuard(
+        lambda _uuid: None,
+        lambda: True,
+        unresolved_name=lambda name, error: seen.append((name, error)),
+    )
+    install_partition_guard(guard)
+    try:
+        with pytest.raises(resource_identity.ResourceNotFoundError) as info:
+            asyncio.run(selectors.resolve_ssh_names(FakeHMC(), "sys-R1", "unknown"))
+        assert seen == [("unknown", info.value)]
+    finally:
+        install_partition_guard(None)
+
+
+def test_unresolved_hold_guard_preserves_store_refusals(hold_guard, monkeypatch):
+    from hmcpctl.operations.logical.store import OperationRefused
+
+    _held()
+    refusal = OperationRefused("store_unavailable", "inspect the operation store")
+
+    async def resolve(*args, **kwargs):
+        raise refusal
+
+    monkeypatch.setattr(selectors, "resolve_lpar_uuid", resolve)
+    with calling(MUTATION), pytest.raises(OperationRefused) as info:
+        asyncio.run(selectors.resolve_ssh_names(FakeHMC(), "sys-R1", NAME))
+    assert info.value is refusal
 
 
 def test_decommission_target_resolution_runs_the_guard(spy):
