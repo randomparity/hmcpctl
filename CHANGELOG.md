@@ -446,6 +446,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ### Fixed
 
+- A failed PCM metrics fetch (#1958) keeps the HMC `Message` and reason code in its error, with
+  any echoed session credential redacted. The response body was cut to 500 characters before
+  sanitizing, which withheld the roughly 1.1 KB PCM 403 and 404 bodies whole.
 - `HMC_CA_BUNDLE` (#1935, ADR 0223) is loaded into a TLS context instead of being handed to httpx as a path, so constructing a client no longer emits httpx's `verify=<str>` `DeprecationWarning`. An unreadable or invalid bundle now fails with a message naming the setting, the path and the fix, and a directory path, which httpx used to treat as a hashed-certificate directory, is now refused: `HMC_CA_BUNDLE` takes a PEM file (use `SSL_CERT_DIR` for a directory).
 - A REST request sent after nearly 5 seconds without one, such as the first after a run of SSH
   commands, no longer intermittently fails with `Server disconnected without sending a response`
