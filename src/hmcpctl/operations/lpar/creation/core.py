@@ -672,6 +672,7 @@ async def _submit_native_creation(
             pass
         elif (
             features.inputs.serial_requested
+            or features.inputs.vscsi_requested
             or features.inputs.layout_requested
             or features.inputs.memory_requested
             or features.inputs.start_requested

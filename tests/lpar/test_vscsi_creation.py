@@ -488,9 +488,24 @@ async def test_serial_and_vscsi_declared_together_both_verify(target):
 
 
 @pytest.mark.asyncio
-async def test_failed_create_propagates_without_retry(target):
+@pytest.mark.parametrize(
+    "options",
+    [{}, {"hardware_mem_encryption": True}, {"affinity_group_id": 1}],
+    ids=["vscsi-only", "with-hardware-memory", "with-affinity"],
+)
+async def test_failed_create_propagates_without_retry(target, monkeypatch, options):
+    if options:
+        # Admission of the companion feature is not under test here.
+        monkeypatch.setattr(
+            "hmcpctl.operations.partition_creation._CreationFeatureCoordinator.admit_host_features",
+            AsyncMock(),
+        )
+        monkeypatch.setattr(
+            "hmcpctl.operations.partition_creation.read_creation_authority",
+            AsyncMock(return_value=(None, False)),
+        )
     target.fault = "create"
     with pytest.raises(HMCCLIError):
-        await invoke(target)
+        await invoke(target, **options)
     assert target.events.count("create") == 1
     assert "stamp" not in target.events and "apply" not in target.events
