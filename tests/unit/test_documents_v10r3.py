@@ -97,8 +97,8 @@ RECORDED = [
         {
             "AdapterType": "ROR",  # live-vocabulary: allow a kb code, not an element value
             "VirtualSlotNumber": "COD",
-            "ConnectingPartitionID": "CUD",
-            "ConnectingVirtualSlotNumber": "CUD",
+            "ConnectingPartitionID": "CUR",
+            "ConnectingVirtualSlotNumber": "CUR",
         },
     ),
 ]

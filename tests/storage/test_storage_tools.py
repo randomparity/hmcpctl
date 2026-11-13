@@ -373,10 +373,10 @@ def test_add_vfc_adapter_builds_xml(monkeypatch, mock_hmc):
     body = route.calls.last.request.content.decode()
     assert "<VirtualFibreChannelClientAdapter" in body
     assert (
-        '<ConnectingPartitionID kb="CUD" kxe="false">7</ConnectingPartitionID>' in body
+        '<ConnectingPartitionID kb="CUR" kxe="false">7</ConnectingPartitionID>' in body
     )
     assert (
-        '<ConnectingVirtualSlotNumber kb="CUD" kxe="false">11</ConnectingVirtualSlotNumber>'
+        '<ConnectingVirtualSlotNumber kb="CUR" kxe="false">11</ConnectingVirtualSlotNumber>'
         in body
     )
 
