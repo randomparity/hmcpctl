@@ -44,14 +44,26 @@ UUID or an exact name; a name matching 0 or more than 1 volume raises.
 | `pmem.rename_volume` | `rename_persistent_memory_volume(hmc, system, lpar, volume, new_name, ownership_override=False)` | mutate | ADR 0092 guard; volume assigned to `lpar`; new name valid and unused |
 | `pmem.delete_volume` | `delete_persistent_memory_volume(hmc, system, lpar, volume, acknowledge_data_loss=False, ownership_override=False)` | destructive | `acknowledge_data_loss` is `True`; ADR 0092 guard; volume assigned to `lpar`; partition state `not activated` |
 
-A failed check raises `ValueError` ending "nothing was changed". Each mutation
-submits once, never retries, then reads back and returns
+Admission reads system `AssociatedSystemCapabilities/PersistentMemoryCapable`
+and `AssociatedPersistentMemoryConfiguration/{SupportedPersistentMemoryDeviceTypes,
+DramPersistentMemoryVolumeBlockSize}`, and partition `PartitionID`,
+`PartitionType`, `PartitionState` and
+`AssociatedPersistentMemoryConfiguration/{Current,Maximum}DramPersistentMemoryVolumes`.
+An absent, non-integer or non-positive value among these refuses as "not
+advertised". A failed check raises `ValueError` ending "nothing was changed".
+Each mutation submits once, never retries, then reads back (also after a write
+error, so `observed` is filled when readable) and returns
 `PersistentMemoryVolumeResult(status, requested, observed, warnings)`.
 `status` is `verified`, `mismatch`, `readback-unavailable` or
 `write-outcome-unknown` (vTPM vocabulary, ADR 0276). Create verifies exactly one
 volume of that name, assigned to the partition, with the requested size and
 affinity; rename verifies the UUID carries the new name; delete verifies the
-UUID is absent from the collection.
+UUID is absent from the collection. A readback that does not yet show the
+change reports `mismatch` with a warning that an accepted (202) write may still
+be completing, so the caller re-reads before retrying. The partition-scoped and
+full collection reads use one new client method,
+`list_persistent_memory_volumes(system_uuid, partition_id=None)`, returning the
+whole parsed feed.
 
 MCP tools in `server_tools/lpar/pmem.py`: `hmc_list_persistent_memory_volumes`
 (`limit`), `hmc_get_persistent_memory_volume`,
