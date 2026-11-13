@@ -282,35 +282,38 @@ async def _processor_pool_reads(client: Client, state: RunState) -> None:
     )
     # One observation for both gets: its id derives from (subtask, tool), and the
     # evidence emitter refuses a run whose observation ids repeat.
-    assertions: list[Assertion] = []
-    reads: dict[str, object] = {}
-    read_failed = False
-    for assertion_id, selector in (
-        ("default-pool-by-id", 0),
-        ("default-pool-by-name", "DefaultPool"),
-    ):
-        status, data = await state.call(
-            client,
-            "hmc_get_shared_processor_pool",
-            system_name_or_uuid=system,
-            pool=selector,
-        )
-        reads[assertion_id] = data
-        pool = field(data, "pool")
-        default = field(pool, "pool_id") == 0 and field(pool, "configured") is True
-        assertions.append(Assertion(assertion_id, status == "PASS" and default))
-        read_failed = read_failed or status != "PASS"
-    if read_failed:
-        assertions.append(_READ_FAILED)
+    by_id_ok, by_id = await _default_pool_get(client, state, 0)
+    by_name_ok, by_name = await _default_pool_get(client, state, "DefaultPool")
+    # Literal ids in the keyword keep them visible to the static scenario-id guard.
     state.record_verified(
         4,
         "hmc_get_shared_processor_pool",
         operation="processor_pool.get",
         scenario=_POOL_READS,
-        assertions=assertions,
+        assertions=[
+            Assertion("default-pool-by-id", by_id_ok),
+            Assertion("default-pool-by-name", by_name_ok),
+            *([_READ_FAILED] if None in (by_id, by_name) else []),
+        ],
         cleanup="not-required",
-        data=reads,
+        data={"by_id": by_id, "by_name": by_name},
     )
+
+
+async def _default_pool_get(
+    client: Client, state: RunState, selector: int | str
+) -> tuple[bool, object]:
+    """Get the default pool by *selector*; the data is None when the call failed."""
+    status, data = await state.call(
+        client,
+        "hmc_get_shared_processor_pool",
+        system_name_or_uuid=state.config.system_name,
+        pool=selector,
+    )
+    if status != "PASS":
+        return False, None
+    pool = field(data, "pool")
+    return field(pool, "pool_id") == 0 and field(pool, "configured") is True, data
 
 
 async def _score_reads(client: Client, state: RunState) -> None:
