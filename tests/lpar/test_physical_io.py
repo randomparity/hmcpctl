@@ -266,6 +266,53 @@ def admission(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_unbound_virtual_tag_refused_at_admission_before_reads(admission):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.creation.core import LparCreation
+
+    creation = LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=256, desired_procs=0.1),
+        physical_io=LparPhysicalIO(load_source_slot="2", console_slot="hmc"),
+    )
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        await admission.module.admit_creation_io(admission.hmc, "sys", creation)
+    admission.module.read_system_entry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provision_preflight_refuses_unbound_virtual_tag(monkeypatch):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.provisioning import core as provisioning
+    from hmcpctl.operations.lpar.provisioning.core import (
+        ProvisionAdapters,
+        ProvisionRequest,
+        ProvisionStorage,
+    )
+
+    monkeypatch.setattr(provisioning, "_check_profile_jobs", AsyncMock())
+    monkeypatch.setattr(
+        provisioning, "resolve_system_uuid", AsyncMock(return_value="sys")
+    )
+    name_check = AsyncMock()
+    monkeypatch.setattr(provisioning, "_check_name_unique", name_check)
+    request = ProvisionRequest(
+        name="example-lpar",
+        adapters=ProvisionAdapters(100),
+        storage=ProvisionStorage("vios", "lv-a", vg_uuid="vg", capacity_mib=1024),
+        resources=LparResources(min_memory=256, desired_memory=512, max_memory=1024),
+        partition_type="OS400",
+        physical_io=LparPhysicalIO(load_source_slot="2", console_slot="hmc"),
+    )
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        await provisioning._preflight_provision_request(
+            SimpleNamespace(config=object()), "sys-R1", request
+        )
+    name_check.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "problem",
     [

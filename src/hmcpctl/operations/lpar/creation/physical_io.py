@@ -13,6 +13,7 @@ from hmcpctl.operations.lpar.assignments import (
 from hmcpctl.operations.lpar.profiles.core import read_partition_profile
 
 from ....documents.lpar_io import VIRTUAL_TAGGED, LparPhysicalIO, virtual_form
+from ....documents.lpar_vscsi import validate_tagged_vscsi
 from ....errors import HMCError, HMCTLSFingerprintError
 from ....ssh.io_inventory import list_io_slots
 from ....ssh.lpar import complete_create_resources, resolve_system_cli_name
@@ -46,6 +47,9 @@ async def admit_creation_io(
     ):
         raise TypeError("creation_sriov must be a tuple of SriovLogicalPortAssignment")
     creation_io_record(io, creation.creation_sriov)
+    # Provisioning reaches creation only through this admission, never through
+    # validate_lpar_creation, so the binding rule is enforced here too (ADR 0382).
+    validate_tagged_vscsi(io, creation.virtual_scsi_adapters)
     if not io.requested:
         if creation.creation_sriov:
             raise ValueError("creation_sriov requires explicit physical_io fields")
@@ -84,8 +88,7 @@ async def admit_creation_io(
         if name == "console_slot" and value == "hmc":
             continue
         if name in VIRTUAL_TAGGED and virtual_form(value):
-            # validate_tagged_vscsi binds it to a declared vSCSI client (ADR 0382).
-            continue
+            continue  # bound to a declared vSCSI client above
         if value in physical:
             _require_tagged_role(resource, name, value)
             if not physical[value].is_required:
