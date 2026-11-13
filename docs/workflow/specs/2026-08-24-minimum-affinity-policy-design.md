@@ -6,7 +6,7 @@ Issue #315 requires a read-only, capability-aware view of Power11 LPAR
 `min_affinity_score` and `min_affinity_score_action`, including portable snapshot capture. The
 campaign acceptance requires REST-versus-CLI evidence, closed validation, actionable unsupported
 results, malformed-response tests, and no setter.
-[ADR 0086](../../../adr/0086-power11-minimum-affinity-policy-read.md) selects the evidence-backed
+[ADR 0086](../../adr/0086-power11-minimum-affinity-policy-read.md) selects the evidence-backed
 CLI path.
 
 ## Contract

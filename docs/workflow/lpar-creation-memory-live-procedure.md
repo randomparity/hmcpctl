@@ -3,7 +3,7 @@
 The named `creation-memory` group runs exactly one selected case. It is excluded
 from default and `all`. Registration and offline tests supply no native evidence.
 The [C07 design](specs/2026-10-26-lpar-shared-memory-creation-design.md) and
-[ADR 0299](../../adr/0299-lpar-shared-memory-creation.md) distinguish saved profiles,
+[ADR 0299](../adr/0299-lpar-shared-memory-creation.md) distinguish saved profiles,
 current configured values and runtime. This arm never activates or applies a profile.
 
 Root must separately approve the exact clean deployed candidate, selected system,
