@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from ..config import HMCConfig
 from .lpar_serial import SERIAL_OBSERVATION_BYTES, bound_profile_attributes
 from .profiles import read_lpar_profile_record
@@ -34,19 +36,25 @@ def parse_vscsi_profile(
     return records
 
 
+class VscsiProfile(NamedTuple):
+    """The bound profile's vSCSI records and its complete attribute map."""
+
+    records: dict[int, tuple[str, ...]]
+    attributes: dict[str, str]
+
+
 async def read_vscsi_profile(
     config: HMCConfig, system: str, name: str, partition_id: int, profile_name: str
-) -> dict[int, tuple[str, ...]]:
+) -> VscsiProfile:
     """Use the existing profile reader, then reject unbound or malformed evidence."""
-    return parse_vscsi_profile(
-        await read_lpar_profile_record(
-            config,
-            system,
-            name,
-            profile_name,
-            max_output_bytes=SERIAL_OBSERVATION_BYTES,
-        ),
+    record = await read_lpar_profile_record(
+        config,
+        system,
         name,
-        partition_id,
         profile_name,
+        max_output_bytes=SERIAL_OBSERVATION_BYTES,
+    )
+    return VscsiProfile(
+        parse_vscsi_profile(record, name, partition_id, profile_name),
+        bound_profile_attributes(record, name, partition_id, profile_name),
     )

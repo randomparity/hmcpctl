@@ -641,7 +641,7 @@ async def test_existing_creation_admission_is_retained(target, vios, failure):
     "encryption,expansion", tuple(itertools.product((None, False, True), repeat=2))
 )
 async def test_environment_paths_keep_false_and_omission(
-    target, environment, encryption, expansion
+    target, environment, encryption, expansion, ibmi_console
 ):
     b = target
     b.entry["Resource"]["PartitionType"] = environment
@@ -657,11 +657,18 @@ async def test_environment_paths_keep_false_and_omission(
         assert await invoke(b, True, **options) is b.entry
         assert "stamp" not in b.events
     else:
+        # Native IBM i creation needs an explicit console; omission stays on REST.
+        native = encryption is not None or expansion is not None
+        console = {"physical_io": ibmi_console(environment)} if native else {}
         result = await core.create_and_stamp_lpar(
             b.hmc,
             SYSTEM,
             core.LparCreation(
-                "part-R1", environment, LparResources(desired_memory=1024), **options
+                "part-R1",
+                environment,
+                LparResources(desired_memory=1024),
+                **options,
+                **console,
             ),
         )
         assert result.ownership_stamped is True

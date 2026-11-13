@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from unit.test_ssh_output_limits import connection
 
+from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.ssh.transport import HMCCLIError, run_hmc_command
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
@@ -217,6 +218,11 @@ def rig(tmp_path, monkeypatch):
         assert args[3] == p["partition_type"]
         assert args[4] == arm.RESOURCES
         assert kwargs["max_virtual_slots"] == 8
+        assert kwargs["physical_io"] == (
+            LparPhysicalIO(console_slot="hmc")
+            if p["partition_type"] == "OS400"
+            else None
+        )
         selected = kwargs["virtual_serial_adapters"]
         assert [
             (a.local_slot, a.role, a.remote_slot, a.remote_lpar_name) for a in selected

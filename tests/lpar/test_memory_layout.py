@@ -1043,16 +1043,26 @@ async def test_layout_admission_read_failure_is_not_create_uncertainty(
 @pytest.mark.asyncio
 async def test_layout_os400_ratios_do_not_borrow_linux_role_prerequisites(
     layout_creation_target,
+    ibmi_console,
+    monkeypatch,
 ):
     import shlex
     from dataclasses import replace
+    from unittest.mock import AsyncMock
 
+    from hmcpctl.operations.lpar.creation import physical_io
     from hmcpctl.operations.lpar.creation.core import create_and_stamp_lpar
 
     target = layout_creation_target
+    # A console-only request resolves the CLI name but reads no slot inventory.
+    monkeypatch.setattr(
+        physical_io, "resolve_system_cli_name", AsyncMock(return_value="sys-R1")
+    )
     target.entry["Resource"]["PartitionType"] = "OS400"
     creation = replace(
-        layout_creation(LparMemoryLayout(hpt_ratio="1:128")), partition_type="OS400"
+        layout_creation(LparMemoryLayout(hpt_ratio="1:128")),
+        partition_type="OS400",
+        physical_io=ibmi_console("OS400"),
     )
     result = await create_and_stamp_lpar(target.hmc, "selector", creation)
     assert "lpar_env=os400" in shlex.split(target.write.await_args.args[1])[-1]

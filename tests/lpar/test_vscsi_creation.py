@@ -13,6 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.documents.lpar_vscsi import (
     VirtualScsiClientAdapter as Client,
@@ -52,11 +53,12 @@ def entry(uuid, name, native_id, kind, environment="AIX/Linux"):
     }
 
 
-def profile(scsi, serial="none", name="new", native_id=9):
+def profile(scsi, serial="none", name="new", native_id=9, **tagged):
     output = io.StringIO()
     csv.writer(output, lineterminator="").writerow(
         f"{k}={v}"
         for k, v in {
+            **tagged,
             "name": "default_profile",
             "lpar_name": name,
             "lpar_id": native_id,
@@ -72,7 +74,7 @@ def profile(scsi, serial="none", name="new", native_id=9):
 
 
 @pytest.fixture(params=("AIX/Linux", "OS400"))
-def target(request, monkeypatch):
+def target(request, monkeypatch, ibmi_console):
     environment = request.param
     local = entry(LOCAL, "new", 9, "LogicalPartition", environment)
     vios = entry(VIOS, "vios-R1", 7, "VirtualIOServer", "Virtual IO Server")
@@ -165,11 +167,13 @@ def target(request, monkeypatch):
         monkeypatch.setattr(module + ".run_hmc_command", b.command)
     monkeypatch.setattr("hmcpctl.ssh.lpar_serial.read_lpar_profile_record", b.reader)
     monkeypatch.setattr("hmcpctl.ssh.lpar_vscsi.read_lpar_profile_record", b.reader)
+    b.console = ibmi_console(environment)
     b.hmc = hmc
     return b
 
 
 async def invoke(b, *, adapters=(CLIENT,), **options):
+    options.setdefault("physical_io", b.console)
     creation = core.LparCreation(
         "new",
         b.environment,
@@ -317,6 +321,143 @@ def test_keylock_refused_with_vscsi():
         )
 
 
+# --- tagged I/O binding (ADR 0382) ------------------------------------------
+
+
+def tagged_creation(io, adapters=(CLIENT,), serial=()):
+    return core.LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=1024),
+        max_virtual_slots=8,
+        physical_io=io,
+        virtual_serial_adapters=serial,
+        virtual_scsi_adapters=adapters,
+    )
+
+
+@pytest.mark.parametrize(
+    "io",
+    [
+        LparPhysicalIO(load_source_slot="2", console_slot="hmc"),
+        LparPhysicalIO(alt_restart_device_slot="2", console_slot="hmc"),
+        LparPhysicalIO(
+            load_source_slot="2", alt_restart_device_slot="2", console_slot="hmc"
+        ),
+    ],
+    ids=["load-source", "alt-restart", "both"],
+)
+def test_tagged_binding_admits_a_declared_client(io):
+    core.validate_lpar_creation(tagged_creation(io))
+
+
+@pytest.mark.parametrize(
+    ("name", "slot", "serial"),
+    [
+        ("load_source_slot", "3", ()),
+        ("load_source_slot", "0", ()),
+        ("alt_restart_device_slot", "1", ()),
+        ("load_source_slot", "3", (VirtualSerialAdapter(3, "server", False, 0),)),
+        ("alt_restart_device_slot", "4", ()),
+    ],
+    ids=["undeclared", "hmc-serial-0", "hmc-serial-1", "declared-serial", "ethernet"],
+)
+def test_tagged_binding_refuses_other_virtual_slots(name, slot, serial):
+    # Creation has no virtual ethernet input, so an ethernet slot is undeclared.
+    io = LparPhysicalIO(console_slot="hmc", **{name: slot})
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        core.validate_lpar_creation(tagged_creation(io, serial=serial))
+
+
+def test_tagged_binding_refuses_without_any_client():
+    io = LparPhysicalIO(load_source_slot="2", console_slot="hmc")
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        core.validate_lpar_creation(tagged_creation(io, adapters=()))
+
+
+@pytest.mark.asyncio
+async def test_ibmi_native_create_requires_console(target):
+    b = target
+    if b.environment == "OS400":
+        with pytest.raises(ValueError, match="console_slot"):
+            await invoke(b, physical_io=LparPhysicalIO())
+        assert "create" not in b.events and "stamp" not in b.events
+    else:
+        result = await invoke(b, physical_io=LparPhysicalIO())
+        assert vscsi_step(result).status == "ok"
+
+
+@pytest.fixture
+def ibmi_target(target):
+    if target.environment != "OS400":
+        pytest.skip("tagged I/O is IBM i only")
+    return target
+
+
+@pytest.mark.asyncio
+async def test_virtual_load_source_renders_and_verifies(ibmi_target):
+    b = ibmi_target
+    b.local_record = profile(
+        "2/client/7/vios-R1/20/0",
+        load_source_slot=2,
+        alt_restart_device_slot=2,
+        console_slot="hmc",
+    )
+    io = LparPhysicalIO(
+        load_source_slot="2", alt_restart_device_slot="2", console_slot="hmc"
+    )
+    result = await invoke(b, physical_io=io, apply_profile=True)
+    record = native_record(b)
+    assert "load_source_slot=2,alt_restart_device_slot=2,console_slot=hmc" in record
+    step = vscsi_step(result)
+    assert step.status == "ok"
+    assert step.result["records"] == [
+        {
+            "slot": 2,
+            "status": "verified",
+            "roles": ["load_source_slot", "alt_restart_device_slot"],
+        }
+    ]
+    statuses = {s.step: s.status for s in result.steps}
+    assert statuses["physical_io"] == "ok" and statuses["apply_profile"] == "ok"
+    assert result.workflow_completed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "saved",
+    [
+        {"load_source_slot": 3, "alt_restart_device_slot": "none"},
+        {"load_source_slot": "none", "alt_restart_device_slot": "none"},
+        {"alt_restart_device_slot": "none"},
+    ],
+    ids=["other-slot", "unset", "absent"],
+)
+async def test_virtual_load_source_mismatch_blocks_apply(ibmi_target, saved):
+    b = ibmi_target
+    b.local_record = profile("2/client/7/vios-R1/20/0", console_slot="hmc", **saved)
+    io = LparPhysicalIO(load_source_slot="2", console_slot="hmc")
+    result = await invoke(b, physical_io=io, apply_profile=True)
+    step = vscsi_step(result)
+    assert step.status == "error"
+    assert step.result["records"] == [
+        {"slot": 2, "status": "mismatch", "roles": ["load_source_slot"]}
+    ]
+    assert not result.workflow_completed and "apply" not in b.events
+
+
+@pytest.mark.asyncio
+async def test_client_record_mismatch_fails_the_bound_role(ibmi_target):
+    b = ibmi_target
+    b.local_record = profile(
+        "2/client/7/vios-R1/21/0", load_source_slot=2, console_slot="hmc"
+    )
+    io = LparPhysicalIO(load_source_slot="2", console_slot="hmc")
+    result = await invoke(b, physical_io=io, apply_profile=True)
+    assert vscsi_step(result).result["records"][0]["status"] == "mismatch"
+    assert "apply" not in b.events
+
+
 # --- readback parser -------------------------------------------------------
 
 
@@ -455,6 +596,12 @@ async def test_unavailable_readback_names_type_only(target):
 @pytest.mark.asyncio
 async def test_controller_mode_reads_no_profile(target):
     target.controller = True
+    if target.environment == "OS400":
+        # The required console is initial-profile I/O, which controller mode refuses.
+        with pytest.raises(ValueError, match="initial-profile I/O"):
+            await invoke(target, apply_profile=False)
+        assert "create" not in target.events
+        return
     result = await invoke(target, apply_profile=False)
     step = vscsi_step(result)
     assert step.status == "error"
@@ -473,6 +620,7 @@ async def test_serial_and_vscsi_declared_together_both_verify(target):
         b.environment,
         LparResources(desired_memory=1024),
         max_virtual_slots=8,
+        physical_io=b.console,
         virtual_serial_adapters=(serial,),
         virtual_scsi_adapters=(CLIENT,),
         apply_profile=True,

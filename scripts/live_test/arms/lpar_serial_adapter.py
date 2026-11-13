@@ -19,6 +19,7 @@ from typing import Any, TypedDict, cast
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import load_profile
 from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.documents.native_records import build_filter
 from hmcpctl.operations.lpar.creation.serial import (
@@ -496,6 +497,10 @@ async def execute(
         packet["partition_type"],
         RESOURCES,
         max_virtual_slots=8,
+        # IBM i native creation needs an explicit console (ADR 0382).
+        physical_io=LparPhysicalIO(console_slot="hmc")
+        if packet["partition_type"] == "OS400"
+        else None,
         virtual_serial_adapters=serial,
     )
     # Only an acknowledged call can reach fresh identity reconciliation. A raised/lost

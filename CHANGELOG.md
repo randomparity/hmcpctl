@@ -23,8 +23,18 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   names one ownership-authorized VIOS on the same system and is written in the single
   creation record. The result compares the saved profile record by record and states that no
   VIOS server adapter or mapping was created and that pairing is unproven.
+- IBM i creation accepts a virtual `load_source_slot` and `alt_restart_device_slot` when the
+  slot is the local slot of a vSCSI client declared in the same request (#1981, ADR 0382).
+  The saved profile is checked for each bound role before the profile is applied. Any other
+  virtual slot, and every virtual console slot, is refused before effects.
 
 ### Changed
+
+- Native IBM i (OS400) creation without `physical_io.console_slot` is refused before any write,
+  instead of failing at the HMC (#1981). No console default is inserted. When a request's
+  other inputs (for example serial or vSCSI records) select controller-mode creation on a
+  PowerVM management controller, an IBM i request is therefore refused too, because the
+  console is initial-profile I/O that controller mode refuses.
 
 - `hmcpctl lpars create` and `hmcpctl vios create` no longer echo an unknown key name from
   `--virtual-serial-adapters` inline JSON in their usage error; the error names the validation

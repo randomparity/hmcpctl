@@ -472,6 +472,7 @@ class _CreationFeatureCoordinator:
                 maximum=self.inputs.max_virtual_slots,
                 adapters=self.inputs.virtual_scsi_adapters,
                 serial=self.inputs.virtual_serial_adapters,
+                roles=self.inputs.physical_io.virtual_tagged(),
             )
         if not self.inputs.vios and self.inputs.start_requested:
             self._attempted_feature = "start_admission"
