@@ -50,6 +50,7 @@ from ....documents.lpar_memory_layout import LparMemoryLayout
 from ....documents.lpar_security_policy import LparSecurityPolicy
 from ....documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ....documents.lpar_start import LparStartSettings
+from ....documents.lpar_vscsi import VirtualScsiClientAdapter, validate_vscsi_input
 from ....documents.lpar_vtpm import LparVtpmSettings
 from ....errors import HMCError, HMCTLSFingerprintError
 from ....resource_identity import is_uuid, resolve_system_uuid
@@ -108,6 +109,7 @@ class LparCreation:
     creation_memory: LparCreationMemory = field(default_factory=LparCreationMemory)
     affinity_group_id: AffinityGroupID | None = None
     start_settings: LparStartSettings = field(default_factory=LparStartSettings)
+    virtual_scsi_adapters: tuple[VirtualScsiClientAdapter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,7 @@ class LparCreationResult:
     serial_step: WorkflowStep | None = None
     creation_memory_step: WorkflowStep | None = None
     affinity_group_step: WorkflowStep | None = None
+    vscsi_step: WorkflowStep | None = None
 
 
 _CreationCompletion = tuple[LparCreationResult, _CreationObservations]
@@ -211,6 +214,8 @@ async def _create_via_cli(
         native_options["memory_layout"] = creation.memory_layout
     if creation.virtual_serial_adapters:
         native_options["virtual_serial_adapters"] = creation.virtual_serial_adapters
+    if creation.virtual_scsi_adapters:
+        native_options["virtual_scsi_adapters"] = creation.virtual_scsi_adapters
     if creation.creation_memory.pairs():
         native_options["creation_memory"] = creation.creation_memory
     if start_admission is not None:
@@ -319,6 +324,15 @@ def validate_lpar_creation(creation: LparCreation) -> None:
         raise ValueError(
             "Serial adapters cannot be combined with keylock in native creation"
         )
+    validate_vscsi_input(
+        creation.virtual_scsi_adapters,
+        creation.max_virtual_slots,
+        creation.virtual_serial_adapters,
+    )
+    if creation.virtual_scsi_adapters and creation.keylock is not None:
+        raise ValueError(
+            "vSCSI adapters cannot be combined with keylock in native creation"
+        )
     if not isinstance(creation.memory_layout, LparMemoryLayout):
         raise TypeError("memory_layout must be LparMemoryLayout")
     creation.memory_layout.validate_creation(creation.partition_type)
@@ -407,6 +421,7 @@ def _creation_feature_inputs(creation: LparCreation) -> _CreationFeatureInputs:
         partition_id=creation.partition_id,
         max_virtual_slots=creation.max_virtual_slots,
         virtual_serial_adapters=creation.virtual_serial_adapters,
+        virtual_scsi_adapters=creation.virtual_scsi_adapters,
         creation_memory=creation.creation_memory,
         start_settings=creation.start_settings,
         memory_layout=creation.memory_layout,
@@ -657,6 +672,7 @@ async def _submit_native_creation(
             pass
         elif (
             features.inputs.serial_requested
+            or features.inputs.vscsi_requested
             or features.inputs.layout_requested
             or features.inputs.memory_requested
             or features.inputs.start_requested
@@ -829,6 +845,7 @@ async def _missing_created_identity(
             (features.inputs.memory_requested, "Creation memory"),
             (features.inputs.affinity_requested, "Affinity group"),
             (features.inputs.serial_requested, "Serial"),
+            (features.inputs.vscsi_requested, "vSCSI"),
             (features.inputs.layout_requested, "Memory layout"),
             (features.inputs.hardware_requested, "Hardware memory"),
             (roles_requested(creation.settings), "Role"),
@@ -1159,6 +1176,7 @@ def _creation_followup(
         )
         or creation.memory_layout.pairs()
         or creation.virtual_serial_adapters
+        or creation.virtual_scsi_adapters
         or memory_requested
         or start_requested
         or affinity_requested
@@ -1177,6 +1195,7 @@ def _creation_followup(
             observations.hardware_memory_step.step,
             observations.memory_layout_step.step,
             observations.serial_step.step,
+            observations.vscsi_step.step,
             observations.creation_memory_step.step,
         )
     )

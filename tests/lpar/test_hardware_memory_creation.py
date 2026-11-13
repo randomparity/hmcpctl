@@ -168,6 +168,7 @@ async def test_prefollowup_observes_coordinator_feature_selection(
 
     assert trace == [
         "serial_step",
+        "vscsi_step",
         "creation_memory_step",
         "memory_layout_step",
         "affinity_group_step",

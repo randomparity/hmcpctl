@@ -1358,6 +1358,19 @@
             ]
           },
           {
+            "variant": "vscsi-client-creation",
+            "parameters": [
+              {
+                "name": "max_virtual_slots",
+                "constraint": "explicit integer maximum strictly greater than every vSCSI local slot required for vSCSI creation; local slots unique across serial and vSCSI records"
+              },
+              {
+                "name": "virtual_scsi_adapters",
+                "constraint": "optional strict typed client-only tuple (ADR 0376), AIX/Linux and OS400; no role field, extra keys refused; exactly one remote VIOS ID or name resolved in the selected system's contained inventory, required to be a VIOS and ownership-authorized before one native creation attempt; remote slot >=2 and below that VIOS maximum; keylock refused; independent classic saved-default-profile record comparison, controller current mapping unavailable; no VIOS server adapter or mapping created, pairing unproven; no live verification claimed"
+              }
+            ]
+          },
+          {
             "variant": "c07-creation-memory",
             "parameters": [
               {

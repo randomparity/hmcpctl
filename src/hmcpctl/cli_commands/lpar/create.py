@@ -21,6 +21,7 @@ from ...documents.lpar_affinity_group import parse_affinity_group_cli
 from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_serial import validate_serial_input
 from ...documents.lpar_start import LparStartSettings
+from ...documents.lpar_vscsi import validate_vscsi_input
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.creation.core import LparCreation
 from ...operations.lpar.creation.workflow import create_lpar
@@ -30,10 +31,12 @@ from ..runtime import with_client
 from .assignment_input import (
     SECURITY_POLICY_WARNING,
     SERIAL_INPUT_HELP,
+    VSCSI_INPUT_HELP,
     load_creation_memory,
     load_pcie_assignments,
     load_physical_io,
     load_security_policy,
+    load_virtual_scsi_adapters,
     load_virtual_serial_adapters,
 )
 
@@ -208,7 +211,7 @@ def lpars_create(
         int | None,
         typer.Option(
             "--max-virtual-slots",
-            help="Maximum virtual I/O slots; required explicitly for serial input",
+            help="Maximum virtual I/O slots; required explicitly for serial or vSCSI input",
         ),
     ] = None,
     virtual_serial_adapters: Annotated[
@@ -284,6 +287,10 @@ def lpars_create(
             help="Typed creation-only boot/start JSON; omission preserves defaults, false is explicit",
         ),
     ] = None,
+    virtual_scsi_adapters: Annotated[
+        str | None,
+        typer.Option("--virtual-scsi-adapters", help=VSCSI_INPUT_HELP),
+    ] = None,
 ) -> None:
     """Create a new LPAR on a managed system.
 
@@ -317,6 +324,14 @@ def lpars_create(
         raise typer.BadParameter(
             "Unique local slots >=2 must be below explicit --max-virtual-slots; encoded serial collection must fit 64 KiB",
             param_hint="--virtual-serial-adapters",
+        ) from None
+    vscsi = load_virtual_scsi_adapters(virtual_scsi_adapters)
+    try:
+        validate_vscsi_input(vscsi, max_virtual_slots, serial)
+    except (ValueError, TypeError):
+        raise typer.BadParameter(
+            "Local slots >=2 must be unique across serial and vSCSI records and below explicit --max-virtual-slots; encoded vSCSI collection must fit 64 KiB",
+            param_hint="--virtual-scsi-adapters",
         ) from None
     try:
         layout = LparMemoryLayout(
@@ -419,6 +434,7 @@ def lpars_create(
                 max_virtual_slots=max_virtual_slots,
                 creation_memory=creation_memory,
                 virtual_serial_adapters=serial,
+                virtual_scsi_adapters=vscsi,
                 caller_token=caller_token,
                 physical_io=load_physical_io(physical_io),
                 apply_profile=not no_apply,
