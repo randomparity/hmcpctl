@@ -1,0 +1,50 @@
+{
+  "format_version": 1,
+  "operations": [
+    {
+      "operation": "inventory.logical",
+      "arm": "round2",
+      "scenario": "st1-logical-inventory"
+    },
+    {
+      "operation": "lpar.decommission",
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
+    },
+    {
+      "operation": "lpar.inspect",
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
+    },
+    {
+      "operation": "lpar.plan",
+      "arm": "round2",
+      "scenario": "st1-lpar-plan"
+    },
+    {
+      "operation": "lpar.power",
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
+    },
+    {
+      "operation": "lpar.prepare_host_handoff",
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
+    },
+    {
+      "operation": "lpar.reconfigure",
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
+    },
+    {
+      "operation": "provision.lpar",
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
+    },
+    {
+      "operation": "tools.invoke",
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
+    }
+  ]
+}
