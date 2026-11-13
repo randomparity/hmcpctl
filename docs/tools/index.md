@@ -6,8 +6,8 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **207** tools are registered.
-- **206** are callable in a default deployment.
+- **208** tools are registered.
+- **207** are callable in a default deployment.
 - **11** are listed by `tools/list` in a default deployment (ADR 0330); `hmc_search_tools` finds the rest, which are called by name or through `hmc_invoke_tool`.
 
 | Effect class | Tools |
@@ -15,7 +15,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `arbitrary-command` | 1 |
 | `destructive` | 49 |
 | `mutate` | 66 |
-| `read` | 91 |
+| `read` | 92 |
 
 ## Maturity vocabulary
 
@@ -29,7 +29,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 
 | Domain | Tools | Page |
 | --- | --- | --- |
-| `adapter` | 6 | [adapter.md](adapter.md) |
+| `adapter` | 7 | [adapter.md](adapter.md) |
 | `boot_order` | 3 | [boot_order.md](boot_order.md) |
 | `capacity` | 1 | [capacity.md](capacity.md) |
 | `cluster` | 5 | [cluster.md](cluster.md) |
@@ -138,6 +138,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_effective_permissions` | `read` | [permissions.md](permissions.md) |
 | `hmc_find_placement` | `read` | [placement.md](placement.md) |
 | `hmc_fleet_health` | `read` | [health.md](health.md) |
+| `hmc_get_adapter` | `read` | [adapter.md](adapter.md) |
 | `hmc_get_console_info` | `read` | [console.md](console.md) |
 | `hmc_get_job` | `read` | [job.md](job.md) |
 | `hmc_get_lpar` | `read` | [lpar.md](lpar.md) |

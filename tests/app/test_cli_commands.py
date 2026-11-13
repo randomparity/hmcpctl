@@ -2670,6 +2670,50 @@ def test_lpar_scoped_commands_pass_system_scope(
     assert seen == [(expected_system, LPAR_NAME)]
 
 
+def test_adapters_get_forwards_type_uuid_and_system(fake_hmc, monkeypatch):
+    seen = []
+
+    async def fake_get_adapter(_hmc, *positional, **keywords):
+        seen.append((positional, keywords))
+        return {"UUID": "adapter-1", "paired_identity": {"remote_slot": 40}}
+
+    monkeypatch.setattr(
+        "hmcpctl.cli_commands.virtualization.adapters.get_adapter", fake_get_adapter
+    )
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "adapters",
+            "get",
+            LPAR_NAME,
+            "adapter-1",
+            "--type",
+            "VirtualFibreChannelClientAdapter",
+            "--system",
+            "sys-R1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == [
+        (
+            (LPAR_NAME, "VirtualFibreChannelClientAdapter", "adapter-1"),
+            {"system_name_or_uuid": "sys-R1"},
+        )
+    ]
+    assert '"remote_slot": 40' in result.output
+
+
+def test_adapters_get_refuses_a_non_storage_type_before_client_call(fake_hmc):
+    result = RUNNER.invoke(
+        cli.app,
+        ["adapters", "get", LPAR_UUID, "adapter-1", "--type", "ClientNetworkAdapter"],
+    )
+
+    assert result.exit_code == 2
+    assert fake_hmc.calls == []
+
+
 def test_storage_map_rejects_invalid_kind_before_client_call(fake_hmc):
     result = RUNNER.invoke(
         cli.app,

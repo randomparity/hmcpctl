@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal, Protocol, TypeVar, get_args
+from typing import Any, Literal, Protocol, TypeVar, cast, get_args
 
 # Element is a type contract only; client implementations parse inbound XML
 # through defusedxml.
@@ -28,6 +28,12 @@ AdapterType = Literal[
     "VirtualNICDedicated",
 ]
 ADAPTER_TYPES = frozenset(get_args(AdapterType))
+
+StorageAdapterType = Literal[
+    "VirtualSCSIClientAdapter",
+    "VirtualFibreChannelClientAdapter",
+]
+STORAGE_ADAPTER_TYPES = frozenset(get_args(StorageAdapterType))
 
 
 def _reject_non_uuid_path_argument(argument: str, value: str) -> None:
@@ -136,6 +142,15 @@ def validate_adapter_type(adapter_type: AdapterType) -> AdapterType:
             f"Must be one of: {', '.join(sorted(ADAPTER_TYPES))}"
         )
     return adapter_type
+
+
+def validate_storage_adapter_type(adapter_type: str) -> StorageAdapterType:
+    if adapter_type not in STORAGE_ADAPTER_TYPES:
+        raise ValueError(
+            f"Invalid adapter_type {adapter_type!r}. "
+            f"Must be one of: {', '.join(sorted(STORAGE_ADAPTER_TYPES))}"
+        )
+    return cast("StorageAdapterType", adapter_type)
 
 
 class LparsClient(Protocol):
@@ -400,6 +415,15 @@ class AdaptersClient(Protocol):
         uuid_path_arguments: Mapping[str, str],
         **kwargs: Any,
     ) -> httpx.Response: ...
+
+    async def _get(
+        self,
+        path: str,
+        resource_type: str | None = None,
+        include_schema_version: bool = True,
+        *,
+        uuid_path_arguments: Mapping[str, str] | None = None,
+    ) -> str: ...
 
     async def list_child(
         self, parent_type: str, parent_uuid: str, child_type: str

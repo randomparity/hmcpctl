@@ -31,6 +31,13 @@
       "observed_at": "2026-10-07T21:33:28Z"
     },
     {
+      "operation": "adapter.get",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "adapter.list",
       "implementation": "implemented",
       "verification": "stale",

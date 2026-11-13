@@ -2975,6 +2975,24 @@
       ]
     },
     {
+      "operation": "adapter.get",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "vscsi-client",
+            "parameters": []
+          },
+          {
+            "variant": "vfc-client",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
       "operation": "adapter.add_network",
       "implementation": {
         "state": "implemented",
