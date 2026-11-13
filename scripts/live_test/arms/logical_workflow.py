@@ -1,11 +1,13 @@
-"""ST73: the logical create, reconfigure and destroy workflow on one partition (#1854).
+"""ST73: the logical create, reconfigure, hand-off and destroy workflow on one partition.
 
 One `hmcpctl-live-pwr-<8 hex>-p` partition goes through the primary catalog's workflow
 tools only: `hmc_provision_lpar` creates it inactive on a run-owned 1 GiB volume and the
 provision VLAN, `hmc_reconfigure_lpar` changes its memory and processors (read back
 `profile`), `hmc_inspect_lpar` reports the change and the volume's mapping,
-`hmc_power_lpar` starts it (the change must be current) and stops it, and
-`hmc_decommission_lpar` deletes it and the owned volume. Every other tool the arm
+`hmc_prepare_host_handoff` holds it for a run-labelled consumer (ADR 0193) while
+`hmc_invoke_tool` dispatches a read and a hold-less start that the hold must refuse,
+then releases it, `hmc_power_lpar` starts it (the change must be current) and stops it,
+and `hmc_decommission_lpar` deletes it and the owned volume. Every other tool the arm
 calls is an independent witness read, or teardown. The lpar-power arm's names,
 baseline, teardown, comparison and recovery witness are reused.
 """
@@ -13,6 +15,7 @@ baseline, teardown, comparison and recovery witness are reused.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
@@ -42,8 +45,12 @@ WORKFLOW_TOOLS = frozenset(
         "hmc_power_lpar",
         "hmc_decommission_lpar",
         "hmc_operation_status",
+        "hmc_prepare_host_handoff",
+        "hmc_invoke_tool",
     }
 )
+HANDOFF = "hmc_prepare_host_handoff"
+INVOKE = "hmc_invoke_tool"
 #: Within lpar-config's maximums (4096 MiB, 2 virtual processors), unlike its desired.
 PATCH = {"memory_mib": 3072, "processors": 2}
 _STOPPED = frozenset({lpar_power._NOT_ACTIVATED})
@@ -258,6 +265,181 @@ async def _inspect(client: Client, state: RunState, run: lpar_power.Run) -> None
     )
 
 
+def _field(data: object, *path: str) -> Any:
+    for key in path:
+        data = data.get(key) if isinstance(data, Mapping) else None
+    return data
+
+
+def _same_uuid(found: object, wanted: str | None) -> bool:
+    return (
+        isinstance(found, str)
+        and wanted is not None
+        and found.lower() == wanted.lower()
+    )
+
+
+async def _handoff_call(
+    client: Client,
+    state: RunState,
+    run: lpar_power.Run,
+    action: str,
+    consumer_label: str | None = None,
+    hold_id: str | None = None,
+) -> tuple[str, Any]:
+    """One hand-off call; a consumer label places the hold, a hold_id releases it."""
+    st, data = await state.call(
+        client,
+        "hmc_prepare_host_handoff",
+        lpar_name_or_uuid=run.p_uuid,
+        system_name_or_uuid=run.system,
+        action=action,
+        hold=consumer_label is not None,
+        consumer_label=consumer_label,
+        hold_id=hold_id,
+    )
+    hold = "hold" if consumer_label else "report"
+    state.record(
+        SUBTASK, f"{HANDOFF} ({hold if action == 'prepare' else action})", st, data
+    )
+    return st, data
+
+
+async def _hold_reported(client: Client, state: RunState, run: lpar_power.Run) -> bool:
+    """Whether a hold-less prepare still reports a hold on P; True when unreadable."""
+    st, data = await _handoff_call(client, state, run, "prepare")
+    return st != "PASS" or _field(data, "hold") is not None
+
+
+async def _place_hold(client: Client, state: RunState, run: lpar_power.Run) -> bool:
+    """Hold P for the run's label; whether the hold is placed as ADR 0193 states it."""
+    op = "lpar.prepare_host_handoff"
+    label = f"hmcpctl-live-{run.token}"
+    run.data["handoff_label"] = label
+    st, data = await _handoff_call(client, state, run, "prepare", label)
+    run.data[op] = data
+    hold_id = _field(data, "hold", "hold_id") if st == "PASS" else None
+    run.data["hold_id"] = hold_id if isinstance(hold_id, str) and hold_id else None
+    run.hold(
+        op,
+        "hold-placed",
+        run.data["hold_id"] is not None
+        and _field(data, "hold", "consumer_label") == label
+        and _same_uuid(
+            _field(data, "document", "identity", "partition_uuid"), run.p_uuid
+        ),
+    )
+    document = json.dumps(_field(data, "document"), default=str)
+    run.hold(
+        op,
+        "document-withholds-hold-id",
+        run.data["hold_id"] is not None and run.data["hold_id"] not in document,
+    )
+    st, again = await _handoff_call(client, state, run, "prepare", label)
+    run.hold(
+        op,
+        "repeat-returns-the-hold",
+        st == "PASS"
+        and run.data["hold_id"] is not None
+        and _field(again, "hold", "hold_id") == run.data["hold_id"],
+    )
+    return run.holds(op, "hold-placed")
+
+
+async def _invoke_cases(client: Client, state: RunState, run: lpar_power.Run) -> None:
+    """Through the gateway: a read answers as directly; a hold-less start is refused."""
+    st, data = await state.call(
+        client,
+        "hmc_invoke_tool",
+        name="hmc_inspect_lpar",
+        arguments={
+            "lpar_name_or_uuid": run.p_uuid,
+            "system_name_or_uuid": run.system,
+            "include": ["resources"],
+        },
+    )
+    state.record(SUBTASK, f"{INVOKE} (hmc_inspect_lpar)", st, data)
+    run.data["tools.invoke.read"] = data
+    run.hold(
+        "tools.invoke",
+        "dispatches-a-read-as-direct",
+        st == "PASS"
+        and _field(data, "name") == "hmc_inspect_lpar"
+        and _same_uuid(_field(data, "result", "uuid"), run.p_uuid)
+        and _field(data, "result", "resources", "desired_memory_mib")
+        == PATCH["memory_mib"],
+    )
+    request_id = f"{run.token}-held-start"
+    run.requests.setdefault(request_id, False)
+    st, data = await state.call(
+        client,
+        "hmc_invoke_tool",
+        name="hmc_power_lpar",
+        arguments={
+            "request_id": request_id,
+            "lpar_name_or_uuid": run.p_uuid,
+            "system_name_or_uuid": run.system,
+            "action": "start",
+            "wait_seconds": 600,
+        },
+    )
+    state.record(SUBTASK, f"{INVOKE} (hmc_power_lpar held start)", st, data)
+    record = await _status(client, state, request_id)
+    record = await _settle(client, state, request_id, record)
+    if record is None or record.get("state") == "terminal":
+        run.requests[request_id] = True
+    run.data["tools.invoke.held_start"] = {"call": data, "operation": record}
+    refused = "partition_held" in json.dumps(
+        {"call": data, "operation": record}, default=str
+    ) and (record is None or record.get("outcome") == "failed")
+    off = await lpar_power._lpar_state(client, state, run, run.p_uuid or "") in _STOPPED
+    run.hold("tools.invoke", "dispatched-mutation-meets-the-hold", refused and off)
+    run.hold("lpar.prepare_host_handoff", "hold-refuses-a-mutation", refused and off)
+
+
+async def _release_hold(client: Client, state: RunState, run: lpar_power.Run) -> bool:
+    """Release P's hold as its placing agent; whether a later report finds none."""
+    st, data = await _handoff_call(
+        client, state, run, "release", hold_id=run.data.get("hold_id")
+    )
+    run.data["handoff_release"] = data
+    released = not await _hold_reported(client, state, run)
+    if released:
+        run.data["hold_id"] = None
+        run.data.pop("handoff_label", None)
+    return (
+        st == "PASS"
+        and _field(data, "action") == "release"
+        and _field(data, "document") is None
+        and released
+    )
+
+
+async def _handoff(client: Client, state: RunState, run: lpar_power.Run) -> bool:
+    """Hold, prove the hold through the gateway, release; whether P is free again."""
+    if await _place_hold(client, state, run):
+        await _invoke_cases(client, state, run)
+    released = await _release_hold(client, state, run)
+    run.hold("lpar.prepare_host_handoff", "release-drops-the-hold", released)
+    return released
+
+
+async def _abandon_hold(client: Client, state: RunState, run: lpar_power.Run) -> bool:
+    """Release a hold the workflow left; whether none is left (teardown needs none)."""
+    if "handoff_label" not in run.data:
+        return True
+    released = await _release_hold(client, state, run)
+    if not released:
+        state.record(
+            SUBTASK,
+            f"{HANDOFF} (teardown release)",
+            "FAIL",
+            run.data.get("handoff_release"),
+            "MANUAL RECOVERY REQUIRED: release the hold with hmcpctl holds release",
+        )
+    return released
+
+
 async def _power(
     client: Client, state: RunState, run: lpar_power.Run, action: str
 ) -> Mapping[str, Any] | None:
@@ -332,6 +514,8 @@ async def _workflow(client: Client, state: RunState, run: lpar_power.Run) -> Non
     if not await _reconfigure(client, state, run):
         return
     await _inspect(client, state, run)
+    if not await _handoff(client, state, run):
+        return
     if await _power_cases(client, state, run):
         await lpar_power._decommission_cases(client, state, run)
 
@@ -407,6 +591,17 @@ _ASSERTIONS: dict[str, tuple[str, ...]] = {
     ),
     "lpar.reconfigure": ("inactive-change-classified-profile",),
     "lpar.inspect": ("reports-the-change-inactive", "reports-the-owned-mapping"),
+    "lpar.prepare_host_handoff": (
+        "hold-placed",
+        "document-withholds-hold-id",
+        "repeat-returns-the-hold",
+        "hold-refuses-a-mutation",
+        "release-drops-the-hold",
+    ),
+    "tools.invoke": (
+        "dispatches-a-read-as-direct",
+        "dispatched-mutation-meets-the-hold",
+    ),
     "lpar.power": (
         "start-completed-activated",
         "started-with-the-change",
@@ -463,6 +658,32 @@ def _observe(state: RunState, run: lpar_power.Run, cleanup: str) -> None:
             cleanup=cleanup,
             data=run.data.get("lpar.inspect"),
         )
+    if "lpar.prepare_host_handoff" in run.ran:
+        state.record_verified(
+            SUBTASK,
+            HANDOFF,
+            operation="lpar.prepare_host_handoff",
+            scenario=SCENARIO,
+            assertions=_assertions(run, "lpar.prepare_host_handoff"),
+            cleanup=cleanup,
+            data={
+                key: run.data.get(key)
+                for key in ("lpar.prepare_host_handoff", "handoff_release")
+            },
+        )
+    if "tools.invoke" in run.ran:
+        state.record_verified(
+            SUBTASK,
+            INVOKE,
+            operation="tools.invoke",
+            scenario=SCENARIO,
+            assertions=_assertions(run, "tools.invoke"),
+            cleanup=cleanup,
+            data={
+                key: run.data.get(key)
+                for key in ("tools.invoke.read", "tools.invoke.held_start")
+            },
+        )
     if "lpar.power" in run.ran:
         state.record_verified(
             SUBTASK,
@@ -493,7 +714,7 @@ def _observe(state: RunState, run: lpar_power.Run, cleanup: str) -> None:
 
 
 async def exercise_logical_workflow(client: Client, state: RunState) -> None:
-    print("\n=== ST73: logical create, reconfigure and destroy (issue #1854) ===")
+    print("\n=== ST73: logical create, reconfigure, hand-off and destroy ===")
     run = lpar_power.Run(state.config.system_name, uuid.uuid4().hex[:8])
     ready = await _preconditions(client, state, run)
     if isinstance(ready, str):
@@ -505,7 +726,8 @@ async def exercise_logical_workflow(client: Client, state: RunState) -> None:
         await _workflow(client, state, run)
     finally:
         try:
-            closed = await _abandon_reconfigure(client, state, run)
+            released = await _abandon_hold(client, state, run)
+            closed = await _abandon_reconfigure(client, state, run) and released
         finally:
             await lpar_power._teardown(client, state, run)
     same = await lpar_power._compare(client, state, run, ready)

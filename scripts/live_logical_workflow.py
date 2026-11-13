@@ -2,8 +2,9 @@
 
 This mutates a managed system: it provisions one scratch partition on a new 1 GiB
 volume in the configured volume group, reconfigures its memory and processors,
-inspects it, starts it once and stops it immediately, then decommissions it and the
-volume, all through the primary catalog's workflow tools. Run
+inspects it, holds it for a hand-off and releases it, starts it once and stops it
+immediately, then decommissions it and the volume, all through the primary catalog's
+workflow tools. Run
 live_test_preflight.py --group logical-workflow first and live_test_recovery.py
 afterwards, including after apparent success.
 """

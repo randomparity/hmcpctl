@@ -457,6 +457,10 @@ def _logical_workflow_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
                 "once and stopped immediately, then decommissioned"
             ),
             (
+                "one local host-handoff hold on that partition in this host's hmcpctl "
+                "state, placed and released by the run; no HMC write"
+            ),
+            (
                 f"one {lpar_power.VOLUME_MIB} MiB volume {lpar_power.VOLUME_PREFIX}"
                 f"<8 hex> in volume group {config.vdisk_volume_group_name}, created by "
                 "provision and deleted by decommission"

@@ -690,6 +690,9 @@ RELEASE_SCENARIO_SUBTASKS = {
     "st35-bare-cec": 25,
     "st36-io-slots": 24,
     "st41-lpar-power": 41,
+    "st1-logical-inventory": 1,
+    "st1-lpar-plan": 1,
+    "st73-logical-workflow": 73,
 }
 
 
