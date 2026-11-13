@@ -2075,6 +2075,31 @@ a passing configuration readback does not establish those behaviors. Registratio
 of the arm adds no packaged maturity credit.
 
 
+## vSCSI client record at creation (arm 74)
+
+The opt-in `lpar-vscsi-client` arm (`st74-lpar-vscsi-client`, ADR 0376) lists the selected
+system's VIOS partitions and creates one inactive OS400 scratch partition with an explicit
+HMC console, `max_virtual_slots=10` and one vSCSI client record: local slot 2, naming the
+first listed VIOS by partition ID, remote slot one below that VIOS's maximum. With no VIOS it
+records a failure before any create. It requires confirmed ownership, a `virtual_scsi_adapters`
+step of `ok`, and the result's statements that no VIOS server adapter or mapping was created
+and that pairing is unproven. It applies the created profile and records the apply step's
+status as observed, because applying a client whose server slot is absent is uncaptured.
+
+The arm never writes the VIOS, maps a disk, activates the partition or retries. Guarded
+inactive-only deletion and an independent resource comparison follow on every outcome.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group lpar-vscsi-client
+uv run --no-sync python scripts/live_test_runner.py --group lpar-vscsi-client \
+  --results-file "$WINDOW_PRIVATE/results.json"
+uv run --no-sync python scripts/live_test_recovery.py --results "$WINDOW_PRIVATE/results.json"
+```
+
+Always run recovery, including after apparent success. Generate public evidence with
+`scripts/live_test_evidence.py`; keep raw results private. A pass proves the saved client
+record only, not a paired server adapter, a usable disk or IBM i installation.
+
 ## Native partition memory quantities (D01, opt-in subtask 50)
 
 The `lpar-memory-quantities` arm creates one inactive AIX/Linux fixture with
