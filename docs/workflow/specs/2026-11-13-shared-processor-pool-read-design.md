@@ -90,7 +90,9 @@ definitions and `docs/tools/` by their generators.
 endpoint. A new focused vocabulary, `tests/fixtures/live/vocabulary/v10r3-8375-42a-shared-processor-pool-source.json`,
 records the captured `GET /rest/api/uom/ManagedSystem/{uuid}/SharedProcessorPool` (200) and
 `lshwres -r procpool -m {}` (exit 0), in the shape of the existing `*-source.json` files,
-with the captured `accept` and `content_type`. The gate reads only the GET path.
+with the captured `accept` and `content_type`. The gate reads only the GET path. The capture
+requested `application/atom+xml`; the client's typed `type=SharedProcessorPool` request is
+evidenced by ST4's pool reads, not by this capture.
 
 **Live scenario.** ST4's read-only profile reads gain `_processor_pool_reads`, beside the
 memory-pool read (`scripts/live_test/arms/profiles.py`). It needs only the system. It

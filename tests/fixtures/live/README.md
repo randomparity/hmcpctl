@@ -321,7 +321,9 @@ Projection SHA-256: `1e27f0aa19563f059c2737ddc2112fbe9d3940afb86f18046b45b8ece53
 `rest-shared-processor-pool-feed` and `cli-procpool` (`capture` prefix `2026-11-13-q1975/`)
 are a read-only capture for #1975 on an HMC at V10R3 SP1060 managing an 8375-42A (POWER9):
 the `ManagedSystem/{uuid}/SharedProcessorPool` feed (HTTP 200, 64 entries, PoolID 0–63,
-requested with `Accept: application/atom+xml`) and `lshwres -r procpool -m <system>` in its
+requested with `Accept: application/atom+xml`, while the client sends the typed
+`application/vnd.ibm.powervm.uom+xml; type=SharedProcessorPool`, which this capture does
+not cover; ST4's pool reads are the evidence for the typed request) and `lshwres -r procpool -m <system>` in its
 default `name=value` form. They were taken by hand rather than by the capture harness and
 tokenized with the same rules: UUIDs map to `0000000N-abcd-4ef0-8abc-00000000000N` tokens in
 first-seen order (keeping the HMC's upper case on the partition link), the HMC host is
