@@ -282,6 +282,22 @@ async def test_unbound_virtual_tag_refused_at_admission_before_reads(admission):
 
 
 @pytest.mark.asyncio
+async def test_console_less_ibmi_io_refused_at_admission_before_reads(admission):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.creation.core import LparCreation
+
+    creation = LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=256, desired_procs=0.1),
+        physical_io=LparPhysicalIO(load_source_slot=DRC),
+    )
+    with pytest.raises(ValueError, match="console_slot"):
+        await admission.module.admit_creation_io(admission.hmc, "sys", creation)
+    admission.module.read_system_entry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_provision_preflight_refuses_unbound_virtual_tag(monkeypatch):
     from hmcpctl.documents.lpar import LparResources
     from hmcpctl.operations.lpar.provisioning import core as provisioning
@@ -356,6 +372,7 @@ async def test_reject_relationship_before_create(admission, problem):
             io_slots=(ProfileIoSlot(DRC, "3", problem != "required"),),
             lpar_io_pool_ids=("3",),
             load_source_slot=DRC,
+            console_slot="hmc",
         ),
     )
     messages = {
@@ -569,6 +586,7 @@ async def test_physical_tag_requires_fresh_device_role_capability(admission):
             io_slots=(ProfileIoSlot(DRC, "3", True),),
             lpar_io_pool_ids=("3",),
             load_source_slot=DRC,
+            console_slot="hmc",
         ),
     )
     admission.module.read_system_entry.return_value["Resource"][

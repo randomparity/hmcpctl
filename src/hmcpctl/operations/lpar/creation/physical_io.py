@@ -16,7 +16,11 @@ from ....documents.lpar_io import VIRTUAL_TAGGED, LparPhysicalIO, virtual_form
 from ....documents.lpar_vscsi import validate_tagged_vscsi
 from ....errors import HMCError, HMCTLSFingerprintError
 from ....ssh.io_inventory import list_io_slots
-from ....ssh.lpar import complete_create_resources, resolve_system_cli_name
+from ....ssh.lpar import (
+    complete_create_resources,
+    require_ibmi_console,
+    resolve_system_cli_name,
+)
 from ....ssh.lpar_io import creation_io_record
 from ....ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
 from ....ssh.sriov import list_sriov_unconfigured_logical_port_rows
@@ -47,13 +51,16 @@ async def admit_creation_io(
     ):
         raise TypeError("creation_sriov must be a tuple of SriovLogicalPortAssignment")
     creation_io_record(io, creation.creation_sriov)
-    # Provisioning reaches creation only through this admission, never through
-    # validate_lpar_creation, so the binding rule is enforced here too (ADR 0382).
+    # The provisioning preflight admits creation I/O through this function before
+    # any effect, so the binding rule refuses there too, not only inside the create
+    # (ADR 0382).
     validate_tagged_vscsi(io, creation.virtual_scsi_adapters)
     if not io.requested:
         if creation.creation_sriov:
             raise ValueError("creation_sriov requires explicit physical_io fields")
         return
+    # Requested physical I/O always selects native creation.
+    require_ibmi_console(creation.partition_type, io)
     if (
         creation.keylock is not None
         or complete_create_resources(creation.resources) is None
