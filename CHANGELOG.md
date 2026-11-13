@@ -16,6 +16,18 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ## [Unreleased]
 
+### Added
+
+- Virtual persistent-memory volumes: `hmc_list_persistent_memory_volumes`,
+  `hmc_get_persistent_memory_volume`, `hmc_create_persistent_memory_volume`,
+  `hmc_rename_persistent_memory_volume` and `hmc_delete_persistent_memory_volume`
+  (`hmcpctl lpars pmem-list`, `pmem-show`, `pmem-create`, `pmem-rename` and `pmem-delete`)
+  manage DRAM-backed volumes through the HMC REST API. Create, rename and delete name the
+  partition the volume is assigned to and are guarded by its ownership token. Create requires
+  an inactive AIX/Linux partition with a spare volume slot and a size that is a multiple of the
+  system's advertised block size. Delete destroys the volume's data: it needs
+  `acknowledge_data_loss` (`--acknowledge-data-loss`) and an inactive partition (ADR 0373).
+
 ## [0.2.0] - 2026-11-13
 
 0.2.0 ships the logical LPAR workflow through the policy-filtered primary MCP catalog

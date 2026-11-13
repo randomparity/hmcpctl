@@ -28,11 +28,12 @@ Model, `documents/persistent_memory.py`:
 - `validate_volume_name(name)`: 1–64 characters of `[A-Za-z0-9_.-]`, a
   conservative subset applied to new names only (create, rename target), never
   to selectors of existing volumes; the HMC stays the final arbiter.
-- `build_create_document(name, size_mib, affinity, partition_link)` and
-  `build_rename_document(new_name)`. Element names, the partition reference
-  form and whether rename needs more than the name are pinned by the live
-  capture (Validation 9) before these builders are written; if rename needs the
-  full entity, the builder takes the read entry instead.
+- `build_volume_document(name, size_mib, *, affinity, partition_id)`: the body of
+  both create (PUT) and rename (POST). The live capture (Validation 9) pinned it:
+  every element carries its `ksv` level or the HMC answers REST0001; the partition
+  is referenced by `AssociatedPartitionId` (the `AssociatedPartition` link is
+  read-only); and a rename must resend `Size` and `AssociatedPartitionId`, so rename
+  sends the read volume's size, affinity and partition ID with the new name.
 
 Operations, `operations/lpar/memory/persistent.py`. Every volume selector is a
 UUID or an exact name; a name matching 0 or more than 1 volume raises.
@@ -61,10 +62,10 @@ volume of that name, assigned to the partition, with the requested size and
 affinity; rename verifies the UUID carries the new name; delete verifies the
 UUID is absent from the collection. A readback that does not yet show the
 change reports `mismatch` with a warning that an accepted (202) write may still
-be completing, so the caller re-reads before retrying. The partition-scoped and
-full collection reads use one new client method,
-`list_persistent_memory_volumes(system_uuid, partition_id=None)`, returning the
-whole parsed feed.
+be completing, so the caller re-reads before retrying. The transport is five
+`SystemsMixin` client methods over the captured paths: the collection with an
+optional `?target=<partition id>`, the single volume, PUT create, POST rename and
+DELETE.
 
 MCP tools in `server_tools/lpar/pmem.py`: `hmc_list_persistent_memory_volumes`
 (`limit`), `hmc_get_persistent_memory_volume`,
