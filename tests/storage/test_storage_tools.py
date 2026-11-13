@@ -330,10 +330,34 @@ def test_add_network_adapter_refuses_out_of_range_pvid_before_any_read(
     assert not read.called
 
 
+def _mock_storage_add_parent(mock_hmc, vios_partition_id: str = "7"):
+    """The client partition (with its system link) and that system's one VIOS."""
+    lpar = (
+        '<entry xmlns="http://www.w3.org/2005/Atom">'
+        f"<id>urn:uuid:{LPAR_UUID}</id><content>"
+        f'<LogicalPartition xmlns="{UOM_NS}">'
+        '<CurrentProfileSync kb="CUD" kxe="false">Disabled</CurrentProfileSync>'
+        f'<AssociatedManagedSystem kb="CUD" kxe="false" rel="related" '
+        f'href="https://hmc.test:12443/rest/api/uom/ManagedSystem/{SYSTEM_UUID}"/>'
+        "</LogicalPartition></content></entry>"
+    )
+    mock_hmc.get(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}").mock(
+        return_value=httpx.Response(200, text=lpar)
+    )
+    return mock_hmc.get(
+        f"/rest/api/uom/ManagedSystem/{SYSTEM_UUID}/VirtualIOServer"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            text=_feed(VIOS_UUID, "VirtualIOServer", PartitionID=vios_partition_id),
+        )
+    )
+
+
 def test_add_vscsi_adapter_builds_xml(monkeypatch, mock_hmc):
     """hmc_add_vscsi_adapter maps vios_partition_id/vios_slot into the doc."""
     _hmc_env(monkeypatch)
-    mock_change_location(mock_hmc, LPAR_UUID)
+    _mock_storage_add_parent(mock_hmc)
     route = mock_hmc.put(
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/VirtualSCSIClientAdapter"
     ).mock(
@@ -353,12 +377,34 @@ def test_add_vscsi_adapter_builds_xml(monkeypatch, mock_hmc):
     )
     assert '<RemoteSlotNumber kb="CUA" kxe="false">11</RemoteSlotNumber>' in body
     assert '<VirtualSlotNumber kb="COD" kxe="false">4</VirtualSlotNumber>' in body
+    assert set(result["paired_identity"]) == {
+        "remote_partition_id",
+        "remote_slot",
+        "remote_vios_uuid",
+    }
+
+
+def test_add_vscsi_adapter_refuses_a_remote_that_is_not_a_local_vios(
+    monkeypatch, mock_hmc
+):
+    """A partition ID naming no VIOS on the client's frame sends no PUT (ADR 0374)."""
+    _hmc_env(monkeypatch)
+    vios = _mock_storage_add_parent(mock_hmc, vios_partition_id="8")
+    route = mock_hmc.put(
+        f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/VirtualSCSIClientAdapter"
+    )
+    with pytest.raises(ValueError, match="not exactly one VIOS"):
+        hmc_add_vscsi_adapter(
+            lpar_name_or_uuid=LPAR_UUID, vios_partition_id=7, vios_slot=11
+        )
+    assert vios.called
+    assert not route.called
 
 
 def test_add_vfc_adapter_builds_xml(monkeypatch, mock_hmc):
     """hmc_add_vfc_adapter maps vios_partition_id/vios_slot into the doc."""
     _hmc_env(monkeypatch)
-    mock_change_location(mock_hmc, LPAR_UUID)
+    _mock_storage_add_parent(mock_hmc)
     route = mock_hmc.put(
         f"/rest/api/uom/LogicalPartition/{LPAR_UUID}/VirtualFibreChannelClientAdapter"
     ).mock(
