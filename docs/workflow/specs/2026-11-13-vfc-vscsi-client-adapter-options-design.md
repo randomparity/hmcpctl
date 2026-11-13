@@ -91,6 +91,9 @@ modules.
     path-argument checks.
   - Widened: the `paired_identity` parse of HMC data. It parses only and builds no command or
     URL.
+  - Added: the pre-add VIOS check takes the managed-system UUID from the HMC's
+    `AssociatedManagedSystem` href and uses it in a GET path. It passes `is_uuid` and then
+    `_reject_non_uuid_path_argument` first, so an href cannot inject path or query content.
 - **Actors:** an MCP client is untrusted for authorization. The HMC is trusted for data, but its
   values are bounded by type checks.
 - **Controls:**
