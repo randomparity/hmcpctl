@@ -95,10 +95,12 @@ def cli_args(adapter):
 
 def test_direct_handler_appends_and_forwards_typed_memory(adapter):
     parameters = inspect.signature(adapter.handler).parameters
-    assert list(parameters)[-3:] == [
+    appended = ["virtual_scsi_adapters"] if adapter.kind == "lpar" else []
+    assert list(parameters)[-3 - len(appended) :] == [
         "creation_memory",
         "affinity_group_id",
         "start_settings",
+        *appended,
     ]
     assert parameters["creation_memory"].default is None
     memory = LparCreationMemory(
