@@ -87,6 +87,7 @@ class AdaptersMixin:
             HMCError: If the HMC answers outside 200/204 (404 included).
         """
         validate_storage_adapter_type(adapter_type)
+        # One literal path per type, so the live-vocabulary gate checks each endpoint.
         if adapter_type == "VirtualSCSIClientAdapter":
             template = "/rest/api/uom/LogicalPartition/{}/VirtualSCSIClientAdapter/{}"
         else:
