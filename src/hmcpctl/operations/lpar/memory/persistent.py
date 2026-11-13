@@ -49,7 +49,6 @@ class PersistentMemoryVolumeResult:
 
 @dataclass(frozen=True)
 class _Partition:
-    uuid: str
     partition_id: int
     partition_type: object
     state: object
@@ -95,7 +94,6 @@ async def _partition(hmc: HMCClient, lpar_uuid: str) -> _Partition:
     if not isinstance(raw_id, str) or not raw_id.strip().isdigit():
         raise ValueError(f"Partition {lpar_uuid} has no readable PartitionID")
     return _Partition(
-        lpar_uuid,
         int(raw_id),
         leaf_text(resource.get("PartitionType")),
         leaf_text(resource.get("PartitionState")),
