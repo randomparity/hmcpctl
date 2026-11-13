@@ -115,12 +115,14 @@ tracks the missing device-role and creation-time adapter-linkage prerequisites u
 #638. Existing adapter implementation owners are unchanged. Closure of #1773 does
 not complete these positive virtual-slot modes or establish passing live evidence.
 
-The operator-approved C04 boundary refuses creation combining
-`simplified_remote_restart_capable=True` with `keystore_kbytes>0` before effects.
-The five security-policy fields remain separately available; this is no update
-restriction. [#1829](https://github.com/randomparity/hmcpctl/issues/1829) tracks the
-supported positive user-defined system-key classifier prerequisite. Closure of
-#1765 does not complete this combination.
+Creation combining `simplified_remote_restart_capable=True` with
+`keystore_kbytes>0` is submitted to the HMC, which admits it only when the trusted
+system key status is User Key ([ADR 0377](../adr/0377-forward-srr-keystore-creation-to-hmc-key-rule.md),
+[#1829](https://github.com/randomparity/hmcpctl/issues/1829)). hmcpctl reads no key
+status. An `HSCL0DCE` refusal is reported as contained only when a scoped lookup
+finds no partition, and as partial or unknown otherwise. The user-key accepted path
+has no live evidence and remains unevidenced under ADR 0212. The five
+security-policy fields remain separately available, with no update restriction.
 
 ## Completed client Ethernet work
 

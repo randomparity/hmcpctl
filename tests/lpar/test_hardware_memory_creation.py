@@ -1387,3 +1387,23 @@ async def test_role_readback_preserves_fatal_tls(monkeypatch):
             {"UUID": PARTITION, "Resource": {"PartitionName": requested.name}},
         )
     assert caught.value is failure
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hardware", [None, True])
+async def test_cli_creation_error_keeps_refusal_code(monkeypatch, hardware):
+    from hmcpctl.ssh.lpar import create_lpar_via_cli
+
+    monkeypatch.setattr(
+        "hmcpctl.ssh.lpar.run_hmc_command",
+        AsyncMock(side_effect=HMCCLIError(PRIVATE, remote_refusal_code="HSCL0DCE")),
+    )
+    config = HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
+    with pytest.raises(HMCCLIError) as raised:
+        await create_lpar_via_cli(
+            config, "sys-R1", "part-R1", hardware_mem_encryption=hardware
+        )
+    assert raised.value.remote_refusal_code == "HSCL0DCE"
+    if hardware:
+        assert raised.value.__cause__ is None
+        assert PRIVATE not in str(raised.value)

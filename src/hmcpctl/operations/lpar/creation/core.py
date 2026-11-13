@@ -364,17 +364,6 @@ def validate_lpar_creation(creation: LparCreation) -> None:
         )
     if not isinstance(creation.settings, LparSettings):
         raise TypeError("settings must be LparSettings")
-    if (
-        creation.settings.simplified_remote_restart_capable is True
-        and creation.security_policy.keystore_kbytes is not None
-        and creation.security_policy.keystore_kbytes > 0
-    ):
-        raise ValueError(
-            "Creation combining simplified remote restart with a nonzero keystore "
-            "requires a supported positive user-defined system-key check. "
-            "Select only one of these features for this creation. "
-            "Nothing was created."
-        )
     validate_partition_type(creation.partition_type)
     if not isinstance(creation.reporting_settings, LparReportingSettings):
         raise TypeError("reporting_settings must be LparReportingSettings")
@@ -384,6 +373,30 @@ def validate_lpar_creation(creation: LparCreation) -> None:
             "Reporting settings cannot be combined with explicit keylock: CLI creation cannot represent keylock. Nothing was created."
         )
     validate_keylock(creation.keylock)
+
+
+_SYSTEM_KEY_REFUSAL_CODE = "HSCL0DCE"
+_SYSTEM_KEY_REFUSAL = (
+    "HMC refused creation combining simplified remote restart with a nonzero "
+    "keystore (HSCL0DCE): the managed system's trusted system key status is not "
+    "User Key. A scoped lookup observed no partition; nothing was created. Select "
+    "only one of these features, or set a user-defined system key first."
+)
+_REJECTED_OUTCOME = "rejected; scoped lookup observed no partition"
+
+
+def _srr_keystore_requested(creation: LparCreation) -> bool:
+    """Whether creation asks for simplified remote restart with a nonzero keystore.
+
+    The HMC admits this pair only when the trusted system key is a user key, and
+    signals otherwise with HSCL0DCE (ADR 0377); hmcpctl never reads the key.
+    """
+    keystore = creation.security_policy.keystore_kbytes
+    return (
+        creation.settings.simplified_remote_restart_capable is True
+        and keystore is not None
+        and keystore > 0
+    )
 
 
 def _creation_feature_inputs(creation: LparCreation) -> _CreationFeatureInputs:
@@ -621,6 +634,7 @@ async def _submit_native_creation(
         "Native {feature} creation outcome is unknown; the partition may exist. "
         "Inspect its {inspection} before retrying; no rollback performed."
     )
+    key_refused = False
     try:
         return await _create_via_cli(
             hmc,
@@ -634,14 +648,21 @@ async def _submit_native_creation(
             start_admission=features.start_admission,
         )
     except HMCError as error:
-        if (
+        key_refused = (
+            isinstance(error, HMCCLIError)
+            and error.remote_refusal_code == _SYSTEM_KEY_REFUSAL_CODE
+            and _srr_keystore_requested(creation)
+        )
+        if key_refused:
+            pass
+        elif (
             features.inputs.serial_requested
             or features.inputs.layout_requested
             or features.inputs.memory_requested
             or features.inputs.start_requested
         ):
             raise
-        if features.inputs.hardware_requested or features.inputs.affinity_requested:
+        elif features.inputs.hardware_requested or features.inputs.affinity_requested:
             pass
         elif (
             not creation.physical_io.requested
@@ -662,8 +683,10 @@ async def _submit_native_creation(
             raise HMCError(
                 diagnostic.format(feature=feature, inspection=inspection)
             ) from (None if role_requested else error)
-    # Keep hardware/affinity errors outside the handler: their prior diagnostic
-    # deliberately retained neither the provider cause nor its context.
+    # Keep these errors outside the handler: neither diagnostic retains the
+    # provider cause or its context.
+    if key_refused:
+        await _raise_system_key_refusal(hmc, features.system_uuid, creation)
     if features.inputs.affinity_requested:
         feature = "affinity group"
     else:
@@ -1207,20 +1230,20 @@ def _creation_followup(
     return steps, allowed
 
 
-async def _raise_layout_create_failure(
-    hmc: HMCClient, system_uuid: str, creation: LparCreation, error: HMCError
-) -> NoReturn:
-    """Reconcile one failed native request without replay, stamping or deletion."""
+async def _scoped_create_outcome(
+    hmc: HMCClient,
+    system_uuid: str,
+    creation: LparCreation,
+    *,
+    refused: bool,
+    feature: str,
+) -> str:
+    """Classify one failed native request by one scoped lookup, without replay."""
     outcome = "unknown"
-    identity = ""
     try:
         found = await hmc.find_partition_by_name(creation.name, system_uuid=system_uuid)
-        if (
-            found is None
-            and isinstance(error, HMCCLIError)
-            and error.remote_refusal_code is not None
-        ):
-            outcome = "rejected; scoped lookup observed no partition"
+        if found is None and refused:
+            outcome = _REJECTED_OUTCOME
         elif (
             isinstance(found, dict)
             and isinstance(found.get("UUID"), str)
@@ -1228,20 +1251,54 @@ async def _raise_layout_create_failure(
             and isinstance(found.get("Resource"), dict)
             and leaf_text(found["Resource"].get("PartitionName")) == creation.name
         ):
-            outcome = "partial; partition exists"
-            identity = f" (UUID {found['UUID']})"
+            outcome = f"partial; partition exists (UUID {found['UUID']})"
     except HMCTLSFingerprintError as identity_error:
         identity_error.add_note(
-            "Memory layout creation submission may have taken effect. "
+            f"{feature} creation submission may have taken effect. "
             "Inspect scoped identity before retrying; no replay, ownership stamp "
             "or rollback performed."
         )
         raise
     except Exception:  # noqa: BLE001 — ordinary post-submission evidence failures mean unknown.
         outcome = "unknown; scoped identity readback unavailable"
+    return outcome
+
+
+async def _raise_layout_create_failure(
+    hmc: HMCClient, system_uuid: str, creation: LparCreation, error: HMCError
+) -> NoReturn:
+    """Reconcile one failed native request without replay, stamping or deletion."""
+    outcome = await _scoped_create_outcome(
+        hmc,
+        system_uuid,
+        creation,
+        refused=isinstance(error, HMCCLIError)
+        and error.remote_refusal_code is not None,
+        feature="Memory layout",
+    )
     raise HMCError(
-        f"Memory layout creation outcome {outcome}{identity}. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed."
+        f"Memory layout creation outcome {outcome}. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed."
     ) from None
+
+
+async def _raise_system_key_refusal(
+    hmc: HMCClient, system_uuid: str, creation: LparCreation
+) -> NoReturn:
+    """Report the HMC's HSCL0DCE refusal as contained only when lookup finds nothing."""
+    outcome = await _scoped_create_outcome(
+        hmc,
+        system_uuid,
+        creation,
+        refused=True,
+        feature="Simplified remote restart and keystore",
+    )
+    if outcome == _REJECTED_OUTCOME:
+        raise HMCCLIError(
+            _SYSTEM_KEY_REFUSAL, remote_refusal_code=_SYSTEM_KEY_REFUSAL_CODE
+        )
+    raise HMCError(
+        f"Simplified remote restart and keystore creation outcome {outcome}. Inspect scoped identity before retrying; no retry, ownership stamp or rollback performed."
+    )
 
 
 async def _created_reporting_step(
