@@ -33,8 +33,8 @@ uppercase hex digits; unchanged discriminator).
 2. Binding (criterion 1), `validate_tagged_vscsi(io, adapters)` in `documents/lpar_vscsi.py`:
    each virtual-tagged slot must equal a declared `VirtualScsiClientAdapter.local_slot`, else
    refuse with a message naming the rule and the refused kinds (undeclared, serial, HMC-default
-   serial 0/1, ethernet). For `load_source_slot` the adapter must have `is_required=True`
-   (ADR 0382 source). Called by `validate_lpar_creation` (before any read) and by
+   serial 0/1, ethernet — creation has no virtual ethernet input, so an ethernet slot is always
+   undeclared). Called by `validate_lpar_creation` (before any read) and by
    `create_lpar_via_cli` (backstop at the only `mksyscfg -r lpar` render for LPARs).
 3. Console (criterion 3), `require_ibmi_console(partition_type, physical_io)` in
    `ssh/lpar.py`: for `lpar_env=os400`, `physical_io.console_slot` must be set, else refuse
@@ -67,7 +67,7 @@ uppercase hex digits; unchanged discriminator).
 Field descriptions in `documents/lpar_io.py`; `hmc_create_lpar` and `hmc_provision_lpar`
 docstrings drop "linkage gap #638"; regenerate `docs/tools/`. `docs/capabilities/lpar-allocation.md`
 C12 paragraph, ADR 0274 status amendment line, CHANGELOG *Added*/*Changed*. Live arm
-`lpar-vscsi-client` (ST74): client `is_required=True`, `load_source_slot` and
+`lpar-vscsi-client` (ST74): `load_source_slot` and
 `alt_restart_device_slot` set to the local slot, and asserts the record's `roles` verified.
 
 ## Failure model

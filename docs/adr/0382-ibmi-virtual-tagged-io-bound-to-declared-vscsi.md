@@ -38,8 +38,7 @@ alt_restart_device_slot=2,console_slot=hmc` exactly as submitted.
 
 hmcpctl owns the role rule. A canonical decimal virtual slot is admitted for
 `load_source_slot` and `alt_restart_device_slot` only when it equals the local slot of a
-vSCSI client record declared in the same creation request; a load source additionally needs
-that record's `is_required=true`. Every other virtual slot is refused before effects.
+vSCSI client record declared in the same creation request. Every other virtual slot is refused before effects.
 Virtual `console_slot`, `alt_console_slot` and `op_console_slot` forms stay refused. IBM i
 native creation without `console_slot` is refused before effects; no default is inserted.
 `HSCL0DC6` remains a backstop only.
@@ -62,8 +61,10 @@ virtual tagged slot is uncaptured and is not compared.
   shows the HMC accepted serial slot 0 and ethernet slot 3 as a load source.
 - **Admit virtual console slots bound to a declared adapter.** judgment: no cited source names
   an eligible virtual console family, and the HMC validates nothing that would catch a wrong one.
-- **Require `is_required` for alternate restart too.** judgment: the cited sources state the
-  required flag only for the load source; adding it would be an unsourced refusal.
+- **Also require the load source's client to be `is_required=true`.** verified: the issue
+  #1981 capture's `mksyscfg` accepted a client declared with is-required `0` as load source,
+  although the first cited page says the HMC tagged-I/O screen offers only required adapters;
+  the issue's criterion admits any declared client, so the refusal would be unrequested.
 - **Require `console_slot` on REST creation too.** verified: at cced9acf
   `admit_creation_io` (`operations/lpar/creation/physical_io.py`) refuses `physical_io` with a
   keylock, and `_create_via_cli` refuses keylock, so IBM i keylock creation is REST-only and a
