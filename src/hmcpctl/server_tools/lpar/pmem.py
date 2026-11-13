@@ -83,8 +83,7 @@ def hmc_create_persistent_memory_volume(
         system_name_or_uuid: System name or UUID from ``hmc_list_systems``.
         lpar_name_or_uuid: Partition the volume is assigned to.
         name: New volume name, 1-64 characters of A-Z a-z 0-9 _ . -, not shaped
-            like a UUID, unique on
-            the system.
+            like a UUID, unique on the system.
         size_mib: Volume size in MiB.
         affinity: Request memory affinity for the volume.
         ownership_override: Bypass ownership protection after operator approval.
