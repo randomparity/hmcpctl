@@ -113,7 +113,8 @@ Its JSON contains private mutation descriptions: retain it locally. Have the ope
 review the arm details below and the exact candidate, arms and mutation boundary.
 Save only its `authorization` object in a private JSON file, set `authorized` to
 `true`, and explicitly set `vios_access` to `true` when the selection includes round2,
-vmedia, sriov, profiles, vios-backup, network, storage or lpar-power; otherwise keep
+vmedia, sriov, profiles, vios-backup, network, storage, lpar-power or logical-workflow;
+otherwise keep
 it `false`. Keep the remaining fields unchanged. The file must match the derived
 candidate and boundary exactly; a general approval or dry run is not authorization.
 Set `WINDOW_AUTHORIZATION` to that file's path, then run once per authorized attempt:
@@ -175,7 +176,7 @@ below. The table does not grant hardware or VIOS access.
 | provision-boot | `uv run --no-sync python scripts/live_provision_boot.py` | subtask 72; powers on a partition with installer media |
 | native-ubuntu-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py ubuntu` | subtask 72; boots the Ubuntu launcher and records refcodes for up to 15 minutes |
 | native-rocky-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py rocky` | subtask 72; boots the Rocky launcher and records refcodes for up to 15 minutes |
-| logical-workflow | `uv run --no-sync python scripts/live_logical_workflow.py` | subtask 73; provisions, reconfigures, powers and decommissions one partition through the workflow tools |
+| logical-workflow | `uv run --no-sync python scripts/live_logical_workflow.py` | subtask 73; provisions, reconfigures, hands off (holds and releases), powers and decommissions one partition through the workflow tools |
 | vg-if-match | `uv run --no-sync python scripts/live_vg_if_match.py` | subtasks 0 and 42; a scratch volume group and one stale-`If-Match` write to it |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
@@ -950,10 +951,11 @@ ADR 0328 records these findings.
 
 ### The logical-workflow arm
 
-The `logical-workflow` arm (subtask 73, #1854) runs the create, reconfigure and destroy
-workflow on one partition through the primary catalog's tools only (ADR 0189, ADR 0330):
-`hmc_provision_lpar`, `hmc_reconfigure_lpar`, `hmc_inspect_lpar`, `hmc_power_lpar`,
-`hmc_decommission_lpar` and `hmc_operation_status`. Every other tool it calls is an
+The `logical-workflow` arm (subtask 73, #1854) runs the create, reconfigure, hand-off and
+destroy workflow on one partition through the primary catalog's tools only (ADR 0189,
+ADR 0330): `hmc_provision_lpar`, `hmc_reconfigure_lpar`, `hmc_inspect_lpar`,
+`hmc_prepare_host_handoff`, `hmc_invoke_tool`, `hmc_power_lpar`, `hmc_decommission_lpar`
+and `hmc_operation_status`. Every other tool it calls is an
 independent witness read or teardown. It needs its own operator authorization: it powers
 a partition on once.
 
@@ -962,8 +964,8 @@ a partition on once.
   `LIVE_TEST_PROVISION_VLAN_ID`, `LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=true` and
   `HMC_AUTHORIZE_POWER_OPERATIONS`. It creates nothing while a `hmcpctl-live-pwr-*`
   partition or `lppwr*` volume exists.
-- **Run.** A failed provision or reconfigure ends the workflow, and a stop that does not
-  complete skips the decommission:
+- **Run.** A failed provision, reconfigure or hold release ends the workflow, and a stop
+  that does not complete skips the decommission:
   1. Provision `hmcpctl-live-pwr-<8 hex>-p` with `power_on` false, on a new 1 GiB volume
      `lppwr<8 hex>` and the VLAN: `workflow-completed`, `ownership-stamped`,
      `left-not-activated`, `storage-mapping-listed`, `last-activated-is-default` (provision
@@ -975,16 +977,31 @@ a partition on once.
      desired memory and virtual processors (`reports-the-change-inactive`), and the
      resources section lists a mapping backed by the run volume
      (`reports-the-owned-mapping`).
-  4. `hmc_power_lpar` start (`start-completed-activated`); once in firmware,
+  4. Hand off (ADR 0193): `hmc_prepare_host_handoff` prepare with `hold` and the label
+     `hmcpctl-live-<8 hex>` returns a `hold_id`, the label and a document naming the
+     partition (`hold-placed`); the document never carries the `hold_id`
+     (`document-withholds-hold-id`); a repeat returns the same hold
+     (`repeat-returns-the-hold`). While it is held, `hmc_invoke_tool` dispatches
+     `hmc_inspect_lpar`, which must answer for the partition with the new desired memory
+     (`tools.invoke`: `dispatches-a-read-as-direct`), and `hmc_power_lpar` start without
+     the `hold_id`, which must be refused `partition_held` with the partition still Not
+     Activated (`hold-refuses-a-mutation`, and `dispatched-mutation-meets-the-hold` for
+     `tools.invoke`). Release with the `hold_id`; a hold-less prepare must then report no
+     hold (`release-drops-the-hold`). The HMC is only read in this step.
+  5. `hmc_power_lpar` start (`start-completed-activated`); once in firmware,
      `hmc_get_lpar` must show 3072 MiB current memory and 2 allocated virtual
      processors (`started-with-the-change`). Then stop, immediate; the stop's own job and an
      independent state read must both say Not Activated
      (`stop-immediate-completed-not-activated`) before the decommission runs. The partition
      has no installer media or operating system, so it stays in firmware.
-  5. The lpar-power arm's decommission cases: a dry run that inventories and changes
+  6. The lpar-power arm's decommission cases: a dry run that inventories and changes
      nothing, then `storage_cleanup=delete_owned` with its eight assertions.
-- **After.** An open reconfigure is abandoned with its own tool, then the lpar-power arm's
-  teardown and baseline compare run. Recovery reads for it what it reads for subtask 41.
+- **After.** A hold the run placed and did not release is released, an open reconfigure is
+  abandoned with its own tool, then the lpar-power arm's teardown and baseline compare run.
+  Recovery reads for it what it reads for subtask 41. Holds are local state, not HMC state,
+  so recovery does not read them: when the run records `MANUAL RECOVERY REQUIRED` for the
+  hold, run `hmcpctl holds list` on the runner host and `hmcpctl holds release` for the
+  run's partition before any other partition work.
 
 Live on V10R3 (2026-11-04, POWER9) at commit `c34e8b6c`, before ADR 0331: provision passed,
 and reconfigure ended `failed` in phase `validating` with ADR 0314 Decision 2's refusal. The

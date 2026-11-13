@@ -96,6 +96,86 @@ class WorkflowWorld(World):
         self.inspected_memory = None
         # ADR 0331: provision applies its saved profile, so both name it.
         self.last_activated = SAVED
+        #: partition UUID -> (consumer label, hold_id), as the ADR 0193 store keeps it.
+        self.holds: dict[str, tuple[str, str]] = {}
+        self.hold_enforced = True
+
+    def _hmc_prepare_host_handoff(self, kwargs: dict[str, Any]) -> Any:
+        entry = self.by_selector(kwargs["lpar_name_or_uuid"])
+        assert entry is not None
+        lpar = entry["uuid"]
+        if kwargs["action"] == "release":
+            if lpar not in self.holds:
+                return ValueError("no_hold: the partition is not held")
+            label, _ = self.holds.pop(lpar)
+            return {
+                "action": "release",
+                "hold": self._view(label, None),
+                "document": None,
+            }
+        if kwargs.get("hold"):
+            label = kwargs["consumer_label"]
+            held = self.holds.setdefault(lpar, (label, f"{len(self.holds):032x}"))
+            if held[0] != label:
+                return ValueError("partition_held: another label holds it")
+        hold = self.holds.get(lpar)
+        view = None if hold is None else self._view(*hold)
+        inspected = self._hmc_inspect_lpar(kwargs)
+        return {
+            "action": "prepare",
+            "hold": view,
+            "document": {
+                "identity": {
+                    "connection": "<default>",
+                    "system_uuid": "s",
+                    "partition_uuid": lpar.lower(),
+                    "name": self.name_of(entry),
+                    "partition_id": 9,
+                },
+                "references": {"connection": "<default>", "agent_id": "agent"},
+                "observed": {
+                    "state": entry["state"],
+                    "rmc_state": None,
+                    "resources": inspected["resources"],
+                    "ownership": {"owned": True, "owner": "agent", "unparsed": False},
+                    "adapters": {
+                        "source": {"status": "ok", "tool": "hmc_list_adapters"},
+                        "items": [],
+                    },
+                },
+                "declared": {"source": "none", "detail": None},
+                "unverified": [],
+                "hold": None if view is None else {**view, "hold_id": None},
+                "unfenced": ["library API"],
+                "unchecked_tools": [],
+            },
+        }
+
+    @staticmethod
+    def _view(label: str, hold_id: str | None) -> dict[str, Any]:
+        return {
+            "consumer_label": label,
+            "agent_id": "agent",
+            "created_at": "t",
+            "hold_id": hold_id,
+        }
+
+    def _hmc_invoke_tool(self, kwargs: dict[str, Any]) -> Any:
+        result = self.respond(kwargs["name"], kwargs["arguments"])
+        if isinstance(result, Exception):
+            return result
+        return {"name": kwargs["name"], "result": result}
+
+    def _hmc_power_lpar(self, kwargs: dict[str, Any]) -> Any:
+        entry = self.by_selector(kwargs.get("lpar_name_or_uuid"))
+        hold = None if entry is None else self.holds.get(entry["uuid"])
+        if self.hold_enforced and hold and kwargs.get("hold_id") != hold[1]:
+            record = _operation("hmc_power_lpar", "terminal", "failed", None)
+            record["request_id"] = kwargs["request_id"]
+            record["warnings"] = [{"code": "partition_held", "message": "held"}]
+            self.operations[kwargs["request_id"]] = record
+            return record
+        return super()._hmc_power_lpar(kwargs)
 
     def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
         answer = super()._hmc_provision_lpar(kwargs)
@@ -228,6 +308,8 @@ _OPERATIONS = {
     "provision.lpar",
     "lpar.reconfigure",
     "lpar.inspect",
+    "lpar.prepare_host_handoff",
+    "tools.invoke",
     "lpar.power",
     "lpar.decommission",
 }
@@ -252,7 +334,8 @@ def test_a_clean_workflow_passes_every_operation_and_leaves_nothing(schemas):
     (patched,) = world.calls_to("hmc_reconfigure_lpar")
     assert patched["patch"] == PATCH
     actions = [kwargs["action"] for kwargs in world.calls_to("hmc_power_lpar")]
-    assert actions == ["start", "stop"]
+    # The first start is the held one, dispatched through hmc_invoke_tool and refused.
+    assert actions == ["start", "start", "stop"]
 
 
 #: The read-only tools the arm may call beside the workflow: its independent witnesses.
@@ -645,3 +728,126 @@ def test_an_abandon_that_raises_still_tears_the_run_down(schemas, monkeypatch):
         _run(schemas, world)
 
     assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}
+
+
+def test_the_hold_is_placed_proved_through_the_gateway_and_released(schemas):
+    world = WorkflowWorld()
+
+    _run(schemas, world)
+
+    handoffs = [
+        (k["action"], k.get("hold", False))
+        for k in world.calls_to("hmc_prepare_host_handoff")
+    ]
+    assert handoffs == [
+        ("prepare", True),
+        ("prepare", True),
+        ("release", False),
+        ("prepare", False),
+    ]
+    invoked = [k["name"] for k in world.calls_to("hmc_invoke_tool")]
+    assert invoked == ["hmc_inspect_lpar", "hmc_power_lpar"]
+    held_start = world.calls_to("hmc_power_lpar")[0]
+    assert held_start["action"] == "start" and "hold_id" not in held_start
+    assert world.holds == {}
+
+
+def test_a_hold_that_lets_the_start_through_fails_both_assertions(schemas):
+    world = WorkflowWorld()
+    world.hold_enforced = False
+
+    state = _run(schemas, world)
+
+    assert "hold-refuses-a-mutation" not in _held(state, "lpar.prepare_host_handoff")
+    assert "dispatched-mutation-meets-the-hold" not in _held(state, "tools.invoke")
+    assert world.partitions == {} and world.volumes == {"hd5", "lv_op"}
+
+
+def test_a_document_carrying_the_hold_id_fails_that_assertion(schemas):
+    world = WorkflowWorld()
+
+    def change(kwargs, answer):
+        if isinstance(answer, dict) and answer.get("document") and answer["hold"]:
+            answer["document"]["hold"] = dict(answer["hold"])
+        return answer
+
+    _changes(world, "hmc_prepare_host_handoff", change)
+
+    state = _run(schemas, world)
+
+    assert "document-withholds-hold-id" not in _held(state, "lpar.prepare_host_handoff")
+
+
+def test_a_refused_release_stops_the_workflow_and_teardown_retries_it(schemas):
+    world = WorkflowWorld()
+    real = world._hmc_prepare_host_handoff
+    refusals = iter([True])
+
+    def refuse_first_release(kwargs):
+        if kwargs["action"] == "release" and next(refusals, False):
+            return ValueError("store unavailable")
+        return real(kwargs)
+
+    world.overrides["hmc_prepare_host_handoff"] = refuse_first_release
+
+    state = _run(schemas, world)
+
+    assert "release-drops-the-hold" not in _held(state, "lpar.prepare_host_handoff")
+    assert [k["action"] for k in world.calls_to("hmc_power_lpar")] == ["start"]
+    releases = [
+        k
+        for k in world.calls_to("hmc_prepare_host_handoff")
+        if k["action"] == "release"
+    ]
+    assert len(releases) == 2
+    assert world.holds == {} and world.partitions == {}
+
+
+def test_a_hold_that_will_not_release_fails_the_cleanup(schemas):
+    world = WorkflowWorld()
+    real = world._hmc_prepare_host_handoff
+    world.overrides["hmc_prepare_host_handoff"] = lambda kwargs: (
+        ValueError("store unavailable")
+        if kwargs["action"] == "release"
+        else real(kwargs)
+    )
+
+    state = _run(schemas, world)
+
+    (entry,) = [e for e in state.observations if e["operation"] == "provision.lpar"]
+    assert entry["observation"]["cleanup"] == "failed"
+
+
+def test_a_start_refused_for_another_reason_does_not_prove_the_hold(schemas):
+    world = WorkflowWorld()
+    world.hold_enforced = False
+    real = world._hmc_power_lpar
+    starts = iter([True])
+
+    def fail_first_start(kwargs):
+        if kwargs.get("action") == "start" and next(starts, False):
+            return ValueError("HSCL1234 the start job failed")
+        return real(kwargs)
+
+    world.overrides["hmc_power_lpar"] = fail_first_start
+
+    state = _run(schemas, world)
+
+    assert "hold-refuses-a-mutation" not in _held(state, "lpar.prepare_host_handoff")
+    assert "dispatched-mutation-meets-the-hold" not in _held(state, "tools.invoke")
+
+
+def test_a_release_answering_with_a_document_fails_that_assertion(schemas):
+    world = WorkflowWorld()
+
+    def change(kwargs, answer):
+        if kwargs["action"] == "release" and isinstance(answer, dict):
+            answer["action"] = "prepare"
+        return answer
+
+    _changes(world, "hmc_prepare_host_handoff", change)
+
+    state = _run(schemas, world)
+
+    assert "release-drops-the-hold" not in _held(state, "lpar.prepare_host_handoff")
+    assert world.holds == {} and world.partitions == {}

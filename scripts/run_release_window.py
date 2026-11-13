@@ -42,6 +42,7 @@ ARMS = {
         "lpar-config",
         "storage",
         "lpar-power",
+        "logical-workflow",
     )
 }
 VIOS_ARMS = {
@@ -53,6 +54,7 @@ VIOS_ARMS = {
     "network",
     "storage",
     "lpar-power",
+    "logical-workflow",
 }
 MAX_LOG = 8 * 1024 * 1024
 GRACE = 5.0
