@@ -23,6 +23,11 @@ def virtual_form(value: object) -> bool:
     )
 
 
+def virtual_tagged_value(name: str, value: object) -> bool:
+    """Whether a tagged field carries a bindable virtual load-source/restart slot."""
+    return name in VIRTUAL_TAGGED and virtual_form(value)
+
+
 @dataclass(frozen=True)
 class ProfileIoSlot:
     """One `io_slots` entry in the ADR 0165-admitted read rendering."""
@@ -176,7 +181,7 @@ class LparPhysicalIO:
         return tuple(
             (name, int(value))
             for name, value in self.tagged()
-            if name in VIRTUAL_TAGGED and virtual_form(value)
+            if virtual_tagged_value(name, value)
         )
 
     @property

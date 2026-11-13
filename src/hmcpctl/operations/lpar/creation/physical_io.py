@@ -12,7 +12,7 @@ from hmcpctl.operations.lpar.assignments import (
 )
 from hmcpctl.operations.lpar.profiles.core import read_partition_profile
 
-from ....documents.lpar_io import VIRTUAL_TAGGED, LparPhysicalIO, virtual_form
+from ....documents.lpar_io import LparPhysicalIO, virtual_tagged_value
 from ....documents.lpar_vscsi import validate_tagged_vscsi
 from ....errors import HMCError, HMCTLSFingerprintError
 from ....ssh.io_inventory import list_io_slots
@@ -94,7 +94,7 @@ async def admit_creation_io(
     for name, value in io.tagged():
         if name == "console_slot" and value == "hmc":
             continue
-        if name in VIRTUAL_TAGGED and virtual_form(value):
+        if virtual_tagged_value(name, value):
             continue  # bound to a declared vSCSI client above
         if value in physical:
             _require_tagged_role(resource, name, value)
@@ -282,7 +282,7 @@ def compare_creation_io(
     if not isinstance(tagged, dict):
         return False
     for name, value in io.tagged():
-        if name in VIRTUAL_TAGGED and virtual_form(value):
+        if virtual_tagged_value(name, value):
             # Its REST rendering is uncaptured; the vSCSI step compares the saved
             # profile's native value with the declared client record (ADR 0382).
             continue
