@@ -19,8 +19,8 @@ that joins `static` and gets its matching prek hook (`id: doc-links`,
    targets; the tracked `*.md` files among them are the files checked. Untracked files —
    including a local-only reference corpus linked into the worktree — are neither read nor
    resolvable, and a tracked file deleted from the work tree resolves as `missing`.
-2. **Link extraction.** Fenced code blocks (``` and `~~~`) and inline code spans are
-   blanked first, keeping line breaks. Over the remaining text, so that link text wrapped
+2. **Link extraction.** Fenced code blocks (``` and `~~~`), HTML comments and inline code
+   spans (which never cross a blank line) are blanked first, keeping line breaks. Over the remaining text, so that link text wrapped
    across lines (but not across a blank line) is still seen, the guard reads inline links and images `[text](target "title")`,
    including `<target>` form, and reference definitions `[id]: target`.
 3. **Skipped targets.** A target with a URI scheme (`https:`, `mailto:`, …) or starting
@@ -30,11 +30,12 @@ that joins `static` and gets its matching prek hook (`id: doc-links`,
    from the linking file's directory. An empty path means the linking file itself. A
    resolved path that is not a tracked file or directory is reported `missing`.
 5. **Anchors.** A fragment is checked only when the target is a tracked `.md` file. The
-   target's anchors are its ATX headings outside fenced code blocks slugged the GitHub way — inline code kept as
+   target's anchors are its ATX headings (including ones inside a blockquote or list item)
+   outside fenced code blocks and HTML comments slugged the GitHub way — inline code kept as
    text, link text kept and URL dropped, HTML tags and `*` removed, lower-cased, every
    character that is not a word character, space or hyphen removed, spaces turned into
-   hyphens, and a repeated slug suffixed `-1`, `-2`, … in document order — plus the
-   values of `id`/`name` attributes on `<a>` tags. Matching is exact, after
+   hyphens, and a repeated slug suffixed with the next free `-1`, `-2`, … in document order — plus
+   the values of `id`/`name` attributes on `<a>` tags outside code spans. Matching is exact, after
    percent-decoding the fragment. An unmatched fragment is reported `anchor`.
 6. **Output.** Exit 0 with a one-line `OK` count; otherwise exit 1 and print
    `<file>:<line>: <missing|anchor>: <target>` per broken link to stderr, the line being

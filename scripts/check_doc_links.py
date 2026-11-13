@@ -45,6 +45,7 @@ _LINK = re.compile(
 _REFERENCE = re.compile(
     r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^>\n]*>|\S+)", re.MULTILINE
 )
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLANK_LINE = re.compile(r"\n[ \t]*\n")
 _ATX = re.compile(
     r"^(?:[ \t]*(?:>|[-*+]|\d+[.)])[ \t]*)* {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$"
@@ -89,7 +90,7 @@ def _blank(match: re.Match[str]) -> str:
 
 
 def _without_fences(text: str) -> str:
-    """*text* with every fenced code block blanked, line breaks kept."""
+    """*text* with every fenced code block and HTML comment blanked, line breaks kept."""
     lines = text.split("\n")
     fence = ""
     for index, line in enumerate(lines):
@@ -105,14 +106,14 @@ def _without_fences(text: str) -> str:
         elif match:
             fence = match.group(1)
             lines[index] = ""
-    return "\n".join(lines)
+    return _HTML_COMMENT.sub(_blank, "\n".join(lines))
 
 
 def slugify(text: str) -> str:
     """The anchor GitHub renders for a heading whose source text is *text*."""
     text = _CODE_SPAN.sub(lambda match: match.group(2), text)
     text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"<[^>]+>", "", text).replace("*", "")
+    text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"[^\w\- ]", "", text.strip().lower())
     return text.replace(" ", "-")
 
@@ -122,8 +123,9 @@ def anchors(text: str) -> set[str]:
     html: set[str] = set()
     slugs: set[str] = set()
     seen: Counter[str] = Counter()
-    for line in _without_fences(text).split("\n"):
-        html.update(_HTML_ANCHOR.findall(line))
+    rendered = _without_fences(text)
+    html.update(_HTML_ANCHOR.findall(_CODE_SPAN.sub(_blank, rendered)))
+    for line in rendered.split("\n"):
         heading = _ATX.match(line)
         if heading:
             base = slugify(heading.group(1))

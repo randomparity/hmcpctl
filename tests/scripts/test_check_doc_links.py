@@ -77,6 +77,9 @@ def test_missing_file_is_reported(tmp_path, capsys):
             "[a](x.md?plain=1)", "[a](y.md?plain=1)", "y.md?plain=1", id="query"
         ),
         pytest.param("[a](sp%20ace.md)", "[a](no%20pe.md)", "no%20pe.md", id="percent"),
+        pytest.param(
+            "[a](#caf%C3%A9)", "[a](#caf%C3%A8)", "#caf%C3%A8", id="percent-fragment"
+        ),
         pytest.param("![a](img.png)", "![a](gone.png)", "gone.png", id="image"),
         pytest.param(
             "[wrapped\ntext](x.md)", "[wrapped\ntext](y.md)", "y.md", id="wrapped"
@@ -89,7 +92,7 @@ def test_resolution_forms(tmp_path, good, bad, reported):
     root = _repo(
         tmp_path / "repo",
         {
-            "docs/page.md": f"# Top\n\n{good}\n\n{bad}\n",
+            "docs/page.md": f"# Top\n\n{good}\n\n{bad}\n\n# Café\n",
             "docs/x.md": "# X\n",
             "docs/sp ace.md": "# S\n",
             "docs/img.png": "png\n",
@@ -139,7 +142,10 @@ def test_html_anchor(tmp_path):
     root = _repo(
         tmp_path / "repo",
         {
-            "a.md": '<a id="kept"></a>\n<a name="named"></a>\n# H\n',
+            "a.md": (
+                '<a id="kept"></a>\n<a name="named"></a>\n# H\n'
+                '`<a id="absent"></a>`\n<!--\n# absent\n-->\n'
+            ),
             "b.md": "[x](a.md#kept) [y](a.md#named) [z](a.md#absent)\n",
         },
     )
@@ -152,20 +158,29 @@ def test_external_and_code_links_skipped(tmp_path):
         "[proto](//example.test/x.md) [ok](x.md)\n"
         "`[span](gone-span.md)`\n"
         "\n"
-        "```md\n[fenced](gone-fenced.md)\n```\n"
+        "```\n```md\n[fenced](gone-fenced.md)\n```\n"
         "~~~\n[tilde](gone-tilde.md)\n~~~\n"
         "[^1]: footnote text\n"
         "[split by\n\na blank line](gone-split.md)\n"
+        "<!-- [commented](gone-comment.md) -->\n"
         "[real](gone-real.md)\n"
     )
     root = _repo(tmp_path / "repo", {"page.md": page, "x.md": "# X\n"})
-    assert _report(root) == ["page.md:15: missing: gone-real.md"]
+    assert _report(root) == ["page.md:17: missing: gone-real.md"]
 
 
 def test_code_span_does_not_cross_a_blank_line(tmp_path):
     page = "A lone ` backtick.\n\n[gone](gone.md)\n\nThen `code`.\n"
     root = _repo(tmp_path / "repo", {"page.md": page})
     assert _report(root) == ["page.md:3: missing: gone.md"]
+
+
+def test_fragment_on_a_markdown_named_directory_is_not_checked(tmp_path):
+    root = _repo(
+        tmp_path / "repo",
+        {"page.md": "[a](notes.md#x)\n", "notes.md/inner.txt": "text\n"},
+    )
+    assert _report(root) == []
 
 
 def test_untracked_target_is_missing(tmp_path):
