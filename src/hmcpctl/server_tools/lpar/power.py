@@ -105,8 +105,9 @@ def power_handler(
         ``hmc_power_on_lpar`` and ``stop`` / ``restart`` need ``hmc_power_off_lpar``:
         the policy must permit that tool and admit this partition for it, or the call
         is refused and nothing is recorded. ``mode`` ``graceful`` asks the operating
-        system (PowerOff ``osshutdown``, RMC must be active); ``immediate`` must be
-        stated and is never chosen for you, not even after a timeout. A partition
+        system (PowerOff ``osshutdown``; RMC must be active except on IBM i, OS400);
+        ``immediate`` must be stated and is never chosen for you, not even after a
+        timeout. A partition
         already in the requested state completes with ``already_in_state`` true and no
         job. The final ``result`` carries ``already_in_state``, ``observed_state``
         (host power state only, not guest readiness) and ``job_id``. A job not done in
