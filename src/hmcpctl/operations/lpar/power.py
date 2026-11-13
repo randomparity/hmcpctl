@@ -22,6 +22,7 @@ from ...jobs import (
     power_on_lpar_job,
 )
 from ...resource_identity import guard_partition, resolve_system_uuid
+from ...xmlutil import leaf_text
 from ..logical import engine
 from ..logical.engine import (
     BodyResult,
@@ -148,11 +149,14 @@ def _precheck(
             f"LPAR {lpar_uuid} is {state!r}; {action} needs it activated{hint}"
         )
     rmc = _norm(resource.get("ResourceMonitoringControlState"))
-    if mode == "graceful" and rmc != "active":
+    # IBM i takes osshutdown without RMC; every other type needs it (ADR 0372).
+    ibm_i = leaf_text(resource.get("PartitionType")) == "OS400"
+    if mode == "graceful" and rmc != "active" and not ibm_i:
         raise OperationFailed(
-            f"a graceful {action} asks the operating system and needs RMC 'active'; "
-            f"LPAR {lpar_uuid} reports {rmc or 'no RMC state'!r}. Pass mode=immediate "
-            "to act without the operating system"
+            f"a graceful {action} asks the operating system and needs RMC 'active' "
+            f"unless the partition is IBM i (OS400); LPAR {lpar_uuid} reports "
+            f"{rmc or 'no RMC state'!r}. Pass mode=immediate to act without the "
+            "operating system"
         )
     return False
 
