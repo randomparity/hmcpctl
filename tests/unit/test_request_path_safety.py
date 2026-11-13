@@ -1206,15 +1206,26 @@ _UUID_UOM_REQUEST_SITES = {
     "client_storage.StorageMixin.list_storage_mappings": "vios_uuid",
     "client_storage.StorageMixin.list_volume_groups": "vios_uuid",
     "client_storage.StorageMixin.map_storage_to_lpar": "vios_uuid",
+    "client_systems.SystemsMixin.create_persistent_memory_volume": "system_uuid",
     "client_systems.SystemsMixin.create_vios": "system_uuid",
+    "client_systems.SystemsMixin.delete_persistent_memory_volume": (
+        "system_uuid volume_uuid"
+    ),
     "client_systems.SystemsMixin.delete_vios": "vios_uuid",
+    "client_systems.SystemsMixin.get_persistent_memory_volume": (
+        "system_uuid volume_uuid"
+    ),
     "client_systems.SystemsMixin.get_vios_storage_detail": "vios_uuid",
+    "client_systems.SystemsMixin.list_persistent_memory_volumes": "system_uuid",
     "client_systems.SystemsMixin.list_vios": "system_uuid",
     "client_systems.SystemsMixin.modify_managed_system": "system_uuid",
     "client_systems.SystemsMixin.power_off_system": "system_uuid",
     "client_systems.SystemsMixin.power_off_vios": "vios_uuid",
     "client_systems.SystemsMixin.power_on_system": "system_uuid",
     "client_systems.SystemsMixin.power_on_vios": "vios_uuid",
+    "client_systems.SystemsMixin.update_persistent_memory_volume": (
+        "system_uuid volume_uuid"
+    ),
     "client_updates.UpdatesMixin.submit_platform_update": "system_uuid",
 }
 _CONSOLE_UOM_REQUEST_SITES = {

@@ -121,3 +121,12 @@ def test_build_volume_document_escapes_name() -> None:
     root = ElementTree.fromstring(document)
     assert root.find(f"{NS}Name").text == "a<b&c"
     assert root.find(f"{NS}Affinity").text == "true"
+
+
+def test_parse_volume_rejects_blank_field_and_missing_resource() -> None:
+    entry = _entry()
+    entry["Resource"]["Name"] = " "
+    with pytest.raises(ValueError, match="Name is malformed"):
+        parse_volume(entry)
+    with pytest.raises(ValueError, match="has no Size"):
+        parse_volume({"Resource": None})
