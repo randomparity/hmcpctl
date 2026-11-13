@@ -90,6 +90,7 @@ CLI_TOOL_MIRRORS: Mapping[str, str | None] = MappingProxyType(
         "lpars clear-boot-order": "hmc_clear_lpar_boot_order",
         "lpars provision": "hmc_provision_lpar",
         "adapters list": "hmc_list_adapters",
+        "adapters get": "hmc_get_adapter",
         "adapters add-network": "hmc_add_network_adapter",
         "adapters update-network": "hmc_update_network_adapter",
         "adapters add-vscsi": "hmc_add_vscsi_adapter",

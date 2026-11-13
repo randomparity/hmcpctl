@@ -23,12 +23,23 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   names one ownership-authorized VIOS on the same system and is written in the single
   creation record. The result compares the saved profile record by record and states that no
   VIOS server adapter or mapping was created and that pairing is unproven.
+- `hmc_get_adapter` (CLI `adapters get`) reads one vSCSI or vFC client adapter of a partition by
+  UUID. It refuses an adapter the partition does not own (ADR 0374).
+- vSCSI and vFC client adapter results from add, get and list carry `paired_identity`: the
+  remote partition ID and slot, the VIOS UUID, and for vFC the WWPN pair.
 
 ### Changed
 
 - `hmcpctl lpars create` and `hmcpctl vios create` no longer echo an unknown key name from
   `--virtual-serial-adapters` inline JSON in their usage error; the error names the validation
   type at that position instead (#1980).
+- `hmc_add_vscsi_adapter` and `hmc_add_vfc_adapter` refuse, before sending anything, a
+  `vios_partition_id` that is not exactly one VIOS on the client partition's managed system.
+
+### Fixed
+
+- `hmc_add_vfc_adapter` sends `kb="CUR"` on its connecting fields. V10R3 refused the old
+  `kb="CUD"` document with REST0001, so the add never succeeded.
 
 ## [0.2.0] - 2026-11-13
 
