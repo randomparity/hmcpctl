@@ -321,6 +321,7 @@ def test_profile_drift_is_unavailable_without_a_read():
     result = _inspect(hmc, ("profile_drift",))
     assert result.profile_drift is not None
     assert result.profile_drift.status == "unavailable"
+    assert "hmc_read_partition_profile" in (result.profile_drift.detail or "")
     assert hmc.calls == [f"list_logical_partitions {SYS.upper()}"]
 
 

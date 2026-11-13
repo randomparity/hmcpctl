@@ -25,6 +25,7 @@ class FakeHMC:
         state="not activated",
         *,
         rmc="active",
+        ptype=None,
         status="COMPLETED_OK",
         after=None,
         authorize_power=False,
@@ -33,6 +34,7 @@ class FakeHMC:
             {"host": "hmc.test", "authorize_power_operations": authorize_power}
         )
         self.state, self.rmc, self.status, self.after = state, rmc, status, after
+        self.ptype = ptype
         self.submits: list[tuple[str, str]] = []
         self.waits = 0
         self.listings = 0
@@ -52,11 +54,12 @@ class FakeHMC:
         self.listings += 1
         if self.list_error is not None:
             raise self.list_error
-        resource = {
-            "PartitionName": "web1",
-            "PartitionState": self.state,
-            "ResourceMonitoringControlState": self.rmc,
-        }
+        resource = {"PartitionName": "web1", "PartitionState": self.state}
+        # None models an absent leaf, not an empty one.
+        if self.rmc is not None:
+            resource["ResourceMonitoringControlState"] = self.rmc
+        if self.ptype is not None:
+            resource["PartitionType"] = self.ptype
         return [{"UUID": LPAR, "Resource": resource}]
 
     async def get_quick_property(self, kind, uuid, name):
@@ -163,13 +166,54 @@ def test_power_off_maps_mode_and_action_onto_one_job(hmc, action, mode, expected
     assert record.effects[0].kind == power.EFFECT_KINDS[action]
 
 
+# Every PartitionType but IBM i's exact key keeps the RMC requirement (ADR 0372).
+_NEEDS_RMC_TYPES = ["AIX/Linux", "Virtual IO Server", None, "os400", "UNKNOWN"]
+# element_to_dict wraps a leaf carrying a ksv attribute (hmcpctl.xmlutil.leaf_text).
+_IBM_I_TYPES = ["OS400", {"@attrs": {"ksv": "V1_3_0"}, "text": "OS400"}]
+
+
+def _graceful_job(hmc, action):
+    ((path, document),) = hmc.submits
+    assert path.endswith(f"/LogicalPartition/{LPAR}/do/PowerOff")
+    parameters = dict(_PARAMETER.findall(document))
+    restart = "true" if action == "restart" else "false"
+    assert (parameters["operation"], parameters["immediate"]) == ("osshutdown", "false")
+    assert parameters["restart"] == restart
+
+
 @pytest.mark.parametrize("action", ["stop", "restart"])
-def test_graceful_without_rmc_fails_naming_immediate_and_writes_nothing(hmc, action):
-    hmc.state, hmc.rmc = "running", "inactive"
+@pytest.mark.parametrize("rmc", ["inactive", None])
+@pytest.mark.parametrize("ptype", _NEEDS_RMC_TYPES)
+def test_graceful_without_rmc_fails_naming_immediate_and_writes_nothing(
+    hmc, action, rmc, ptype
+):
+    hmc.state, hmc.rmc, hmc.ptype = "running", rmc, ptype
     record = _run(action)
     assert _end(record) == ("terminal", "failed")
     assert "mode=immediate" in record.warnings[0]
     assert hmc.submits == [] and record.effects == ()
+
+
+@pytest.mark.parametrize("action", ["stop", "restart"])
+@pytest.mark.parametrize("ptype", _NEEDS_RMC_TYPES)
+def test_graceful_with_rmc_submits_osshutdown(hmc, action, ptype):
+    hmc.state, hmc.ptype = "running", ptype
+    hmc.after = "not activated" if action == "stop" else "running"
+    record = _run(action)
+    assert _end(record) == ("terminal", "completed")
+    _graceful_job(hmc, action)
+
+
+@pytest.mark.parametrize("action", ["stop", "restart"])
+@pytest.mark.parametrize("rmc", ["active", "inactive", None])
+@pytest.mark.parametrize("ptype", _IBM_I_TYPES, ids=["plain", "ksv-wrapped"])
+def test_ibm_i_graceful_needs_no_rmc(hmc, action, rmc, ptype):
+    hmc.state, hmc.rmc, hmc.ptype = "running", rmc, ptype
+    hmc.after = "not activated" if action == "stop" else "running"
+    record = _run(action)
+    assert _end(record) == ("terminal", "completed")
+    _graceful_job(hmc, action)
+    assert record.effects[0].kind == power.EFFECT_KINDS[action]
 
 
 @pytest.mark.parametrize(

@@ -204,6 +204,36 @@ def test_promote_completed_window(hostile_git_config, candidate):
     assert snapshot["system.get"]["observed_at"] == observation["observed_at"]
 
 
+def test_promotion_commit_passes_secret_hook(candidate, tmp_path):
+    """Promotion commits new evidence digests through an active secret-scan hook.
+
+    The hook runs the `just secrets` scanner command, baseline and flags over the
+    staged files rather than every tracked file: the promotion's new and moved
+    findings are all in the staged catalog, and a full scan adds about 50 s.
+    """
+    root, *_, observation = candidate
+    marker = tmp_path / "secrets-hook-ran"
+    hooks = Path(
+        git(root, "rev-parse", "--path-format=absolute", "--git-path", "hooks")
+    )
+    hooks.mkdir(exist_ok=True)
+    (hooks / "pre-commit").write_text(
+        "#!/bin/sh\ngit diff --cached --name-only -z | xargs -0 uv run --no-sync "
+        "detect-secrets-hook --baseline .secrets.baseline --no-verify -- "
+        f"&& touch '{marker}'\n"
+    )
+    (hooks / "pre-commit").chmod(0o755)
+
+    promote(candidate)
+
+    assert marker.is_file()
+    changed = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+    assert ".secrets.baseline" not in changed.splitlines()
+    shown = git(root, "show", "HEAD", "--", "docs/capabilities/maturity.json")
+    assert f'"closure_fingerprint": "{observation["closure_fingerprint"]}"' in shown
+    assert f'"tested_commit": "{observation["tested_commit"]}"' in shown
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

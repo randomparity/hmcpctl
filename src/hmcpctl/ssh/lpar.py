@@ -289,17 +289,16 @@ async def create_lpar_via_cli(
     try:
         return await run_hmc_command(config, cmd)
     except HMCCLIError as error:
-        if memory_pairs:
-            code = error.remote_refusal_code
-        elif layout_pairs:
-            code = error.remote_refusal_code
+        code = error.remote_refusal_code
+        if layout_pairs and not memory_pairs:
             layout_error = f"{code}: " if code else ""
             layout_error += (
                 "Native layout creation outcome requires scoped identity reconciliation"
             )
-        elif not hardware_pairs and affinity_group_id is None:
+        elif not memory_pairs and not hardware_pairs and affinity_group_id is None:
             raise HMCCLIError(
-                f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run."
+                f"Creation outcome unknown for {name!r}: {error}. Inspect whether the partition exists before retrying; ownership stamping has not run.",
+                remote_refusal_code=code,
             ) from error
     except Exception:
         if not memory_pairs:
@@ -312,7 +311,8 @@ async def create_lpar_via_cli(
     if layout_error is not None:
         raise _LayoutCreateSubmissionError(layout_error, remote_refusal_code=code)
     raise HMCCLIError(
-        f"{'Affinity group' if affinity_group_id is not None else 'Hardware memory'} creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run."
+        f"{'Affinity group' if affinity_group_id is not None else 'Hardware memory'} creation outcome unknown. Inspect whether the partition exists before retrying; ownership stamping has not run.",
+        remote_refusal_code=code,
     )
 
 

@@ -787,7 +787,7 @@ evidence covers the ownership-guarded path, as bare-cec's does.
   removed it.
 - **Not run, recorded as SKIP rows naming what they need:** `hmc_dump_restart_lpar`,
   provision's SR-IOV and vNIC arguments, a graceful `hmc_power_lpar` stop or
-  restart, and whole-system power.
+  restart, the same on IBM i without RMC (ADR 0372), and whole-system power.
 - **After.** Teardown abandons any `hmc_power_lpar`, provision or decommission operation
   left open, each with its own tool. Any failed,
   cancelled, or unproven decommission attempt retains its remaining resources for

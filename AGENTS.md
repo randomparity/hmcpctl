@@ -224,22 +224,30 @@ Common causes worth checking first:
   because the environment is the behaviour under test.
 
   The earlier version of this note produced real breakage. Verify a fix with
-  the environment a workstation actually has, not an empty one. `HMCConfig`
-  declares **thirteen** fields, so thirteen `HMC_*` names can leak in; this
-  covers the eleven that no fixture already pins:
+  the environment a workstation actually has, not an empty one. Every
+  `HMCConfig` field has an `HMC_*` name that can leak in; `just env-vars` lists
+  them, so this note states no count that could drift. The probe below sets
+  every field except the two that autouse fixtures in `tests/conftest.py`
+  already pin (`HMC_VERIFY_SSL`, `HMC_AUTHORIZE_POWER_OPERATIONS`). When a
+  field is added, add it here with a non-default value:
 
   ```sh
-  HMC_AGENT_ID=a HMC_AUDIT_MEMENTO=m HMC_HOST=h \
-  HMC_ISO_URL_ALLOWLIST=iso.example.test HMC_PASSWORD=p HMC_PORT=12443 \
-  HMC_SCHEMA_VERSION=V1_0 HMC_SSH_KEY_FILE=/k HMC_SSH_TIMEOUT=111 \
-  HMC_TIMEOUT=17 HMC_USER=u \
+  HMC_AGENT_ID=a HMC_AUDIT_MEMENTO=m HMC_CA_BUNDLE=/ca.pem \
+  HMC_CERT_FINGERPRINT=AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA \
+  HMC_HOST=h HMC_ISO_BUILD_ARGUMENTS='["{target}"]' HMC_ISO_BUILD_ENTRY=/build \
+  HMC_ISO_URL_ALLOWLIST=iso.example.test HMC_MAX_RESPONSE_BYTES=1048576 \
+  HMC_PASSWORD=p HMC_PORT=12443 HMC_SCHEMA_VERSION=V1_0 HMC_SSH_KEY_FILE=/k \
+  HMC_SSH_TIMEOUT=111 HMC_SSH_VERIFY_HOST_KEY=false HMC_TIMEOUT=17 \
+  HMC_TRUST_SYSTEM_STORE=false HMC_UPLOAD_TIMEOUT=222 HMC_USER=u \
     uv run --no-sync pytest tests/ -q
   ```
 
   Every value differs from the field's declared default, deliberately.
-  `HMC_PORT`, `HMC_TIMEOUT` and `HMC_SSH_TIMEOUT` default to 443, 180 and 300; a
-  probe set to the default is invisible to a test that asserts the default, so
-  it would prove nothing. A leak has to surface as a wrong-value assertion.
+  `HMC_PORT`, `HMC_TIMEOUT`, `HMC_SSH_TIMEOUT` and `HMC_UPLOAD_TIMEOUT` default
+  to 443, 180, 300 and 600, and `HMC_SSH_VERIFY_HOST_KEY` and
+  `HMC_TRUST_SYSTEM_STORE` default to true; a probe set to the default is
+  invisible to a test that asserts the default, so it would prove nothing. A
+  leak has to surface as a wrong-value assertion.
 
   **The failures this probe produces are its output, not pre-existing failures
   to fix under the rule at the top of this section.** It is a diagnostic, and it
@@ -251,8 +259,7 @@ Common causes worth checking first:
   what says the branch is shippable.
 
   `HMC_VERIFY_SSL` and `HMC_AUTHORIZE_POWER_OPERATIONS` are deliberately absent:
-  autouse fixtures in `tests/conftest.py` already pin both for every test, so
-  exporting them here would prove nothing.
+  exporting them here would prove nothing, because the autouse fixtures pin both.
 
   Two names in play here leak in a second way, and neither shows up as a
   wrong-value assertion:

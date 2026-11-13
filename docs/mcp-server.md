@@ -182,7 +182,7 @@ decision writes its own audit record, so one placement call can write a few hund
 `hmc_power_lpar` (`destructive`) starts, stops or restarts one LPAR as a durable operation
 (ADR 0190, ADR 0199). It needs `request_id`, `lpar_name_or_uuid`, `system_name_or_uuid` and
 `action` (`start`, `stop` or `restart`); `mode` is `graceful` (PowerOff `osshutdown`, RMC must
-be active) unless `immediate` is stated, and nothing switches to `immediate` on its own. The
+be active except on IBM i, OS400) unless `immediate` is stated, and nothing switches to `immediate` on its own. The
 call returns within `wait_seconds` with the operation record; the work continues, and
 `hmc_operation_status` or a `continuation=resume` call reads it. A partition already in the
 requested state completes with `already_in_state` true and no job. The final `result` carries
