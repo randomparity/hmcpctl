@@ -1,0 +1,7 @@
+{
+ "capture": "2026-11-13-q1975/procpool-cli",
+ "command": "lshwres -r procpool -m sys-R1",
+ "exit_status": 0,
+ "stdout": "name=DefaultPool,shared_proc_pool_id=0,lpar_names=example-lpar,lpar_ids=1\nname=SharedPool01,shared_proc_pool_id=1,max_pool_proc_units=20.0,curr_reserved_pool_proc_units=1.0,pend_reserved_pool_proc_units=1.0,lpar_ids=none\n",
+ "stderr": ""
+}

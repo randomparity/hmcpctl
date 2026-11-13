@@ -55,7 +55,8 @@ the feed with `_parse_feed`, as `list_virtual_switches` does. 204 returns `[]`.
 - `get_shared_processor_pool(hmc, system_name_or_uuid, pool: int | str)
   -> SharedProcessorPoolResult(system_uuid, configured_rule, pool)`. An `int` (never a
   `bool`) selects by PoolID, 0 included; a `str` selects by exact, case-sensitive PoolName.
-  An empty name, a negative ID or another type raises `ValueError`. The selector is one
+  An empty name or a negative ID raises `ValueError`; a `bool` or another type raises
+  `TypeError`. The selector is one
   required argument, so no call carries two selectors or none, and an MCP client's `""` for
   an unset optional string (ADR 0094) cannot arise. It searches every slot. No match raises
   `ResourceNotFoundError("shared processor pool", ...)` with the neutral advice "List the
@@ -157,7 +158,7 @@ default pool by ID and by name (`processor_pool.get`). Nothing is written.
    list is the one captured UUID. Pool 1 reports partitions as `None`.
 4. A malformed unit (non-numeric, negative, non-finite, empty), PoolID or partition href
    raises `HMCError`; an empty `AssignedPartitions` projects as `()`. An unknown ID or name
-   raises `ResourceNotFoundError`; an empty name, negative ID or `bool` raises `ValueError`.
+   raises `ResourceNotFoundError`; an empty name or negative ID raises `ValueError`, a `bool` `TypeError`.
 5. ST4 records `processor_pool.list` and `processor_pool.get` against `lshwres`, read-only.
 
 ## Validation

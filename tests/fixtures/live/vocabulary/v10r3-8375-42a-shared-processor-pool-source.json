@@ -1,0 +1,34 @@
+{
+ "firmware": "v10r3-8375-42a-shared-processor-pool-source",
+ "sources": [
+  "2026-11-13 authorized #1975 read-only SharedProcessorPool capture: HMC V10R3 SP1060 managing 8375-42A (POWER9); REST feed GET and lshwres -r procpool, redacted fixtures rest-shared-processor-pool-feed and cli-procpool; source vocabulary only"
+ ],
+ "rest": {
+  "endpoints": [
+   {
+    "method": "GET",
+    "path": "/rest/api/uom/ManagedSystem/{uuid}/SharedProcessorPool",
+    "accept": "application/atom+xml",
+    "status": 200,
+    "content_type": "application/atom+xml"
+   }
+  ],
+  "errors": [],
+  "values": {},
+  "element_enums": {}
+ },
+ "cli": {
+  "commands": [
+   {
+    "command": "lshwres -r procpool -m {}",
+    "exit_status": [
+     0
+    ],
+    "codes": [],
+    "outputs": [],
+    "error_streams": []
+   }
+  ],
+  "values": {}
+ }
+}
