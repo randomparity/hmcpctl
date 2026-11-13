@@ -41,7 +41,11 @@ uppercase hex digits; unchanged discriminator).
    ("supply physical_io.console_slot: hmc or a declared physical/SR-IOV DRC; no default is
    inserted"). Called in `_create_via_cli` before its effect-classifying `try` (so the start
    and serial outcome handlers never see it as an unknown outcome) and in
-   `create_lpar_via_cli`. The REST create path is unchanged; its 406/REST0001 fallback reaches
+   `create_lpar_via_cli`, which `scripts/live_test/arms/lpar_serial_adapter.py` (ST63) calls
+   directly; ST63's OS400 leg therefore passes `console_slot="hmc"`. Criterion 3 is bounded to
+   native (`mksyscfg`) creation: the REST create path is unchanged, because keylock creation is
+   REST-only and `admit_creation_io` refuses `physical_io` with keylock, so a universal console
+   rule would remove IBM i keylock creation. The REST 406/REST0001 fallback reaches
    `_create_via_cli` and is refused there, after a refused REST write.
 4. Admission: `admit_creation_io` skips virtual forms in its per-device loop (rule 2 owns
    them); its OS400 and fresh `IBMiCapable` checks still apply because `tagged()` is non-empty.
@@ -71,7 +75,8 @@ C12 paragraph, ADR 0274 status amendment line, CHANGELOG *Added*/*Changed*. Live
 1. **Actors and deployments** — local operator or agent calling `hmc_create_lpar`/CLI
    against an HMC it is configured for; live lab runs per `docs/live-testing.md`.
 2. **Invariants and assets** — no HMC write before every rule refuses; a created partition is
-   never reported verified when a tagged role points elsewhere; the published MCP input
+   not reported verified when a role the request set as a virtual slot reads back as another
+   value; the published MCP input
    contract (admits strictly more inputs; console-less IBM i native create now refused early).
 3. **Accepted failure classes** — a load source whose VIOS server adapter or disk is absent
    (pairing unproven, ADR 0376); IBM i boot behaviour (no install or activation, exclusion);

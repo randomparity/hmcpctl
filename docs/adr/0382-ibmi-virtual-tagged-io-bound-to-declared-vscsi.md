@@ -17,12 +17,22 @@ refused only a slot the partition lacks (`HSCL0DC6`), stored any `console_slot` 
 unchecked (including a nonexistent slot), and refused a record without `console_slot`
 (rc 1, no HSCL code).
 
-Published IBM i guidance names one virtual family for these roles: a client SCSI adapter is
-tagged as the load source of a hosted IBM i partition, and must be marked required to be
-offered as one; the same adapter is tagged as the alternate restart device to IPL from
-virtual optical (IBM support pages "Create a Client Partition (i, AIX, or Linux) Hosted by
-an IBMi Server Partition" and "Creating a Virtual Optical drive in a HMC-Managed VIOS
-Partition"). No source in scope establishes a virtual console device family.
+Role matrix from published IBM guidance (IBM support pages "Create a Client Partition
+(i, AIX, or Linux) Hosted by an IBMi Server Partition"
+<https://www.ibm.com/support/pages/create-client-partition-i-aix-or-linux-hosted-ibmi-server-partition-using-hmc-classic-signon>,
+"Creating a Virtual Optical drive in a HMC-Managed VIOS Partition"
+<https://www.ibm.com/support/pages/creating-virtual-optical-drive-hmc-managed-vios-partition>,
+"C2004130 Unable to load IBM i OS to NPIV SAN Storage"
+<https://www.ibm.com/support/pages/c2004130-unable-load-ibm-i-os-npiv-san-storage-vfchost-status-remains-notloggedin-vios>):
+
+| Virtual family | Load source | Alternate restart | Console | Here |
+|---|---|---|---|---|
+| vSCSI client | yes; must be required to be offered on the HMC tagged-I/O screen | yes (virtual optical) | not named | admitted when declared |
+| vFC client | yes (NPIV SAN disk) | not named | not named | no creation input; refused (#1830) |
+| virtual serial, virtual ethernet | not named | not named | not named | refused |
+
+The capture's saved-profile readback (`lssyscfg -r prof`) echoed `load_source_slot=2,
+alt_restart_device_slot=2,console_slot=hmc` exactly as submitted.
 
 ## Decision
 
@@ -35,9 +45,8 @@ native creation without `console_slot` is refused before effects; no default is 
 `HSCL0DC6` remains a backstop only.
 
 The created profile's virtual tagged fields are compared from the same saved-profile record
-the vSCSI step already reads (`lssyscfg -r prof`, whose readback was captured), together with
-that slot's client record; the REST profile comparison keeps its physical, SR-IOV and `hmc`
-fields.
+the vSCSI step already reads (`lssyscfg -r prof`), together with that slot's client
+record; the REST profile comparison keeps its physical, SR-IOV and `hmc` fields.
 
 ## Consequences
 
@@ -55,6 +64,10 @@ virtual tagged slot is uncaptured and is not compared.
   an eligible virtual console family, and the HMC validates nothing that would catch a wrong one.
 - **Require `is_required` for alternate restart too.** judgment: the cited sources state the
   required flag only for the load source; adding it would be an unsourced refusal.
+- **Require `console_slot` on REST creation too.** verified: at cced9acf
+  `admit_creation_io` (`operations/lpar/creation/physical_io.py`) refuses `physical_io` with a
+  keylock, and `_create_via_cli` refuses keylock, so IBM i keylock creation is REST-only and a
+  universal console rule would remove it.
 - **Insert `console_slot=hmc` when absent.** judgment: ADR 0274 rejects an implicit console.
 - **Compare virtual slots through the REST profile.** judgment: their REST rendering is
   uncaptured, and the CLI readback that echoes them is already read for the same records.
