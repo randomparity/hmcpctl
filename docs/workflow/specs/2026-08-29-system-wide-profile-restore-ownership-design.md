@@ -1,7 +1,7 @@
 # System-wide profile restore ownership design
 
 Issue: [#449](https://github.com/randomparity/hmc-mcp/issues/449)
-Decision: [ADR 0092](../../../adr/0092-uniform-lpar-ownership-authorization-rule.md)
+Decision: [ADR 0092](../../adr/0092-uniform-lpar-ownership-authorization-rule.md)
 
 ## Goal and scope
 

@@ -105,7 +105,7 @@ Tests use a synthetic V10R3-shaped fixture (no lab identifiers): `VolumeGroup sc
 with one `PhysicalVolume`, `VirtualDisks` (CUD) with `Metadata` and two `VirtualDisk` children
 (`DiskCapacity`, `DiskLabel`, `DiskName` CUR; `VolumeGroup` href and `UniqueDeviceID` ROR).
 The contracts and their tests are listed per task in
-[the plan](../plans/2026-09-23-virtual-disk-rmw.md).
+the local plan `2026-09-23-virtual-disk-rmw.md`.
 
 ## Considered and rejected
 

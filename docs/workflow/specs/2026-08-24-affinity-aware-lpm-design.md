@@ -1,7 +1,7 @@
 # Affinity-aware LPM preflight design
 
 Issue: #320  
-Decision: [ADR 0091](../../../adr/0091-compose-affinity-preflight-before-lpm.md)
+Decision: [ADR 0091](../../adr/0091-compose-affinity-preflight-before-lpm.md)
 
 ## Outcome
 

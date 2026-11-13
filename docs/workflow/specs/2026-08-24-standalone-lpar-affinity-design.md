@@ -1,7 +1,7 @@
 # Standalone LPAR post-activation affinity assessment
 
 Issue: #319
-Decision: [ADR 0090](../../../adr/0090-standalone-lpar-affinity-assessment.md)
+Decision: [ADR 0090](../../adr/0090-standalone-lpar-affinity-assessment.md)
 
 ## Contract
 

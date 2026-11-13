@@ -229,7 +229,7 @@ step 6 re-judges this against the actual diff.
 
 Every success criterion above is covered by a `focused-test` entry in the implementation plan's
 Verification table
-([plan](../plans/2026-09-15-discover-search-parameters.md), *Task 1 — Verification*), which is the
+(the local plan `2026-09-15-discover-search-parameters.md`, *Task 1 — Verification*), which is the
 inventory of record for the build. **It is pre-capture and was not revised**: it still prescribes
 the disproven `<Nickname>`/`<SearchParameter_Collection>` parse and the removed parent arguments,
 and three of its named tests no longer exist. A banner at its head says so, and ADR 0142 plus the
