@@ -384,7 +384,7 @@ async def test_name_selector_resolves_the_same_vios(target):
             ValueError,
             "not a VIOS",
         ),
-        (Client(2, 20, False, remote_lpar_name="new"), ValueError, "not a VIOS"),
+        (Client(2, 20, False, remote_lpar_name="new"), ValueError, "not contained"),
         (Client(2, 20, False, remote_lpar_id=99), ValueError, "not contained"),
         (Client(2, 64, False, remote_lpar_id=7), ValueError, "below the VIOS maximum"),
     ],

@@ -46,21 +46,12 @@ class VscsiAdmission:
 
 
 def _selected(
-    adapter: VirtualScsiClientAdapter,
-    inventory: tuple[SerialTarget, ...],
-    pending: SerialTarget,
+    adapter: VirtualScsiClientAdapter, inventory: tuple[SerialTarget, ...]
 ) -> SerialTarget:
+    """Resolve the one selector; the pending partition is absent from the inventory."""
     if adapter.remote_lpar_name is not None:
-        if adapter.remote_lpar_name == pending.name:
-            raise ValueError(
-                "vSCSI remote partition is not a VIOS on the selected system"
-            )
         matches = [t for t in inventory if t.name == adapter.remote_lpar_name]
     else:
-        if adapter.remote_lpar_id == pending.partition_id:
-            raise ValueError(
-                "vSCSI remote partition is not a VIOS on the selected system"
-            )
         matches = [t for t in inventory if t.partition_id == adapter.remote_lpar_id]
     if len(matches) != 1:
         raise ValueError(
@@ -100,7 +91,7 @@ async def admit_vscsi_creation(
     cache: dict[str, SerialTarget] = {}
     servers = []
     for adapter in adapters:
-        selected = _selected(adapter, inventory, pending)
+        selected = _selected(adapter, inventory)
         key = selected.uuid.casefold()
         if key not in cache:
             cache[key] = await read_owned_target(hmc, system_name, selected)
