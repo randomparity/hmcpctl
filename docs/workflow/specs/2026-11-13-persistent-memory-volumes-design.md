@@ -26,7 +26,8 @@ Model, `documents/persistent_memory.py`:
   `parse_volume(entry)` raises `ValueError` naming the field when `uuid`, `name`
   or `size_mib` is missing or malformed.
 - `validate_volume_name(name)`: 1–64 characters of `[A-Za-z0-9_.-]`, a
-  conservative subset; the HMC stays the final arbiter.
+  conservative subset applied to new names only (create, rename target), never
+  to selectors of existing volumes; the HMC stays the final arbiter.
 - `build_create_document(name, size_mib, affinity, partition_link)` and
   `build_rename_document(new_name)`. Element names, the partition reference
   form and whether rename needs more than the name are pinned by the live
