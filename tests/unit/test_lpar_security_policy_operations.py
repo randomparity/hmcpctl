@@ -1040,31 +1040,154 @@ async def test_policy_malformed_identity_retains_required_stamp_contract(
     command.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_creation_refuses_srr_with_nonzero_keystore_before_effects(
-    creation_target, monkeypatch
-):
+KEY_REFUSAL = (
+    "HMC refused creation combining simplified remote restart with a nonzero "
+    "keystore (HSCL0DCE): the managed system's trusted system key status is not "
+    "User Key. A scoped lookup observed no partition; nothing was created. Select "
+    "only one of these features, or set a user-defined system key first."
+)
+
+
+def _srr_keystore_creation(**extra):
     from hmcpctl.documents.lpar import LparResources, LparSettings
     from hmcpctl.operations.lpar.creation import core
 
-    hmc, _, command = creation_target
-    assign = AsyncMock()
-    monkeypatch.setattr(core, "_created_settings_step", assign)
-    creation = core.LparCreation(
+    return core.LparCreation(
         "part-R1",
         "AIX/Linux",
         LparResources(desired_memory=1024),
         settings=LparSettings(simplified_remote_restart_capable=True),
         security_policy=LparSecurityPolicy(keystore_kbytes=4),
-        apply_profile="default_profile",
+        **{"apply_profile": "default_profile", **extra},
     )
-    with pytest.raises(ValueError, match="simplified remote restart.*nonzero"):
-        await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
-    command.assert_not_awaited()
-    hmc.create_logical_partition.assert_not_awaited()
+
+
+def _refuse_with(command, code, marker="private-provider-marker"):
+    from hmcpctl.errors import HMCCLIError
+
+    command.side_effect = HMCCLIError(
+        f"An error occurred. {marker}", remote_refusal_code=code
+    )
+
+
+@pytest.mark.asyncio
+async def test_creation_submits_srr_with_keystore(creation_target, monkeypatch):
+    import shlex
+
+    from hmcpctl.operations.lpar.creation import core
+    from hmcpctl.operations.lpar.workflow_contract import WorkflowStep
+
+    hmc, _, command = creation_target
+    settings = AsyncMock(return_value=WorkflowStep("settings", "ok"))
+    monkeypatch.setattr(core, "_created_settings_step", settings)
+    result = await core.create_and_stamp_lpar(
+        hmc, SYSTEM, _srr_keystore_creation(apply_profile=None)
+    )
+    command.assert_awaited_once()
+    record = shlex.split(command.await_args.args[1])[-1]
+    assert record.count("simplified_remote_restart_capable=1") == 1
+    assert record.count("keystore_kbytes=4") == 1
+    assert result.security_policy_step.status == "ok"
+    settings.assert_awaited_once()
+    core.stamp_created_lpar_ownership.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hardware", [None, True])
+async def test_srr_keystore_hscl0dce_is_contained_refusal(
+    creation_target, monkeypatch, hardware
+):
+    import traceback
+
+    from hmcpctl.errors import HMCCLIError
+    from hmcpctl.operations.lpar.creation import core
+
+    hmc, _, command = creation_target
+    monkeypatch.setattr(partition_creation, "admit_hardware_memory", AsyncMock())
+    hmc.find_partition_by_name.side_effect = [None, None]
+    _refuse_with(command, "HSCL0DCE")
+    apply = AsyncMock()
+    monkeypatch.setattr(core, "_apply_created_profile", apply)
+    extra = {} if hardware is None else {"hardware_mem_encryption": hardware}
+    with pytest.raises(HMCCLIError) as raised:
+        await core.create_and_stamp_lpar(hmc, SYSTEM, _srr_keystore_creation(**extra))
+    error = raised.value
+    assert str(error) == KEY_REFUSAL
+    assert error.remote_refusal_code == "HSCL0DCE"
+    assert error.__cause__ is None and error.__context__ is None
+    assert "private-provider-marker" not in "".join(traceback.format_exception(error))
+    command.assert_awaited_once()
+    assert hmc.find_partition_by_name.await_count == 2
     core.stamp_created_lpar_ownership.assert_not_awaited()
-    assign.assert_not_awaited()
-    hmc.find_partition_by_name.assert_not_awaited()
+    apply.assert_not_awaited()
+    hmc.delete_logical_partition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lookup", ["found", "foreign", "error", "tls"])
+async def test_srr_keystore_hscl0dce_reconciles_outcome(creation_target, lookup):
+    from hmcpctl.errors import HMCCLIError, HMCTLSFingerprintError
+    from hmcpctl.operations.lpar.creation import core
+
+    hmc, entry, command = creation_target
+    _refuse_with(command, "HSCL0DCE")
+    foreign = {"UUID": PARTITION, "Resource": {"PartitionName": "other-R1"}}
+    outcome = {
+        "found": entry,
+        "foreign": foreign,
+        "error": HMCError("lookup down"),
+        "tls": HMCTLSFingerprintError("Certificate fingerprint differs"),
+    }[lookup]
+    hmc.find_partition_by_name.side_effect = [None, outcome]
+    expected = {
+        "found": f"outcome partial; partition exists (UUID {PARTITION})",
+        "foreign": "outcome unknown.",
+        "error": "outcome unknown; scoped identity readback unavailable",
+    }
+    with pytest.raises(HMCError) as raised:
+        await core.create_and_stamp_lpar(hmc, SYSTEM, _srr_keystore_creation())
+    error = raised.value
+    if lookup == "tls":
+        assert error is outcome
+        assert any("may have taken effect" in note for note in error.__notes__)
+    else:
+        assert not isinstance(error, HMCCLIError)
+        assert str(error).startswith(
+            "Simplified remote restart and keystore creation " + expected[lookup]
+        )
+        assert "no retry, ownership stamp or rollback performed" in str(error)
+        assert error.__cause__ is None
+    command.assert_awaited_once()
+    core.stamp_created_lpar_ownership.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["keystore-only", "other-code"])
+async def test_hscl0dce_outside_combination_keeps_policy_unknown(creation_target, case):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.creation import core
+
+    hmc, _, command = creation_target
+    if case == "keystore-only":
+        _refuse_with(command, "HSCL0DCE")
+        creation = core.LparCreation(
+            "part-R1",
+            "AIX/Linux",
+            LparResources(desired_memory=1024),
+            security_policy=LparSecurityPolicy(keystore_kbytes=4),
+        )
+    else:
+        _refuse_with(command, "HSCL0001")
+        creation = _srr_keystore_creation()
+    with pytest.raises(HMCError) as raised:
+        await core.create_and_stamp_lpar(hmc, SYSTEM, creation)
+    assert str(raised.value) == (
+        "Native policy creation outcome is unknown; the partition may exist. "
+        "Inspect its scoped identity and profile before retrying; no rollback "
+        "performed."
+    )
+    assert hmc.find_partition_by_name.await_count == 1
+    core.stamp_created_lpar_ownership.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,9 @@
 
 Proposed (2026-10-23) — issue #1765; frozen C04 scope and operator decisions.
 
+> **Amended by [0377](0377-forward-srr-keystore-creation-to-hmc-key-rule.md)**
+> (2026-11-13): the SRR + nonzero-keystore creation refusal is replaced.
+
 ## Context
 
 Five native partition fields have eighteen documented P10/P11 create/update
