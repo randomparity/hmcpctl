@@ -10,10 +10,10 @@ an HMC, and use the CLI or an MCP client.
 | [Configuration](configuration.md) | TOML profiles, nicknames, environment precedence, TLS, and REST ports |
 | [CLI](cli.md) | Inventory, LPAR lifecycle, storage, adapters, and snapshots |
 | [LPAR ISO installation recipe](recipes/lpar-iso-install.md) | Resumable provisioning and optical-boot lifecycle |
-| [MCP server](mcp-server.md) | Access policies, client setup, HTTP transport, migration, and diagnostics |
+| [MCP server](mcp-server.md) | The logical LPAR workflow tools, access policies, client setup, HTTP transport, migration, and diagnostics |
 | [Python library](python-api.md) | Installation, example usage, typing, and the supported API contract |
 | [kdive Tier A contract](kdive-tier-a-contract.md) | Pre-release LPAR imports, PowerAction job mapping, console capture, and ownership and host-key settings |
-| [HMC compatibility](compatibility.md) | What 0.1.0 verifies live, HMC versions, and firmware write-path limitations |
+| [HMC compatibility](compatibility.md) | What 0.2.0 claims, how to check live verification, HMC versions, and firmware write-path limitations |
 | [Development](development.md) | Stack, setup, testing, source layout, and HMC REST API internals |
 | [Read-only system inventory recipe](recipes/system-inventory.md) | Capture managed-system configuration before later operator decisions |
 | [Bare-CEC LPAR recipe](recipes/bare-cec-lpar.md) | Bring up an LPAR on a dedicated PCIe slot, activate it to SMS, and tear it down |
