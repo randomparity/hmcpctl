@@ -53,11 +53,12 @@ def entry(uuid, name, native_id, kind, environment="AIX/Linux"):
     }
 
 
-def profile(scsi, serial="none", name="new", native_id=9):
+def profile(scsi, serial="none", name="new", native_id=9, **tagged):
     output = io.StringIO()
     csv.writer(output, lineterminator="").writerow(
         f"{k}={v}"
         for k, v in {
+            **tagged,
             "name": "default_profile",
             "lpar_name": name,
             "lpar_id": native_id,
@@ -384,6 +385,77 @@ async def test_ibmi_native_create_requires_console(target):
     else:
         result = await invoke(b, physical_io=LparPhysicalIO())
         assert vscsi_step(result).status == "ok"
+
+
+@pytest.fixture
+def ibmi_target(target):
+    if target.environment != "OS400":
+        pytest.skip("tagged I/O is IBM i only")
+    return target
+
+
+@pytest.mark.asyncio
+async def test_virtual_load_source_renders_and_verifies(ibmi_target):
+    b = ibmi_target
+    b.local_record = profile(
+        "2/client/7/vios-R1/20/0",
+        load_source_slot=2,
+        alt_restart_device_slot=2,
+        console_slot="hmc",
+    )
+    io = LparPhysicalIO(
+        load_source_slot="2", alt_restart_device_slot="2", console_slot="hmc"
+    )
+    result = await invoke(b, physical_io=io, apply_profile=True)
+    record = native_record(b)
+    assert "load_source_slot=2,alt_restart_device_slot=2,console_slot=hmc" in record
+    step = vscsi_step(result)
+    assert step.status == "ok"
+    assert step.result["records"] == [
+        {
+            "slot": 2,
+            "status": "verified",
+            "roles": ["load_source_slot", "alt_restart_device_slot"],
+        }
+    ]
+    statuses = {s.step: s.status for s in result.steps}
+    assert statuses["physical_io"] == "ok" and statuses["apply_profile"] == "ok"
+    assert result.workflow_completed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "saved",
+    [
+        {"load_source_slot": 3, "alt_restart_device_slot": "none"},
+        {"load_source_slot": "none", "alt_restart_device_slot": "none"},
+        {"alt_restart_device_slot": "none"},
+    ],
+    ids=["other-slot", "unset", "absent"],
+)
+async def test_virtual_load_source_mismatch_blocks_apply(ibmi_target, saved):
+    b = ibmi_target
+    b.local_record = profile("2/client/7/vios-R1/20/0", console_slot="hmc", **saved)
+    io = LparPhysicalIO(load_source_slot="2", console_slot="hmc")
+    result = await invoke(b, physical_io=io, apply_profile=True)
+    step = vscsi_step(result)
+    assert step.status == "error"
+    assert step.result["records"] == [
+        {"slot": 2, "status": "mismatch", "roles": ["load_source_slot"]}
+    ]
+    assert not result.workflow_completed and "apply" not in b.events
+
+
+@pytest.mark.asyncio
+async def test_client_record_mismatch_fails_the_bound_role(ibmi_target):
+    b = ibmi_target
+    b.local_record = profile(
+        "2/client/7/vios-R1/21/0", load_source_slot=2, console_slot="hmc"
+    )
+    io = LparPhysicalIO(load_source_slot="2", console_slot="hmc")
+    result = await invoke(b, physical_io=io, apply_profile=True)
+    assert vscsi_step(result).result["records"][0]["status"] == "mismatch"
+    assert "apply" not in b.events
 
 
 # --- readback parser -------------------------------------------------------

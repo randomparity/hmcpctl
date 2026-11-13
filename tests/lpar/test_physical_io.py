@@ -190,6 +190,16 @@ def test_native_schema_normalization_and_postcondition():
     assert not compare_creation_io(io, (), {})
 
 
+def test_rest_comparison_leaves_virtual_roles_to_the_vscsi_step():
+    io = LparPhysicalIO(
+        load_source_slot="2", alt_restart_device_slot="2", console_slot="hmc"
+    )
+    profile = {"IOConfigurationInstance": {"TaggedIO": {"Console": "HMC"}}}
+    assert compare_creation_io(io, (), profile)
+    profile["IOConfigurationInstance"]["TaggedIO"]["Console"] = "none"
+    assert not compare_creation_io(io, (), profile)
+
+
 def test_unknown_pool_or_required_slot_does_not_compare_equal():
     io = LparPhysicalIO(io_slots=(ProfileIoSlot(DRC, None, False),))
     assert not compare_creation_io(io, (), _profile())
