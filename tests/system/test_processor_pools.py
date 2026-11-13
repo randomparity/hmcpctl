@@ -32,6 +32,10 @@ CLI_ROWS = _parse_lshwres_output(live_fixture("cli-procpool")["stdout"])
 RESOLVE = "hmcpctl.operations.systems.processor_pools.resolve_system_uuid"
 
 
+LPAR = "0000000a-abcd-4ef0-8abc-00000000000a"
+VIOS = "0000000b-abcd-4ef0-8abc-00000000000b"
+
+
 def _entry(pool_id: int) -> dict:
     return copy.deepcopy(
         next(e for e in ENTRIES if e["Resource"]["PoolID"] == str(pool_id))
@@ -181,6 +185,8 @@ def test_missing_name_or_uuid_refuses_the_pool():
         project_shared_processor_pool(entry)
     with pytest.raises(HMCError, match="no UUID"):
         project_shared_processor_pool({"Resource": {}})
+    with pytest.raises(HMCError, match="no UUID"):
+        project_shared_processor_pool({**_entry(1), "UUID": "not-a-uuid"})
 
 
 @pytest.mark.parametrize("assigned", ["", {}])
@@ -196,15 +202,15 @@ def test_membership_accepts_partition_and_vios_links_in_order():
     entry["Resource"]["AssignedPartitions"] = {
         "link": [
             {
-                "href": "https://hmc.test:443/rest/api/uom/ManagedSystem/s/LogicalPartition/A1"
+                "href": f"https://hmc.test:443/rest/api/uom/ManagedSystem/s/LogicalPartition/{LPAR}"
             },
             {
-                "href": "https://hmc.test:443/rest/api/uom/ManagedSystem/s/VirtualIOServer/B2"
+                "href": f"https://hmc.test:443/rest/api/uom/ManagedSystem/s/VirtualIOServer/{VIOS}"
             },
         ]
     }
 
-    assert project_shared_processor_pool(entry).assigned_partition_uuids == ("A1", "B2")
+    assert project_shared_processor_pool(entry).assigned_partition_uuids == (LPAR, VIOS)
 
 
 @pytest.mark.parametrize(
@@ -212,6 +218,11 @@ def test_membership_accepts_partition_and_vios_links_in_order():
     [
         {"link": {"href": "https://hmc.test:443/rest/api/uom/ManagedSystem/s"}},
         {"link": {"rel": "related"}},
+        {
+            "link": {
+                "href": "https://hmc.test/rest/api/uom/ManagedSystem/s/LogicalPartition/A1"
+            }
+        },
         "text",
     ],
 )

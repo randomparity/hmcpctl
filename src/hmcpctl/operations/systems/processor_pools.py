@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from hmcpctl.client.core import HMCClient
 
 from ...errors import HMCError
-from ...resource_identity import ResourceNotFoundError, resolve_system_uuid
+from ...resource_identity import ResourceNotFoundError, is_uuid, resolve_system_uuid
 from ...xmlutil import leaf_text
 
 #: ADR 0375: the default pool, a pool with nonzero units, or a renamed slot.
@@ -80,7 +80,7 @@ def _partition_uuid(href: object, label: str) -> str:
     path = urlparse(href).path if isinstance(href, str) else ""
     for marker in _PARTITION_MARKERS:
         _, found, tail = path.rpartition(marker)
-        if found and tail and "/" not in tail:
+        if found and is_uuid(tail):
             return tail
     raise HMCError(
         f"Shared processor pool {label} has an AssignedPartitions link that names "
@@ -120,7 +120,11 @@ def project_shared_processor_pool(entry: Mapping[str, Any]) -> SharedProcessorPo
     """Project one parsed feed entry, raising ``HMCError`` on any malformed field."""
     uuid = entry.get("UUID")
     resource = entry.get("Resource")
-    if not isinstance(uuid, str) or not uuid or not isinstance(resource, Mapping):
+    if (
+        not isinstance(uuid, str)
+        or not is_uuid(uuid)
+        or not isinstance(resource, Mapping)
+    ):
         raise HMCError("Shared processor pool entry has no UUID or resource")
     raw_id = leaf_text(resource.get("PoolID"))
     if not isinstance(raw_id, str) or not _POOL_ID.fullmatch(raw_id):
