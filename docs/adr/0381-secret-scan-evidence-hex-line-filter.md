@@ -33,8 +33,9 @@ lowercase hex value of exactly that length, plus an optional trailing comma.
 Nothing else can appear on a matching line. The `maturity.json` results leave the
 baseline, and that file leaves `BASELINED_FINDINGS`.
 `tests/test_ci_pipeline.py` pins the full filter list and these exact patterns,
-and runs a controlled fault: a credential-shaped value on any other key, line
-shape or length is still reported. The promotion script is unchanged.
+and runs a controlled fault showing the filter does not exclude a credential
+under another key, of another length, in uppercase, with trailing content, or of a
+non-hex shape under an evidence key. The promotion script is unchanged.
 Design: [the #1970 specification](../workflow/specs/2026-11-13-promotion-secret-scan-design.md).
 
 ## Consequences

@@ -22,7 +22,11 @@ baseline and `BASELINED_FINDINGS` edit (#1968).
   the exact `filters_used` list, the two patterns included. Add the controlled-fault
   scan test.
 - `tests/scripts/test_promote_live_observations.py`: an end-to-end promotion in
-  the existing `candidate` clone, with a `pre-commit` hook that runs `just secrets`.
+  the existing `candidate` clone, with a `pre-commit` hook that runs the `secrets`
+  recipe's scanner command (`uv run --no-sync detect-secrets-hook --baseline
+  .secrets.baseline --no-verify --`) over the staged files. Scanning only staged files
+  keeps the test about 50 s faster than a full-repository `just secrets`, and the
+  promotion's new and moved findings are all in the staged `maturity.json`.
 - No change to `promote_live_observations.py`, its commit allowlist, the
   detect-secrets version or the `maturity.json` format (approved exclusions).
 
@@ -60,8 +64,7 @@ baseline and `BASELINED_FINDINGS` edit (#1968).
 
 1. `just secrets` exits 0 on the branch, and the baseline holds no
    `maturity.json` results.
-2. Run in the `candidate` fixture clone with a `pre-commit` hook that runs
-   `just secrets`, promotion commits a new `tested_commit` and
+2. Run in the `candidate` fixture clone with that `pre-commit` hook, promotion commits a new `tested_commit` and
    `closure_fingerprint`, with no edit to the baseline or the pin.
 3. Each fault case in the threat model is reported by `detect-secrets-hook`
    using this baseline. The two evidence shapes are not reported.
