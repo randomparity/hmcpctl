@@ -16,6 +16,75 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
+0.2.0 ships the logical LPAR workflow through the policy-filtered primary MCP catalog
+(ADR 0189, ADR 0330). An MCP agent can do all of the following with the primary tools, and
+reach the specialist catalog through `hmc_search_tools` and `hmc_invoke_tool`:
+
+- plan a partition and provision it with owned root storage;
+- list it in the logical inventory, reconfigure it and inspect it;
+- hand it to an external consumer such as kdive's adopt-only BYOH provider under a hold;
+- power it, and decommission it with explicit owned-resource cleanup.
+
+The consumer contract is epic #1215. The stable Python API is still the six-name
+`hmcpctl.api` facade of ADR 0118.
+
+### Verified
+
+These nine operations passed a live run (ST73, the `logical-workflow` arm) on HMC V10R3 M1060
+managing a POWER9 system. The verification ledger reads `current` for each at the release
+commit:
+
+- `lpar.plan` (`hmc_plan_lpar`)
+- `provision.lpar` (`hmc_provision_lpar`)
+- `inventory.logical` (`hmc_inventory`)
+- `lpar.reconfigure` (`hmc_reconfigure_lpar`)
+- `lpar.inspect` (`hmc_inspect_lpar`)
+- `lpar.prepare_host_handoff` (`hmc_prepare_host_handoff`)
+- `tools.invoke` (`hmc_invoke_tool`)
+- `lpar.power` (`hmc_power_lpar`)
+- `lpar.decommission` (`hmc_decommission_lpar`)
+
+The claim covers the MCP tools the run called and what it asserted
+([`docs/live-testing.md`](https://github.com/randomparity/hmcpctl/blob/v0.2.0/docs/live-testing.md#the-logical-workflow-arm)):
+
+- an inactive provision on a new 1 GiB virtual disk;
+- an inactive memory and processor change;
+- a hold placed, enforced through `hmc_invoke_tool` and released;
+- one start and an immediate stop;
+- a decommission that deletes the owned disk.
+
+It does not cover the `hmcpctl` CLI commands that wrap the same operations.
+[What 0.2.0 claims](https://github.com/randomparity/hmcpctl/blob/v0.2.0/docs/compatibility.md#what-020-claims)
+maps each operation to its tool. The ledger in
+[`docs/capabilities/`](https://github.com/randomparity/hmcpctl/blob/v0.2.0/docs/capabilities/README.md)
+is authoritative.
+
+### Known issues
+
+- Most of the catalog is not live-verified at this commit. Of 207 operations, 9 read `current`,
+  103 `stale`, 95 `unevidenced`, 0 `failed` and 0 `unrecorded`. The 0.1.0 claims are not
+  re-claimed: their evidence is stale, so those operations ship unclaimed.
+- `hmc_search_tools` and `hmc_operation_status` are primary tools but are not claimed: no
+  release scenario asserts them.
+- `provision.lpar` and `lpar.reconfigure` are recorded `partial`, and the claim covers only the
+  variants the run exercised:
+  - provision rejects positive virtual-slot forms of the physical-I/O slots before any effect;
+  - reconfigure's disk and network changes on an activated partition have no native proof.
+- The unattended Ubuntu and Rocky installer boot (`install` on `hmc_provision_lpar`, ending
+  `boot_started`, ADR 0328) is not claimed. It was observed live before this release but was not
+  part of the release window.
+- A host-handoff hold binds only this host's hmcpctl front ends, as ADR 0193 states. It does not
+  fence the library API, other hosts, the HMC GUI or direct HMC commands. A hold left by a
+  consumer stays until it is released.
+- `hmc_inspect_lpar`'s `profile_drift` reason still says no read-only partition-profile tool
+  exists. `hmc_read_partition_profile` does exist.
+- Network boot is not supported by the LPAR power-on operation (#868).
+- The shared memory pool tools assume `lshwres -r mempool` field names and a remove form that
+  no capture has confirmed (#1245).
+- Reads of a system in `Recovery` or `No Connection` are uncaptured (#1290).
+
 ### Added
 
 - `hmcpctl --version` (#1950) prints the installed package version and exits 0. It is eager:
@@ -605,5 +674,6 @@ tool. `just verification-report` prints every operation's current state, and
 - Builds report the static version `0.1.0` regardless of commit; git-derived dev versions are
   planned (#1471).
 
-[unreleased]: https://github.com/randomparity/hmcpctl/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/randomparity/hmcpctl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/randomparity/hmcpctl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/randomparity/hmcpctl/releases/tag/v0.1.0
