@@ -34,7 +34,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _QUERY_TIMEOUT_SECONDS = 60
 
 _FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
-_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
+_CODE_SPAN = re.compile(
+    r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.DOTALL
+)
 _LINK = re.compile(
     r"!?\[((?:[^\[\]]|\[[^\[\]]*\])*)\]"
     r"\(\s*(<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)"
@@ -44,7 +46,9 @@ _REFERENCE = re.compile(
     r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^>\n]*>|\S+)", re.MULTILINE
 )
 _BLANK_LINE = re.compile(r"\n[ \t]*\n")
-_ATX = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
+_ATX = re.compile(
+    r"^(?:[ \t]*(?:>|[-*+]|\d+[.)])[ \t]*)* {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$"
+)
 _HTML_ANCHOR = re.compile(
     r"<a\s[^>]*\b(?:id|name)\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE
 )
@@ -115,16 +119,20 @@ def slugify(text: str) -> str:
 
 def anchors(text: str) -> set[str]:
     """Every fragment a link may name in the Markdown document *text*."""
-    found: set[str] = set()
+    html: set[str] = set()
+    slugs: set[str] = set()
     seen: Counter[str] = Counter()
     for line in _without_fences(text).split("\n"):
-        found.update(_HTML_ANCHOR.findall(line))
+        html.update(_HTML_ANCHOR.findall(line))
         heading = _ATX.match(line)
         if heading:
-            slug = slugify(heading.group(1))
-            found.add(f"{slug}-{seen[slug]}" if seen[slug] else slug)
-            seen[slug] += 1
-    return found
+            base = slugify(heading.group(1))
+            slug = base
+            while slug in slugs:
+                seen[base] += 1
+                slug = f"{base}-{seen[base]}"
+            slugs.add(slug)
+    return html | slugs
 
 
 def _targets(text: str) -> list[tuple[int, str]]:
@@ -161,6 +169,8 @@ class _Tree:
             return (self.root / path).read_text(encoding="utf-8")
         except UnicodeDecodeError as error:
             raise DocLinksError(f"{path} is not UTF-8: {error.reason}") from error
+        except OSError as error:
+            raise DocLinksError(f"could not read {path}: {error.strerror}") from error
 
     def exists(self, path: str) -> bool:
         return path == "." or path in self.files or Path(path) in self.dirs

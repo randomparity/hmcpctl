@@ -124,6 +124,17 @@ def test_duplicate_heading_suffix():
     assert check_doc_links.anchors(text) == {"same", "same-1", "same-2"}
 
 
+def test_duplicate_suffix_skips_a_literal_suffixed_heading():
+    text = '# Same\n# Same\n# Same 1\n<a id="other"></a>\n# Other\n'
+    assert check_doc_links.anchors(text) == {"same", "same-1", "same-1-1", "other"}
+    assert check_doc_links.anchors("# A\n# A 1\n# A\n") == {"a", "a-1", "a-2"}
+
+
+def test_quoted_and_listed_headings_are_anchors():
+    text = "> # Quoted\n- # Listed\n1. ## Numbered\n"
+    assert check_doc_links.anchors(text) == {"quoted", "listed", "numbered"}
+
+
 def test_html_anchor(tmp_path):
     root = _repo(
         tmp_path / "repo",
@@ -149,6 +160,12 @@ def test_external_and_code_links_skipped(tmp_path):
     )
     root = _repo(tmp_path / "repo", {"page.md": page, "x.md": "# X\n"})
     assert _report(root) == ["page.md:15: missing: gone-real.md"]
+
+
+def test_code_span_does_not_cross_a_blank_line(tmp_path):
+    page = "A lone ` backtick.\n\n[gone](gone.md)\n\nThen `code`.\n"
+    root = _repo(tmp_path / "repo", {"page.md": page})
+    assert _report(root) == ["page.md:3: missing: gone.md"]
 
 
 def test_untracked_target_is_missing(tmp_path):
@@ -204,6 +221,19 @@ def test_non_utf8_file(tmp_path, capsys):
     err = capsys.readouterr().err.splitlines()
     assert len(err) == 1
     assert err[0].startswith("ERROR: bad.md is not UTF-8")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 file")
+def test_unreadable_file(tmp_path, capsys):
+    root = _repo(tmp_path / "repo", {"a.md": "# A\n"})
+    (root / "a.md").chmod(0)
+    try:
+        assert check_doc_links.main(["--repo-root", str(root)]) == 1
+    finally:
+        (root / "a.md").chmod(0o644)
+    assert capsys.readouterr().err.splitlines() == [
+        "ERROR: could not read a.md: Permission denied"
+    ]
 
 
 def test_clean_repository_passes(tmp_path, capsys):

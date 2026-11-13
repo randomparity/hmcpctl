@@ -51,7 +51,8 @@ pager, or a prompt will stall the agent with no recovery path.
       asserts nothing about the file. `just doc-freshness` does read every
       tracked Markdown file's *first line*, looking for a generation banner —
       so a page here can still redden it by opening with something
-      banner-shaped, but its body is unchecked.
+      banner-shaped, and `just doc-links` reads its body only to resolve links
+      and anchors — a repo-wide scan, as above.
   - **When the answer is not obvious, use `--merge`.** It costs one merge
     commit. A wrong `--squash` is not reversible once it is on `main`.
   - Two shell mechanics, for whatever check you do write over

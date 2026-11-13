@@ -9,7 +9,6 @@
 #   just tool-docs         # regenerate docs/tools/ from the registry
 #   just tool-docs-check   # fail when docs/tools/ has fallen behind the registry
 #   just doc-freshness     # fail when any generated document has fallen behind
-#   just doc-links         # fail when a relative Markdown link or anchor is broken
 
 # synchronize locked dependencies and install repository hooks
 setup:
