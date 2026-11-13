@@ -107,6 +107,13 @@ GAPS = (
         "gap: needs an operating system with an active RMC connection",
     ),
     (
+        "hmc_power_lpar (graceful stop and restart on IBM i without RMC)",
+        (
+            "gap: needs an owned scratch IBM i (OS400) partition with an installed "
+            "operating system and a recovery and boot plan (ADR 0372)"
+        ),
+    ),
+    (
         "hmc_power_on_system / hmc_power_off_system",
         "gap: needs an operator window to power the whole managed system",
     ),
