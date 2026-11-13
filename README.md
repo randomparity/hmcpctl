@@ -28,14 +28,14 @@ use [the contributor setup](CONTRIBUTING.md).
 The package is not published to an index. A project that depends on it as a
 library pins a [release tag](https://github.com/randomparity/hmcpctl/releases), which
 names the commit the release was verified at and carries the
-[API compatibility contract](docs/python-api.md). For the first release, `v0.1.0`:
+[API compatibility contract](docs/python-api.md). For the current release, `v0.2.0`:
 
 ```toml
-dependencies = ["hmcpctl @ git+https://github.com/randomparity/hmcpctl@v0.1.0"]
+dependencies = ["hmcpctl @ git+https://github.com/randomparity/hmcpctl@v0.2.0"]
 ```
 
 Write `hmcpctl[app] @ ...` for the CLI and MCP server. With uv, `uv add --raw
-"hmcpctl @ git+https://github.com/randomparity/hmcpctl@v0.1.0"` writes that entry. Without
+"hmcpctl @ git+https://github.com/randomparity/hmcpctl@v0.2.0"` writes that entry. Without
 `--raw`, uv moves the Git source into `[tool.uv.sources]`, which stays out of your package's
 published metadata: other installers then look for `hmcpctl` on PyPI, where this project
 publishes nothing and has not reserved the name, so whoever registers it decides what installs.
