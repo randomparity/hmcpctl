@@ -1,7 +1,7 @@
 # Actionable job-status classification design
 
 Issue: #408  
-Decision: [ADR 0081](../../../adr/0081-classify-actionable-job-outcomes.md)
+Decision: [ADR 0081](../../adr/0081-classify-actionable-job-outcomes.md)
 
 ## Outcome
 

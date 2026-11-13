@@ -7,7 +7,7 @@ at most once, independent of connection count. Existing reported values, `HMC_HO
 behavior, environment/profile precedence, fresh-per-call behavior, and exception classification
 must remain unchanged. No cache or migration is permitted.
 
-This design follows [ADR 0108](../../../adr/0108-invocation-scoped-config-documents.md).
+This design follows [ADR 0108](../../adr/0108-invocation-scoped-config-documents.md).
 
 ## Architecture
 

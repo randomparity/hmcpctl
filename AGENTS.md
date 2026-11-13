@@ -24,8 +24,9 @@ pager, or a prompt will stall the agent with no recovery path.
   `gh pr merge --merge` (merge commit) or `gh pr merge --rebase` (rebase merge).
   - **Documentation-only** means **no changed file's content is asserted by a
     test or a `static` gate.** *Content*, specifically: repo-wide scans like
-    `just secrets` read every tracked file, and counting those would make the
-    exception dead.
+    `just secrets`, which reads every tracked file, and `just doc-links`, which
+    reads every tracked Markdown body, would make the exception dead if they
+    counted.
   - **Decide it by reading, not by a pattern or a grep.** Both have been tried
     here and both are unsound, because the guards reach their files three
     different ways: by literal path, by basename
@@ -50,7 +51,8 @@ pager, or a prompt will stall the agent with no recovery path.
       asserts nothing about the file. `just doc-freshness` does read every
       tracked Markdown file's *first line*, looking for a generation banner —
       so a page here can still redden it by opening with something
-      banner-shaped, but its body is unchecked.
+      banner-shaped, and `just doc-links` reads its body only to resolve links
+      and anchors — a repo-wide scan, as above.
   - **When the answer is not obvious, use `--merge`.** It costs one merge
     commit. A wrong `--squash` is not reversible once it is on `main`.
   - Two shell mechanics, for whatever check you do write over
@@ -341,6 +343,7 @@ just nicknames         # the committed config fixture's nicknames table is well-
 just tool-docs-check   # docs/tools/ still matches the MCP tool registry
 just adr-numbering     # every docs/adr/ record's number is unique and matches its H1
 just doc-freshness     # every generated document matches its declared command
+just doc-links         # every relative Markdown link and #anchor in a tracked file resolves
 ```
 
 Two of those have a **regenerator, not a hand fix**. When `tool-docs-check`

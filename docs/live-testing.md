@@ -3441,7 +3441,7 @@ CLI on an owned fixture before the updater is called qualified. Each step needs 
 root grant naming the exact commit; a stop below ends the window.
 
 1. Prepare one owned inactive fixture with the version-3 `prepare` packet, exactly
-   as in [the retained fixture prerequisite](#retained-fixture-prerequisite-for-vnic-source-qualification),
+   as in [the retained fixture prerequisite](workflow/specs/2026-11-01-vnic-retained-fixture-design.md),
    requiring READY/UNCHANGED, then PREPARED/RETAINED.
 2. Create vNIC 1 with `hmcpctl network add-vnic --yes --port-vlan-id 0
    --pvid-priority 0 --no-auto-priority-failover --allowed-vlan-ids <A>
