@@ -1,0 +1,36 @@
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:ns2="http://a9.com/-/spec/opensearch/1.1/" xmlns:ns3="http://www.w3.org/1999/xhtml">
+    <id>00000002-abcd-4ef0-8abc-000000000002</id>
+    <updated>2026-11-13T14:07:15.294Z</updated>
+    <link rel="SELF" href="https://hmc.test:443/rest/api/uom/ManagedSystem/00000001-abcd-4ef0-8abc-000000000001/VirtualPersistentMemoryVolume"/>
+    <link rel="MANAGEMENT_CONSOLE" href="https://hmc.test:443/rest/api/uom/ManagementConsole/00000003-abcd-4ef0-8abc-000000000003"/>
+    <generator>IBM Power Systems Management Console</generator>
+    <entry>
+        <id>00000004-ABCD-4EF0-8ABC-000000000004</id>
+        <title>VirtualPersistentMemoryVolume</title>
+        <published>2026-11-13T14:07:15.433Z</published>
+        <link rel="SELF" href="https://hmc.test:443/rest/api/uom/ManagedSystem/00000001-abcd-4ef0-8abc-000000000001/VirtualPersistentMemoryVolume/00000004-ABCD-4EF0-8ABC-000000000004"/>
+        <author>
+            <name>IBM Power Systems Management Console</name>
+        </author>
+        <etag:etag xmlns:etag="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/" xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">723079992</etag:etag>
+        <content type="application/vnd.ibm.powervm.uom+xml; type=VirtualPersistentMemoryVolume">
+            <VirtualPersistentMemoryVolume:VirtualPersistentMemoryVolume xmlns:VirtualPersistentMemoryVolume="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/" xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/" xmlns:ns2="http://www.w3.org/XML/1998/namespace/k2" schemaVersion="V1_0">
+    <Metadata>
+        <Atom>
+            <AtomID>00000004-ABCD-4EF0-8ABC-000000000004</AtomID>
+            <AtomCreated>1794578835304</AtomCreated>
+        </Atom>
+    </Metadata>
+    <Uuid ksv="V1_10_0" kb="ROR" kxe="false">00000004-ABCD-4EF0-8ABC-000000000004</Uuid>
+    <Name ksv="V1_10_0" kxe="false" kb="CUR">example-vol</Name>
+    <Size ksv="V1_10_0" kb="COR" kxe="false">256</Size>
+    <CurrentSize ksv="V1_10_0" kb="ROR" kxe="false">256</CurrentSize>
+    <VolumeId ksv="V1_10_0" kb="ROR" kxe="false">1142931457</VolumeId>
+    <Affinity ksv="V1_10_0" kb="COD" kxe="false">false</Affinity>
+    <AssociatedPartitionName ksv="V1_10_0" kxe="false" kb="ROR">example-lpar</AssociatedPartitionName>
+    <AssociatedPartitionId ksv="V1_10_0" kb="COR" kxe="false">1</AssociatedPartitionId>
+    <AssociatedPartition ksv="V1_10_0" kb="ROR" kxe="false" href="https://hmc.test:443/rest/api/uom/ManagedSystem/00000001-abcd-4ef0-8abc-000000000001/LogicalPartition/00000005-ABCD-4EF0-8ABC-000000000005" rel="related"/>
+</VirtualPersistentMemoryVolume:VirtualPersistentMemoryVolume>
+        </content>
+    </entry>
+</feed>
