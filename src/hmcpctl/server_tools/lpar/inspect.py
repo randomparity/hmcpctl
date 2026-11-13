@@ -94,8 +94,8 @@ def inspect_handler(
         SSH transport. ``resources`` needs ``hmc_list_vios`` for the system and
         ``hmc_get_vios_storage_detail`` for each VIOS (by UUID, at most 16); its
         ``mappings`` cover only the VIOSes read. ``rmc`` comes from the partition read.
-        ``profile_drift`` is always ``unavailable`` until a read-only profile read
-        exists. ``next_actions`` names tools the policy permits, chosen from the state
+        ``profile_drift`` is always ``unavailable``: inspection does not compare
+        profiles; read one with ``hmc_read_partition_profile``. ``next_actions`` names tools the policy permits, chosen from the state
         and RMC; ``hmc_capture_lpar_console`` is named, never run.
 
         Args:
