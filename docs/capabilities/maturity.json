@@ -1267,6 +1267,19 @@
             ]
           },
           {
+            "variant": "c12-virtual-tagged-io-vscsi",
+            "parameters": [
+              {
+                "name": "physical_io.console_slot",
+                "constraint": "required for native IBM i creation; refused before effects when absent, no default inserted (ADR 0274, ADR 0382)"
+              },
+              {
+                "name": "physical_io.load_source_slot,physical_io.alt_restart_device_slot",
+                "constraint": "canonical decimal virtual slot admitted only when it equals the local slot of a vSCSI client declared in virtual_scsi_adapters of the same request (ADR 0382); undeclared, serial, HMC-default 0/1 and ethernet slots rejected before effects; saved-profile readback of each bound role and its client record before apply; HSCL0DC6 is a backstop only"
+              }
+            ]
+          },
+          {
             "variant": "c03-partition-vtpm",
             "parameters": [
               {
@@ -1435,11 +1448,11 @@
         ],
         "missing_scope": [
           {
-            "variant": "c12-positive-virtual-slot-linkage",
+            "variant": "c12-virtual-console-slot",
             "parameters": [
               {
-                "name": "physical_io.load_source_slot,physical_io.alt_restart_device_slot,physical_io.console_slot",
-                "constraint": "positive virtual-slot forms without creation-time adapter linkage rejected before effects; operator-approved gap retained for #638 dependency reconciliation, existing adapter owners unchanged"
+                "name": "physical_io.console_slot",
+                "constraint": "virtual-slot console forms rejected before effects: no cited source establishes an eligible virtual console device family (ADR 0382); hmc and physical/direct SR-IOV forms supported"
               }
             ]
           }
@@ -5276,7 +5289,7 @@
             "parameters": [
               {
                 "name": "physical_io.load_source_slot,physical_io.alt_restart_device_slot,physical_io.console_slot",
-                "constraint": "positive virtual-slot forms without creation-time adapter linkage rejected before effects; operator-approved gap retained for #638 dependency reconciliation, existing adapter owners unchanged"
+                "constraint": "virtual load-source and alternate-restart slots must name a vSCSI client declared in the same request (ADR 0382), which provisioning cannot declare, so they are rejected before effects; virtual console forms rejected; existing adapter owners unchanged"
               }
             ]
           }

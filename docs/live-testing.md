@@ -2080,9 +2080,11 @@ of the arm adds no packaged maturity credit.
 The opt-in `lpar-vscsi-client` arm (`st74-lpar-vscsi-client`, ADR 0376) lists the selected
 system's VIOS partitions and creates one inactive OS400 scratch partition with an explicit
 HMC console, `max_virtual_slots=10` and one vSCSI client record: local slot 2, naming the
-first listed VIOS by partition ID, remote slot one below that VIOS's maximum. With no VIOS it
-records a failure before any create. It requires confirmed ownership, a `virtual_scsi_adapters`
-step of `ok`, and the result's statements that no VIOS server adapter or mapping was created
+first listed VIOS by partition ID, remote slot one below that VIOS's maximum. Slot 2 is also
+the load source and alternate restart device (ADR 0382). With no VIOS it records a failure
+before any create. It requires confirmed ownership, a `virtual_scsi_adapters` step of `ok`
+whose record for slot 2 is verified with both roles bound, a `physical_io` step of `ok`, and
+the result's statements that no VIOS server adapter or mapping was created
 and that pairing is unproven. It applies the created profile and records the apply step's
 status as observed, because applying a client whose server slot is absent is uncaptured.
 

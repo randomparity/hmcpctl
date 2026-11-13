@@ -170,10 +170,13 @@ def hmc_create_lpar(
             create sets the current configuration itself, so the step reports
             the apply as skipped.
         physical_io: Optional typed initial physical/pool and IBM i tagged-I/O
-            configuration. No implicit console is chosen. Physical/direct SR-IOV
-            DRCs and explicit hmc console are supported; unresolved virtual-slot
-            selectors fail before effects (remaining linkage gap #638). C12 profile
-            readback must succeed before application and later workflow steps.
+            configuration. No implicit console is chosen; native IBM i creation
+            without console_slot fails before effects. Physical/direct SR-IOV DRCs
+            and explicit hmc console are supported. A virtual load-source or
+            alternate-restart slot must be the local slot of a client declared in
+            virtual_scsi_adapters; other virtual slots and virtual consoles fail
+            before effects (ADR 0382). C12 profile readback must succeed before
+            application and later workflow steps.
         profile: Optional HMC connection profile, distinct from a logical-partition
             profile; uses the default when omitted.
     """

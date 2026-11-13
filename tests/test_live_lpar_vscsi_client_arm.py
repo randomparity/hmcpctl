@@ -29,7 +29,10 @@ VIOS_LISTING = {
 }
 
 
-def created(status="ok", pairing="unproven"):
+ROLES = ["load_source_slot", "alt_restart_device_slot"]
+
+
+def created(status="ok", pairing="unproven", roles=ROLES, io="ok"):
     return {
         "lpar": {"UUID": "new"},
         "ownership_stamped": True,
@@ -43,9 +46,10 @@ def created(status="ok", pairing="unproven"):
                     "vios_server_adapters": "not-created",
                     "vios_mappings": "not-created",
                     "pairing": pairing,
-                    "records": [{"slot": 2, "status": "verified"}],
+                    "records": [{"slot": 2, "status": "verified", "roles": roles}],
                 },
             },
+            {"step": "physical_io", "status": io},
             {"step": "apply_profile", "status": "ok"},
         ],
     }
@@ -84,10 +88,20 @@ def make_state(monkeypatch, responses):
         (("PASS", created()), True),
         (("PASS", created(status="error")), False),
         (("PASS", created(pairing="verified")), False),
+        (("PASS", created(roles=["load_source_slot"])), False),
+        (("PASS", created(io="error")), False),
         (("FAIL", created()), False),
         (("PASS", {"lpar": {"UUID": "new"}, "steps": None}), False),
     ],
-    ids=["verified", "mismatch", "pairing-claimed", "failed-call", "malformed"],
+    ids=[
+        "verified",
+        "mismatch",
+        "pairing-claimed",
+        "roles-missing",
+        "io-unverified",
+        "failed-call",
+        "malformed",
+    ],
 )
 async def test_arm_asserts_comparison_and_always_cleans_up(
     monkeypatch, response, holds
@@ -102,6 +116,11 @@ async def test_arm_asserts_comparison_and_always_cleans_up(
     assert create["virtual_scsi_adapters"] == [
         {"local_slot": 2, "remote_slot": 199, "is_required": False, "remote_lpar_id": 1}
     ]
+    assert create["physical_io"] == {
+        "console_slot": "hmc",
+        "load_source_slot": "2",
+        "alt_restart_device_slot": "2",
+    }
     assert create["apply_partition_profile"] is True
     verified = state.record_verified.call_args.kwargs
     assert verified["assertions"][0].holds is holds
