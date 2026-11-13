@@ -207,7 +207,7 @@ class PcmMixin:
         # as `application/vnd.ibm.powervm.pcm.json` for `*/*` (#634).
         resp = await self._request("GET", url, headers={"Accept": "*/*"})
         if resp.status_code != 200:
-            raise HMCError(f"GET {url} failed", resp.status_code, resp.text[:500])
+            raise HMCError(f"GET {url} failed", resp.status_code, resp.text)
         try:
             document = resp.json()
         except ValueError as exc:

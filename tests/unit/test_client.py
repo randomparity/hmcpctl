@@ -1813,6 +1813,43 @@ async def test_fetch_json_404_raises(mock_hmc):
 
 
 @pytest.mark.asyncio
+async def test_fetch_json_error_keeps_message_of_long_body_and_redacts_session(
+    mock_hmc,
+):
+    """A ~1.1 KB PCM error body keeps its Message; the echoed session is redacted (#1958)."""
+    secret = "synthetic-session-token-0123456789"  # pragma: allowlist secret
+    message = "The supplied URI does not identify a known resource."
+    body = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<HttpErrorResponse xmlns="http://www.ibm.com/xmlns/systems/power/firmware/web/mc/2012_10/"'
+        ' schemaVersion="V1_0">\n'
+        '    <HTTPStatus kb="ROR" kxe="false">404</HTTPStatus>\n'
+        '    <RequestURI kb="ROR" kxe="false">/rest/api/pcm/ProcessedMetrics/'
+        + "x"
+        * 380
+        + "</RequestURI>\n"
+        f'    <ReasonCode kxe="false" kb="ROR">{message}</ReasonCode>\n'
+        f'    <Message kb="ROO" kxe="false">{message}</Message>\n'
+        '    <RequestHeaders kb="ROO" kxe="false">{host=hmc-1, '
+        f"x-api-session={secret}, accept=*/*}}</RequestHeaders>\n"
+        "</HttpErrorResponse>\n"
+    )
+    assert 1000 < len(body) < 1300
+    mock_hmc.get("/rest/api/pcm/ProcessedMetrics/ManagedSystem_sys_2.json").mock(
+        return_value=httpx.Response(404, text=body)
+    )
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(HMCError) as exc_info:
+            await hmc.fetch_json(
+                "/rest/api/pcm/ProcessedMetrics/ManagedSystem_sys_2.json"
+            )
+    assert exc_info.value.status_code == 404
+    assert message in str(exc_info.value)
+    assert secret not in str(exc_info.value)
+    assert secret not in (exc_info.value.body or "")
+
+
+@pytest.mark.asyncio
 async def test_parse_failure_names_failing_call(mock_hmc):
     """A 200 with malformed XML surfaces as HMCError naming the failing path."""
     mock_hmc.get("/rest/api/uom/ManagedSystem").mock(
