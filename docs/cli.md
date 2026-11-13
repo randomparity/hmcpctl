@@ -112,6 +112,9 @@ hmcpctl jobs show <job-id>
 hmcpctl holds list                   # external-management holds on this host; no HMC call
 hmcpctl holds release <partition-uuid>   # release one hold; never deletes the partition
 hmcpctl lpars power-on mylpar --hold-id <hold-id>   # act on a partition you were handed
+hmcpctl operations list              # logical-operation records on this host; no HMC call
+hmcpctl operations abandon <operation-id>   # stop a paused or interrupted operation
+hmcpctl capabilities                 # packaged implementation and verification state per tool
 hmcpctl raw get /rest/api/uom/VirtualSwitch   # escape hatch, prints XML
 ```
 
@@ -120,7 +123,10 @@ commands below default to lossless TSV when redirected and tables on a terminal.
 such as `hmcpctl lpars decommission` and `hmcpctl lpars provision` return a
 stable envelope with `workflow_completed`, ordered `steps`, `warnings`, and the
 blast-radius or provisioning summary, which is friendlier for automation than
-raw HMC payloads. Every entry is the parsed uom resource:
+raw HMC payloads. Both are recorded in the same local operation store as the MCP server's
+logical tools, under `--request-id`; `operations list` and `operations abandon` reach every
+agent's records ([local logical-operation records](hmc-cli-cheatsheet.md#local-logical-operation-records)).
+Inventory entries are the parsed uom resource:
 `{UUID, title, link, ResourceType, Resource}` where `Resource` is the flattened
 XML (namespace-stripped, HMC bookkeeping attributes removed).
 
