@@ -6,6 +6,9 @@ Accepted (2026-10-03), issue #1223. Implements the H1 spec's `hmc_power_lpar` ro
 Decision 2 and ADRs 0190 and 0195. It narrows the spec's selector rule for this tool only:
 `system_name_or_uuid` is required (Decision 2). ADR 0189 and the H1 spec otherwise stand.
 
+> **Amended by [0372](0372-ibm-i-graceful-shutdown-without-rmc.md)** (2026-11-13): Decision 5's
+> graceful RMC rule no longer applies to `OS400` partitions.
+
 > **Note** (2026-10-04, issue #1314): the `hmc_power_off_lpar` docstring this record cites no
 > longer calls `immediate=False` graceful, and ADR 0164's amendment now refuses `shutdown` with
 > `restart` and without `immediate`.
