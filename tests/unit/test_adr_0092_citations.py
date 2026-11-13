@@ -75,6 +75,7 @@ _INVENTORY_PATHS = tuple(
         "operations/lpar/profiles/sync.py",
         "operations/lpar/profiles/artifacts.py",
         "operations/lpar/vtpm.py",
+        "operations/lpar/memory/persistent.py",
         "operations/lpar/core.py",
         "operations/lpar/creation/core.py",
         "operations/lpar/decommission/core.py",
@@ -121,6 +122,9 @@ _CLASSIFIED_MUTATORS = frozenset(
         "configure_lpar_settings",
         "configure_lpar_reporting_settings",
         "configure_lpar_vtpm",
+        "create_persistent_memory_volume",
+        "rename_persistent_memory_volume",
+        "delete_persistent_memory_volume",
         "configure_lpar_msp",
         "configure_lpar_processor_compatibility",
         "synchronize_lpar_profile",
@@ -167,6 +171,8 @@ _GUARDED_DELEGATES = {
     "apply_lpar_pcie_assignments": "apply_validated_lpar_pcie_assignments",
     "migrate_lpar_with_affinity_preflight": "migrate_lpar",
     "load_optical_media": "_change_optical_media",
+    "rename_persistent_memory_volume": "_authorized_assigned_volume",
+    "delete_persistent_memory_volume": "_authorized_assigned_volume",
     "unload_optical_media": "_change_optical_media",
 }
 _UNCHECKED_ROWS = frozenset({"`hmc lpar modify` (CLI)"})

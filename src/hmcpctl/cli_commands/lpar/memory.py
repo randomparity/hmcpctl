@@ -10,6 +10,14 @@ import typer
 from hmcpctl.operations.lpar.memory.current import change_lpar_memory
 from hmcpctl.operations.lpar.memory.move import move_lpar_memory
 from hmcpctl.operations.lpar.memory.paging import switch_lpar_paging_vios
+from hmcpctl.operations.lpar.memory.persistent import (
+    PersistentMemoryVolumeResult,
+    create_persistent_memory_volume,
+    delete_persistent_memory_volume,
+    get_persistent_memory_volume,
+    list_persistent_memory_volumes,
+    rename_persistent_memory_volume,
+)
 from hmcpctl.operations.lpar.memory.statistics import reset_lpar_memory_statistics
 
 from ...documents.lpar_memory import (
@@ -222,6 +230,132 @@ def lpars_memory_statistics_reset(
         raise typer.Exit(code=1)
 
 
+_SYSTEM = typer.Option(..., "--system", "-s", help="Managed system name or UUID")
+_PARTITION = typer.Argument(..., help="Partition the volume is assigned to")
+_VOLUME = typer.Argument(..., help="Volume UUID, or an exact unique name")
+_OVERRIDE = typer.Option(
+    False, "--ownership-override", help="Bypass ownership protection after approval"
+)
+_YES = typer.Option(False, "--yes", "-y", help="Skip confirmation")
+
+
+def _print_volume_result(result: PersistentMemoryVolumeResult) -> None:
+    print_json(asdict(result))
+    if result.status != "verified":
+        raise typer.Exit(code=1)
+
+
+def lpars_pmem_list(
+    system: str = typer.Argument(..., help="Managed system name or UUID"),
+    lpar: str | None = typer.Option(
+        None, "--lpar", help="Only volumes assigned to this partition"
+    ),
+) -> None:
+    """List virtual persistent-memory volumes."""
+    volumes = with_client(lambda hmc: list_persistent_memory_volumes(hmc, system, lpar))
+    print_json([asdict(volume) for volume in volumes])
+
+
+def lpars_pmem_show(
+    system: str = typer.Argument(..., help="Managed system name or UUID"),
+    volume: str = _VOLUME,
+) -> None:
+    """Show one virtual persistent-memory volume."""
+    print_json(
+        asdict(
+            with_client(lambda hmc: get_persistent_memory_volume(hmc, system, volume))
+        )
+    )
+
+
+def lpars_pmem_create(
+    lpar: str = _PARTITION,
+    name: str = typer.Argument(..., help="New volume name, unique on the system"),
+    system: str = _SYSTEM,
+    size_mib: int = typer.Option(..., "--size-mib", help="Volume size in MiB"),
+    affinity: bool = typer.Option(False, "--affinity", help="Request affinity"),
+    ownership_override: bool = _OVERRIDE,
+    yes: bool = _YES,
+) -> None:
+    """Create a DRAM volume assigned to an inactive AIX/Linux partition."""
+    if not yes and not typer.confirm(
+        f"Create {terminal_field(size_mib)} MiB volume '{terminal_field(name)}' "
+        f"for '{terminal_field(lpar)}'? Submitted once; inspect uncertain outcomes"
+    ):
+        return
+    result = with_client(
+        lambda hmc: create_persistent_memory_volume(
+            hmc,
+            lpar,
+            name,
+            size_mib,
+            system_name_or_uuid=system,
+            affinity=affinity,
+            ownership_override=ownership_override,
+        )
+    )
+    _print_volume_result(result)
+
+
+def lpars_pmem_rename(
+    lpar: str = _PARTITION,
+    volume: str = _VOLUME,
+    new_name: str = typer.Argument(..., help="New volume name, unique on the system"),
+    system: str = _SYSTEM,
+    ownership_override: bool = _OVERRIDE,
+    yes: bool = _YES,
+) -> None:
+    """Rename a volume assigned to the partition."""
+    if not yes and not typer.confirm(
+        f"Rename volume '{terminal_field(volume)}' to '{terminal_field(new_name)}'?"
+    ):
+        return
+    result = with_client(
+        lambda hmc: rename_persistent_memory_volume(
+            hmc,
+            lpar,
+            volume,
+            new_name,
+            system_name_or_uuid=system,
+            ownership_override=ownership_override,
+        )
+    )
+    _print_volume_result(result)
+
+
+def lpars_pmem_delete(
+    lpar: str = _PARTITION,
+    volume: str = _VOLUME,
+    system: str = _SYSTEM,
+    acknowledge_data_loss: bool = typer.Option(
+        False,
+        "--acknowledge-data-loss",
+        help="Consent to destroying the volume's data",
+    ),
+    ownership_override: bool = _OVERRIDE,
+    yes: bool = _YES,
+) -> None:
+    """Delete a volume of an inactive partition; its data is destroyed."""
+    if not acknowledge_data_loss:
+        usage_error("Deleting a volume destroys its data; pass --acknowledge-data-loss")
+    if not yes and not typer.confirm(
+        f"Delete volume '{terminal_field(volume)}' of '{terminal_field(lpar)}'? "
+        "Its data is destroyed and cannot be recovered"
+    ):
+        return
+    result = with_client(
+        lambda hmc: delete_persistent_memory_volume(
+            hmc,
+            lpar,
+            volume,
+            system_name_or_uuid=system,
+            acknowledge_data_loss=acknowledge_data_loss,
+            ownership_override=ownership_override,
+        )
+    )
+    _print_volume_result(result)
+
+
 def register_commands(group: typer.Typer) -> None:
     """Register native memory changes on the existing LPAR group."""
     group.command("memory", short_help="Adjust.")(lpars_memory)
@@ -231,4 +365,19 @@ def register_commands(group: typer.Typer) -> None:
     group.command("memory-move", short_help="Move.")(lpars_memory_move)
     group.command("memory-statistics-reset", short_help="Reset statistics history.")(
         lpars_memory_statistics_reset
+    )
+    group.command("pmem-list", short_help="List persistent-memory volumes.")(
+        lpars_pmem_list
+    )
+    group.command("pmem-show", short_help="Show a persistent-memory volume.")(
+        lpars_pmem_show
+    )
+    group.command("pmem-create", short_help="Create a persistent-memory volume.")(
+        lpars_pmem_create
+    )
+    group.command("pmem-rename", short_help="Rename a persistent-memory volume.")(
+        lpars_pmem_rename
+    )
+    group.command("pmem-delete", short_help="Delete a persistent-memory volume.")(
+        lpars_pmem_delete
     )

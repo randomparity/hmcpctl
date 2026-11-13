@@ -387,3 +387,79 @@ class SystemsMixin:
             return None
         entries = _parse_feed(xml, path)
         return entries[0] if entries else None
+
+    # -- Virtual persistent-memory volumes (#643, ADR 0373) ------------- #
+    # Write headers follow ADR 0178 through _put/_post/_delete; the schema
+    # version pin is omitted on writes, as for every other create.
+
+    async def list_persistent_memory_volumes(
+        self: SystemsClient, system_uuid: str
+    ) -> list[dict[str, Any]]:
+        """Every volume on a system; an empty collection answers HTTP 204.
+
+        The documented ``?target=<partition id>`` filter is not used: with the
+        typed Accept this client sends, it was observed only on an empty
+        collection, so callers filter on ``AssociatedPartitionId`` instead.
+        """
+        _reject_non_uuid_path_argument("system_uuid", system_uuid)
+        path = (
+            f"/rest/api/uom/ManagedSystem/{system_uuid}/VirtualPersistentMemoryVolume"
+        )
+        xml = await self._get(path, "VirtualPersistentMemoryVolume")
+        return _parse_feed(xml, path) if xml else []
+
+    async def get_persistent_memory_volume(
+        self: SystemsClient, system_uuid: str, volume_uuid: str
+    ) -> dict[str, Any] | None:
+        """One volume; an unknown UUID answers HTTP 404, raised as HMCError."""
+        _reject_non_uuid_path_argument("system_uuid", system_uuid)
+        _reject_non_uuid_path_argument("volume_uuid", volume_uuid)
+        path = (
+            f"/rest/api/uom/ManagedSystem/{system_uuid}"
+            f"/VirtualPersistentMemoryVolume/{volume_uuid}"
+        )
+        xml = await self._get(path, "VirtualPersistentMemoryVolume")
+        entries = _parse_feed(xml, path) if xml else []
+        return entries[0] if entries else None
+
+    async def create_persistent_memory_volume(
+        self: SystemsClient, system_uuid: str, volume_xml: str
+    ) -> dict[str, Any] | None:
+        """PUT a new volume to the system collection; returns the created entry."""
+        _reject_non_uuid_path_argument("system_uuid", system_uuid)
+        path = (
+            f"/rest/api/uom/ManagedSystem/{system_uuid}/VirtualPersistentMemoryVolume"
+        )
+        xml = await self._put(
+            path,
+            volume_xml,
+            resource_type="VirtualPersistentMemoryVolume",
+            include_schema_version=False,
+        )
+        entries = _parse_feed(xml, path) if xml else []
+        return entries[0] if entries else None
+
+    async def update_persistent_memory_volume(
+        self: SystemsClient, system_uuid: str, volume_uuid: str, volume_xml: str
+    ) -> None:
+        """POST a volume document to its URI; the HMC changes only its name."""
+        _reject_non_uuid_path_argument("system_uuid", system_uuid)
+        _reject_non_uuid_path_argument("volume_uuid", volume_uuid)
+        await self._post(
+            f"/rest/api/uom/ManagedSystem/{system_uuid}"
+            f"/VirtualPersistentMemoryVolume/{volume_uuid}",
+            volume_xml,
+            resource_type="VirtualPersistentMemoryVolume",
+            include_schema_version=False,
+        )
+
+    async def delete_persistent_memory_volume(
+        self: SystemsClient, system_uuid: str, volume_uuid: str
+    ) -> None:
+        """DELETE one volume; its data is destroyed."""
+        _reject_non_uuid_path_argument("system_uuid", system_uuid)
+        _reject_non_uuid_path_argument("volume_uuid", volume_uuid)
+        await self._delete(
+            f"/rest/api/uom/ManagedSystem/{system_uuid}"
+            f"/VirtualPersistentMemoryVolume/{volume_uuid}"
+        )

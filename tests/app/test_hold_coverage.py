@@ -65,6 +65,7 @@ OVERRIDES: dict[str, dict[str, Any]] = {
     "hmc_configure_lpar_security_policy": {"settings": {"secure_boot": 0}},
     "hmc_configure_lpar_vtpm": {"settings": {"vtpm_enabled": True}},
     "hmc_delete_partition_profile": _WINDOW,
+    "hmc_delete_persistent_memory_volume": {"acknowledge_data_loss": True},
     "hmc_dlpar_mem": {"resources": {"desired_memory": 1024}},
     "hmc_dlpar_proc": {"change": {"operation": "add", "processors": 1}},
     "hmc_dump_restart_lpar": {"allow_dump_restart": True},

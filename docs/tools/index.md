@@ -6,16 +6,16 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **207** tools are registered.
-- **206** are callable in a default deployment.
+- **212** tools are registered.
+- **211** are callable in a default deployment.
 - **11** are listed by `tools/list` in a default deployment (ADR 0330); `hmc_search_tools` finds the rest, which are called by name or through `hmc_invoke_tool`.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
-| `destructive` | 49 |
-| `mutate` | 66 |
-| `read` | 91 |
+| `destructive` | 50 |
+| `mutate` | 68 |
+| `read` | 93 |
 
 ## Maturity vocabulary
 
@@ -51,6 +51,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `pcm` | 2 | [pcm.md](pcm.md) |
 | `permissions` | 1 | [permissions.md](permissions.md) |
 | `placement` | 1 | [placement.md](placement.md) |
+| `pmem` | 5 | [pmem.md](pmem.md) |
 | `provision` | 1 | [provision.md](provision.md) |
 | `remote_access` | 2 | [remote_access.md](remote_access.md) |
 | `resource_group` | 2 | [resource_group.md](resource_group.md) |
@@ -109,6 +110,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_create_lpar` | `mutate` | [lpar.md](lpar.md) |
 | `hmc_create_media_repository` | `mutate` | [media.md](media.md) |
 | `hmc_create_optical_media` | `mutate` | [media.md](media.md) |
+| `hmc_create_persistent_memory_volume` | `mutate` | [pmem.md](pmem.md) |
 | `hmc_create_system_profile` | `mutate` | [system_profile.md](system_profile.md) |
 | `hmc_create_user` | `mutate` | [user.md](user.md) |
 | `hmc_create_vios` | `mutate` | [vios.md](vios.md) |
@@ -124,6 +126,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_delete_media_repository` | `destructive` | [media.md](media.md) |
 | `hmc_delete_optical_media` | `destructive` | [media.md](media.md) |
 | `hmc_delete_partition_profile` | `destructive` | [lpar_profile.md](lpar_profile.md) |
+| `hmc_delete_persistent_memory_volume` | `destructive` | [pmem.md](pmem.md) |
 | `hmc_delete_system_profile` | `destructive` | [system_profile.md](system_profile.md) |
 | `hmc_delete_user` | `destructive` | [user.md](user.md) |
 | `hmc_delete_vios` | `destructive` | [vios.md](vios.md) |
@@ -154,6 +157,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_get_minimum_affinity_policy` | `read` | [lpar.md](lpar.md) |
 | `hmc_get_partition_template` | `read` | [template.md](template.md) |
 | `hmc_get_pcm_preferences` | `read` | [pcm.md](pcm.md) |
+| `hmc_get_persistent_memory_volume` | `read` | [pmem.md](pmem.md) |
 | `hmc_get_proc_compat_modes` | `read` | [system.md](system.md) |
 | `hmc_get_remote_access` | `read` | [remote_access.md](remote_access.md) |
 | `hmc_get_shared_storage_pool` | `read` | [cluster.md](cluster.md) |
@@ -183,6 +187,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_list_optical_media` | `read` | [media.md](media.md) |
 | `hmc_list_partition_profiles` | `read` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_list_partition_templates` | `read` | [template.md](template.md) |
+| `hmc_list_persistent_memory_volumes` | `read` | [pmem.md](pmem.md) |
 | `hmc_list_resource_group_memopt_scores` | `read` | [resource_group.md](resource_group.md) |
 | `hmc_list_resource_roles` | `read` | [resource_role.md](resource_role.md) |
 | `hmc_list_resources` | `read` | [console.md](console.md) |
@@ -247,6 +252,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_remove_vios_vfc_group_label` | `destructive` | [vios_label.md](vios_label.md) |
 | `hmc_remove_vnic` | `destructive` | [vnic.md](vnic.md) |
 | `hmc_rename_lpar` | `mutate` | [lpar.md](lpar.md) |
+| `hmc_rename_persistent_memory_volume` | `mutate` | [pmem.md](pmem.md) |
 | `hmc_reset_lpar_memory_statistics` | `destructive` | [lpar.md](lpar.md) |
 | `hmc_restore_lpar_profiles` | `destructive` | [lpar_profile.md](lpar_profile.md) |
 | `hmc_restore_vios` | `destructive` | [vios.md](vios.md) |
