@@ -111,6 +111,9 @@ family set excluded from that guard, and serial admission carries it (only
      or rollback, as for every native creation.
    - The remote server slot may already exist, be occupied or be absent: accepted — pairing is
      reported `unproven`, never checked.
+   - A deferred profile apply after a verified comparison (default `apply_partition_profile`)
+     runs against a client whose server slot may be absent; its outcome is reported as-is,
+     with no retry or rollback. Arm74 records that apply step's status.
 4. **Covered elsewhere** — VIOS server adapters and mappings (#680, #663); profile lifecycle
    (#1724); IBM i installation (operator); load-source / alternate-restart slot binding to a
    declared client slot (#1981, which references `local_slot`).
@@ -138,5 +141,5 @@ family set excluded from that guard, and serial admission carries it (only
 | Observation | focused-test | same file: verified, readback mismatch, missing record, controller mode, unavailable read; three fixed statements |
 | Serial coexistence | focused-test | `tests/lpar/test_serial_input.py`: declared family excluded from exclusivity |
 | MCP/CLI wiring | focused-test | `tests/app/test_lpar_vscsi.py`: MCP schema forbids extras; CLI inline JSON decode and refusal |
-| Live scenario | focused-test | arm74 unit test with a stub client; live run is operator-gated (`docs/live-testing.md`) |
-| Generated docs | focused-test | `just tool-docs-check`, `just doc-freshness` |
+| Live scenario | live | arm74 (`scripts/live_test_runner.py --group lpar-vscsi-client` per `docs/live-testing.md`); its stub-client unit test is not evidence for the criterion, and without a granted lab run criterion 6's live half is reported unmet |
+| Generated docs and ledger | focused-test | `just tool-docs-check`, `just doc-freshness`, `just capability-inventory` |
