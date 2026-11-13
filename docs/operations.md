@@ -58,8 +58,8 @@ tool. An effect-class grant with `all-targets` can reach either tool; a targets
 table cannot authorize either one even when it contains both selector kinds.
 
 The vNIC mutation contract is admitted only for POWER9 8375-42A managed by HMC V10R3
-M1060. The admission is a code gate, not a live-verification claim: 0.1.0 records no live
-observation of these operations ([what 0.1.0 supports](compatibility.md#what-010-supports)). `hmc_add_vnic` selects one backing with `vios_name`, `vios_lpar_id`, `adapter_id`,
+M1060. The admission is a code gate, not a live-verification claim: no release claims these
+operations ([what 0.2.0 claims](compatibility.md#what-020-claims)). `hmc_add_vnic` selects one backing with `vios_name`, `vios_lpar_id`, `adapter_id`,
 `physical_port_id`, and `capacity_percent`, plus the vNIC `port_vlan_id`. The HMC assigns the
 logical-port ID; callers do not supply one. A successful or unchanged result reports the assigned
 ID in `backing_after[].logical_port_id` after correlated HMC readback. `hmc_remove_vnic` accepts

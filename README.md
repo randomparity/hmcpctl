@@ -46,10 +46,9 @@ Existing pre-release installations must use the one-time
 You need network access to an HMC and an HMC account with permissions for your
 intended operations. The project targets HMC V8–V11; individual operations have
 [version and firmware limits](docs/compatibility.md).
-Release 0.1.0 claims live verification for 15 system, LPAR, job and dedicated-PCIe
-operations on HMC V10R3; the
-[compatibility page](docs/compatibility.md#what-010-supports)
-lists them and shows how to check any other operation's state.
+Release 0.2.0 claims nine operations of the logical LPAR workflow, which its MCP server
+lists as primary tools; the [compatibility page](docs/compatibility.md#what-020-claims) names them
+and shows how to check whether each, or any other operation, is live-verified.
 
 ## Configure
 
@@ -63,7 +62,8 @@ export HMC_VERIFY_SSL=true
 
 Set `HMC_PASSWORD` through your shell or secret manager before running commands.
 Replace the example host and user with your own. TLS verification requires the
-HMC's CA certificate to be trusted through `SSL_CERT_FILE`; see
+HMC's certificate to be trusted: through the operating-system store, `HMC_CA_BUNDLE`,
+`SSL_CERT_FILE`, or a pinned `HMC_CERT_FINGERPRINT`; see
 [TLS trust](docs/configuration.md#tls-trust). Verification is off by default if
 `HMC_VERIFY_SSL` is omitted, which exposes credentials to interception.
 
@@ -156,11 +156,17 @@ An MCP client normally launches this process for you. For clients that use an
 
 Replace the placeholders and use your client's secret handling if available.
 If it cannot find the executable, use its absolute path from `uv tool dir --bin`.
-The client process must have access to the policy file, and `SSL_CERT_FILE` must be set in its
-environment when verifying a private CA ([TLS trust](docs/configuration.md#tls-trust)).
+The client process must have access to the policy file, and its environment must carry the
+TLS trust settings you chose above ([TLS trust](docs/configuration.md#tls-trust)).
 
-Try asking: “List my managed Power systems” or “Show fleet health.”
-Call `hmc_effective_permissions` to inspect the active policy.
+The server lists only its primary tools, the
+[logical LPAR workflow](docs/mcp-server.md#logical-lpar-workflow); under this read-only
+policy that is `hmc_inventory`, `hmc_plan_lpar`, `hmc_inspect_lpar`, `hmc_operation_status`
+and `hmc_search_tools`. Every other permitted tool, such as `hmc_fleet_health`, is found
+with `hmc_search_tools` and called by name.
+
+Try asking: “List my managed Power systems and their partitions.”
+Call `hmc_effective_permissions` by name to inspect the active policy.
 
 An access policy is required. For broader permissions, migration from older
 deployments, audit logging, and HTTP setup, see the

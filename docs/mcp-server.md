@@ -85,13 +85,35 @@ with `all-targets` can therefore still disclose the `prod` inventory. When the
 configuration or policy is sensitive, withhold these tools by name: enumerate
 the permitted `tools` without granting the `read` effect class.
 
-The next two sections, and [Logical operation state](#logical-operation-state) for
-`hmc_operation_status`, describe the logical LPAR workflow tools: tool search and invocation,
-`hmc_inventory`, `hmc_plan_lpar`, `hmc_power_lpar`, `hmc_reconfigure_lpar`,
-`hmc_inspect_lpar` and `hmc_operation_status`. All but `hmc_reconfigure_lpar`, which is
-unreleased, are in the 0.1.0 catalog, but the workflow they belong to is
-planned for 0.2.0 and 0.1.0 makes no live-verification claim for them
-([what 0.1.0 supports](compatibility.md#what-010-supports)).
+### Logical LPAR workflow
+
+`tools/list` carries the eleven primary tools of the logical LPAR workflow
+([ADR 0189](adr/0189-logical-lpar-catalog-and-delegated-authorization.md),
+[ADR 0330](adr/0330-default-listing-is-the-primary-catalog.md)), less any the policy withholds.
+They take one partition through its life:
+
+| Step | Tool | Effect |
+|------|------|--------|
+| See what exists | `hmc_inventory` | `read` |
+| Plan a new partition | `hmc_plan_lpar` | `read` |
+| Create it, with storage, network and optional installer boot | `hmc_provision_lpar` | `destructive` |
+| Change processors, memory, name, boot, disks or network adapters | `hmc_reconfigure_lpar` | `destructive` |
+| Start, stop or restart it | `hmc_power_lpar` | `destructive` |
+| Read its state, RMC, reference codes and resources | `hmc_inspect_lpar` | `read` |
+| Hand it to an external consumer under a hold | `hmc_prepare_host_handoff` | `mutate` |
+| Remove it | `hmc_decommission_lpar` | `destructive` |
+| Follow a durable operation | `hmc_operation_status` | `read` |
+| Find and call any other permitted tool | `hmc_search_tools`, `hmc_invoke_tool` | `read`, `destructive` |
+
+Provision, reconfigure, power and decommission are durable operations keyed by the caller's
+`request_id`: each call returns within `wait_seconds` while the work continues, a repeat returns
+the same operation, and `continuation` resumes or abandons a paused one
+([Logical operation state](#logical-operation-state)). Each logical tool runs its steps as the
+specialist tools it names, so the policy must permit those too. The sections below and
+[External-management holds](#external-management-holds) describe each tool; the
+[MCP tool reference](tools/index.md) has every parameter. The 0.2.0 release claim names nine
+of these tools; [what 0.2.0 claims](compatibility.md#what-020-claims) lists them and shows how
+to check whether each is live-verified.
 
 ### Tool search and invocation
 
@@ -144,7 +166,9 @@ optional `install`. It returns the selected system, VIOS and volume group, a `pl
 each evaluated candidate's blockers, the changes provisioning would make, and what it could not
 verify. Placement evaluates at most 16 systems and selects the tightest fit with no blocker; two
 qualifying VIOS and volume-group pairs are an `ambiguous` blocker, never a first match.
-Provisioning does not consume the digest until #1225.
+Pass the digest to `hmc_provision_lpar` as `expected_plan_digest`, and a new provision is
+refused with `plan_digest_mismatch` unless a fresh plan of the same request still matches it;
+that re-plan needs the same tools as planning.
 
 Planning needs every tool it reads, all or nothing: `hmc_list_lpars`, `hmc_capacity_report`,
 `hmc_list_virtual_networks`, `hmc_list_vios` and `hmc_list_volume_groups`, plus
@@ -170,25 +194,38 @@ attention, so one operation never writes a second power job. `start` needs
 that tool and admit the partition for it, on every call including a continuation. Crash with
 dump stays `hmc_dump_restart_lpar`.
 
-`hmc_reconfigure_lpar` (`destructive`) changes one LPAR's processors, memory or partition name
-as a durable operation (ADR 0314). It needs `request_id`, `lpar_name_or_uuid`,
-`system_name_or_uuid` and a `patch` of `name`, `processors` and `memory_mib`; omitted fields are
-not touched. Every change is planned before anything is written, and `result.changes` says where
+`hmc_reconfigure_lpar` (`destructive`) changes one LPAR's processors, memory, partition name,
+boot order, virtual disks or network adapters, or detaches its installer media, as a durable
+operation (ADR 0314). It needs `request_id`, `lpar_name_or_uuid`, `system_name_or_uuid` and a
+`patch` of `name`, `processors`, `memory_mib`, `boot`, `installer_media`, `disks` and
+`networks`; omitted fields are not touched. A partition whose last-activated profile is not its
+default profile is refused before any write. Every change is planned before anything is
+written, and `result.changes` says where
 each one lives: `live` (running, RMC active, inside the running minimum and maximum, and an
 increase unless `allow_disruption` is true), `profile` (a not-activated partition: its default
 profile and current configuration both hold it) or `pending_activation` (saved in the default
 profile only; `result.activation` names the profile whose activation applies it). A value outside
 the profile's minimum or maximum widens that bound and is always `pending_activation`. Nothing
-reboots the partition or changes its processor mode. `processors` or `memory_mib` need
-`exclusive_writer_window=true` (ADR 0242). `name` needs `hmc_modify_lpar` and `hmc_rename_lpar`;
-`memory_mib` needs `hmc_dlpar_mem`, and `processors` `hmc_dlpar_proc`, each with
-`hmc_update_partition_profile`. An interrupted profile write resumes by reading the profile back;
-an interrupted DLPAR write always needs attention.
+reboots the partition or changes its processor mode. `processors`, `memory_mib`,
+`installer_media`, `disks` or `networks` need `exclusive_writer_window=true` (ADR 0242). `name`
+needs `hmc_modify_lpar` and `hmc_rename_lpar`; `memory_mib` needs `hmc_dlpar_mem`, and
+`processors` `hmc_dlpar_proc`, each with `hmc_update_partition_profile`. An interrupted profile
+write resumes by reading the profile back; an interrupted DLPAR write always needs attention.
+
+`boot` and `installer_media` act on a partition `hmc_provision_lpar` created:
+`boot: root_disk` sets its next boot to its root disk (`hmc_set_lpar_boot_order`), and
+`installer_media: detach` removes the installer media mapping and keeps the medium
+(`hmc_unmount_optical_media`, granted for all targets). `disks.add` creates and maps a new disk
+that decommission's `delete_owned` later deletes, and `disks.detach` removes one disk's mapping,
+never the disk. `networks.add` and `networks.remove` add a client network adapter on a VLAN or
+remove the one carrying a MAC. Disk and network changes then save the current configuration
+into the default profile so they survive an activation. The tool reference lists the tools
+each needs and the states that refuse them.
 
 `hmc_inspect_lpar` (`read`) reports one LPAR's state and the sections named in `include`:
 `rmc`, `refcodes` (at most 20, newest first, over SSH), `resources` (memory and processor
 figures, plus the storage mappings each of the system's VIOSes holds for the partition, at most
-16 VIOSes) and `profile_drift` (always `unavailable` until a read-only profile read exists). It
+16 VIOSes) and `profile_drift` (always `unavailable`: inspection does not compare profiles). It
 needs `lpar_name_or_uuid` and `system_name_or_uuid`; `include` defaults to `rmc` and
 `refcodes`. The partition is read as `hmc_get_lpar`, and a policy that withholds it refuses the
 call. Each section is then authorized as the tool it uses (`hmc_read_lpar_refcodes`;
@@ -523,8 +560,9 @@ beside `store-id` and `execution.lock` in one state directory: `HMCPCTL_STATE_DI
 otherwise the platform state directory. `hmc_power_lpar`, `hmc_reconfigure_lpar`,
 `hmc_provision_lpar`, `hmc_decommission_lpar` and their CLI mirrors `hmcpctl lpars provision`
 and `hmcpctl lpars decommission` start logical operations, so the store is created by the first
-of them to run (a provision or decommission `dry_run` records nothing);
-operator commands for the store are #1286. The
+of them to run (a provision or decommission `dry_run` records nothing).
+`hmcpctl operations list` and `hmcpctl operations abandon` read and abandon any agent's records
+([local logical-operation records](hmc-cli-cheatsheet.md#local-logical-operation-records)). The
 directory is created with mode `0700` and its files with `0600`; hmcpctl refuses a directory or
 file that other users can access.
 

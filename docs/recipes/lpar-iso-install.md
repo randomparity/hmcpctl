@@ -1,12 +1,13 @@
 # LPAR ISO installation recipe
 
-> **Status: exercised live with a patched build; not verified for 0.1.0.** These steps ran in
+> **Status: exercised live with a patched build; not claimed by any release.** These steps ran in
 > this order, from creation through cleanup, on 2026-09-23 against HMC V10R3 M1060, and the ISO
 > booted into its installer. That run used a build patched for #935 and #979 and imported the
 > ISO outside `hmcpctl` (#978). The fixes for all three have since merged, but the recipe has not
-> been re-run end to end on a release commit, and 0.1.0 makes no live-verification claim for its
-> adapter, storage or media operations
-> ([what 0.1.0 supports](../compatibility.md#what-010-supports)).
+> been re-run end to end on a release commit, and no release claims live verification for its
+> adapter, storage or media operations. The 0.2.0 claim covers logical tools listed under
+> [From an MCP client](#from-an-mcp-client), not these CLI steps
+> ([what 0.2.0 claims](../compatibility.md#what-020-claims)).
 
 This recipe creates one powered-off LPAR, gives it a virtual network adapter and a VIOS-backed
 virtual disk, puts an installation ISO in the VIOS media repository, mounts it, and boots the
@@ -98,12 +99,14 @@ shows.
 
 ## HMC CLI steps
 
-One thing in this recipe has no working `hmcpctl` command yet. Run it in an SSH session on
-the HMC, as the HMC user in your connection profile:
+One step in this recipe runs on the HMC CLI. Run it in an SSH session on the HMC, as the HMC
+user in your connection profile:
 
 - writing the adapters that `hmcpctl` adds into the partition's profile before a profile
-  power-on, when `CurrentProfileSync` is not `On` (see step 5). `hmcpctl` reports the sync
-  state but does not yet write the profile itself.
+  power-on, when `CurrentProfileSync` is not `On` (see step 5). `hmcpctl lpars
+  save-current-profile` can now save the current configuration into a profile, keeping a
+  recovery copy before it overwrites one, but this recipe has not been run with it, so step 5
+  keeps the HMC CLI form that ran.
 
 The HMC CLI block below uses `<angle-bracket>` placeholders, not shell variables. Fill it in
 from the same values.

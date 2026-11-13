@@ -1,7 +1,9 @@
 # Bare-CEC LPAR recipe
 
 > **MCP operations verified** on HMC V10R3 M1060 with an 8375-42A (POWER9) managed system
-> during the v0.1.0 live window (#879). That window did not run these CLI wrappers.
+> during the v0.1.0 live window (#879). That window did not run these CLI wrappers, and
+> 0.2.0 does not claim these operations again
+> ([what 0.2.0 claims](../compatibility.md#what-020-claims)).
 > Expected outcomes below describe the corresponding operations; CLI presentation is
 > documented separately and is not a historical CLI verification claim.
 
