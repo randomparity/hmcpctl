@@ -242,9 +242,8 @@ def pool_assertions(
             "pool-membership-match",
             ids
             and all(
-                pool.get("assigned_partition_uuids") is None
-                or _member_count(row.get("lpar_ids", "none"))
-                == len(pool["assigned_partition_uuids"])
+                _member_count(row.get("lpar_ids", "none"))
+                == len(pool.get("assigned_partition_uuids") or ())
                 for row, pool in pairs
             ),
         ),

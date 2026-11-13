@@ -50,7 +50,9 @@ an empty list.
   captured or documented case produces one. The live scenario compares the rule against
   `lshwres -r procpool` on every run, which is where a disagreement surfaces.
 - Whether REST reports `AssignedPartitions` on a non-default pool with members is
-  uncaptured. Reading it as `null` keeps "not reported" distinct from "no members".
+  uncaptured. Reading it as `null` keeps "not reported" distinct from "no members". The
+  live comparison counts `null` as no members, so the first run against a populated
+  non-default pool fails its membership assertion rather than passing over the case.
 - The default pool reports `AvailableProcUnits` 0 while hosting partitions. The projection
   passes the HMC's value through; it is not the default pool's free capacity, and a writer
   (#1977) must not read it as such.

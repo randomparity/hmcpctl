@@ -1763,6 +1763,8 @@ _POOL_ROWS = live_fixture("cli-procpool")["stdout"]
             "pool-units-match",
         ),
         (_POOL_ROWS.replace("lpar_ids=1\n", "lpar_ids=1,2\n"), "pool-membership-match"),
+        # REST omits pool 1's AssignedPartitions while the CLI lists members.
+        (_POOL_ROWS.replace("lpar_ids=none", "lpar_ids=3,4"), "pool-membership-match"),
     ],
 )
 def test_pool_assertions_fail_alone_on_one_disagreement(stdout, failing) -> None:

@@ -101,8 +101,9 @@ there. The rows parse with `ssh.commands._parse_lshwres_output`. It asserts four
 the configured pool IDs equal the CLI's; each pool's name matches; each unit the CLI row
 carries (`max_pool_proc_units`, `curr_reserved_pool_proc_units`,
 `pend_reserved_pool_proc_units`) equals the REST value; and the `lpar_ids` count (`none`
-is 0; otherwise the comma-separated count) equals the `assigned_partition_uuids` length
-wherever REST reports membership. Units compare as `Decimal(cli) == Decimal(str(rest))`.
+is 0; otherwise the comma-separated count) equals the `assigned_partition_uuids` length,
+a `null` membership counting as 0, so a pool the CLI shows with members and REST reports
+without them fails the assertion and captures the uncaptured case. Units compare as `Decimal(cli) == Decimal(str(rest))`.
 Assertion ids: `pool-ids-match`, `pool-names-match`, `pool-units-match`,
 `pool-membership-match`; the two gets record one `processor_pool.get` observation holding
 `default-pool-by-id` and `default-pool-by-name`, because an observation id derives from
