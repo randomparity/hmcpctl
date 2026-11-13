@@ -10,7 +10,9 @@ import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import asyncssh
 import fastmcp  # noqa: F401 — imported for its import-time logging configuration
@@ -22,6 +24,8 @@ from hmcpctl import config
 from hmcpctl.audit import sink as audit_sink
 from hmcpctl.audit.sink import AUDIT_LOGGER_NAME
 from hmcpctl.config import HMCConfig
+from hmcpctl.documents.lpar_io import LparPhysicalIO
+from hmcpctl.operations.lpar.creation import physical_io
 
 #: The ``fastmcp`` logger and its handlers as importing ``fastmcp`` leaves them.
 #: Captured at collection time, before any test can serve, because ADR 0051 made
@@ -832,3 +836,39 @@ def redirected_git_checkout(tmp_path, monkeypatch, request, isolated_git):
         monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
         monkeypatch.setenv("GIT_WORK_TREE", str(root))
     return root
+
+
+@pytest.fixture
+def ibmi_console(monkeypatch):
+    """Supply the explicit console native IBM i creation requires (ADR 0382).
+
+    Returns ``console(environment)``: ``console_slot="hmc"`` for OS400 and empty
+    physical I/O otherwise. The console makes the request initial-profile I/O, so the
+    fresh IBM i capability read and the REST profile comparison answer as an HMC that
+    stored the console.
+    """
+    monkeypatch.setattr(
+        physical_io,
+        "read_system_entry",
+        AsyncMock(
+            return_value={
+                "Resource": {"AssociatedSystemCapabilities": {"IBMiCapable": "true"}}
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        physical_io,
+        "read_partition_profile",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                fields={"IOConfigurationInstance": {"TaggedIO": {"Console": "HMC"}}}
+            )
+        ),
+    )
+
+    def console(environment: str) -> LparPhysicalIO:
+        if environment == "OS400":
+            return LparPhysicalIO(console_slot="hmc")
+        return LparPhysicalIO()
+
+    return console

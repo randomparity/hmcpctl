@@ -67,6 +67,7 @@ from ....ssh.lpar import (
     create_lpar_via_cli,
     get_lpar_reporting_settings,
     get_lpar_settings,
+    require_ibmi_console,
     resolve_system_cli_name,
     validate_caller_token,
 )
@@ -203,6 +204,7 @@ async def _create_via_cli(
         raise ValueError(
             "CLI creation cannot represent keylock; supply complete resources on an HMC accepting REST creation. Nothing was created."
         )
+    require_ibmi_console(creation.partition_type, creation.physical_io)
     try:
         system_name = await resolve_system_cli_name(hmc.config, system_uuid)
     except HMCCLIError:

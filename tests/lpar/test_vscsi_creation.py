@@ -73,7 +73,7 @@ def profile(scsi, serial="none", name="new", native_id=9):
 
 
 @pytest.fixture(params=("AIX/Linux", "OS400"))
-def target(request, monkeypatch):
+def target(request, monkeypatch, ibmi_console):
     environment = request.param
     local = entry(LOCAL, "new", 9, "LogicalPartition", environment)
     vios = entry(VIOS, "vios-R1", 7, "VirtualIOServer", "Virtual IO Server")
@@ -166,11 +166,13 @@ def target(request, monkeypatch):
         monkeypatch.setattr(module + ".run_hmc_command", b.command)
     monkeypatch.setattr("hmcpctl.ssh.lpar_serial.read_lpar_profile_record", b.reader)
     monkeypatch.setattr("hmcpctl.ssh.lpar_vscsi.read_lpar_profile_record", b.reader)
+    b.console = ibmi_console(environment)
     b.hmc = hmc
     return b
 
 
 async def invoke(b, *, adapters=(CLIENT,), **options):
+    options.setdefault("physical_io", b.console)
     creation = core.LparCreation(
         "new",
         b.environment,
@@ -372,6 +374,18 @@ def test_tagged_binding_refuses_without_any_client():
         core.validate_lpar_creation(tagged_creation(io, adapters=()))
 
 
+@pytest.mark.asyncio
+async def test_ibmi_native_create_requires_console(target):
+    b = target
+    if b.environment == "OS400":
+        with pytest.raises(ValueError, match="console_slot"):
+            await invoke(b, physical_io=LparPhysicalIO())
+        assert "create" not in b.events and "stamp" not in b.events
+    else:
+        result = await invoke(b, physical_io=LparPhysicalIO())
+        assert vscsi_step(result).status == "ok"
+
+
 # --- readback parser -------------------------------------------------------
 
 
@@ -510,6 +524,12 @@ async def test_unavailable_readback_names_type_only(target):
 @pytest.mark.asyncio
 async def test_controller_mode_reads_no_profile(target):
     target.controller = True
+    if target.environment == "OS400":
+        # The required console is initial-profile I/O, which controller mode refuses.
+        with pytest.raises(ValueError, match="initial-profile I/O"):
+            await invoke(target, apply_profile=False)
+        assert "create" not in target.events
+        return
     result = await invoke(target, apply_profile=False)
     step = vscsi_step(result)
     assert step.status == "error"
@@ -528,6 +548,7 @@ async def test_serial_and_vscsi_declared_together_both_verify(target):
         b.environment,
         LparResources(desired_memory=1024),
         max_virtual_slots=8,
+        physical_io=b.console,
         virtual_serial_adapters=(serial,),
         virtual_scsi_adapters=(CLIENT,),
         apply_profile=True,

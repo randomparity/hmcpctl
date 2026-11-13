@@ -52,7 +52,9 @@ record; the REST profile comparison keeps its physical, SR-IOV and `hmc` fields.
 Virtual-slot tagged I/O always takes the native path with declared vSCSI records, so it
 inherits ADR 0376's deferred apply and unproven pairing: a configured load source points at
 an adapter whose server side may not exist yet. A caller that relied on the HMC's rc 1 for a
-console-less IBM i native create now gets a refusal before any write. The REST rendering of a
+console-less IBM i native create now gets a refusal before any write; because a console is
+initial-profile I/O, which controller-mode creation already refuses, native IBM i creation on a
+PowerVM management controller is refused before effects too. The REST rendering of a
 virtual tagged slot is uncaptured and is not compared.
 
 ## Considered & rejected

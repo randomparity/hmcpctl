@@ -90,6 +90,37 @@ def test_virtual_tagged_forms_refused(name, value, match):
         LparPhysicalIO(**{name: value})
 
 
+@pytest.mark.parametrize(
+    "io,match",
+    [
+        (LparPhysicalIO(load_source_slot="2", console_slot="hmc"), "vSCSI client"),
+        (None, "console_slot"),
+        (LparPhysicalIO(load_source_slot=DRC), "console_slot"),
+    ],
+    ids=["unbound-virtual", "no-physical-io", "no-console"],
+)
+def test_native_render_refuses_before_any_command(monkeypatch, io, match):
+    from hmcpctl.config import HMCConfig
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.ssh.lpar import create_lpar_via_cli
+
+    command = AsyncMock()
+    monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", command)
+    config = HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
+    with pytest.raises(ValueError, match=match):
+        asyncio.run(
+            create_lpar_via_cli(
+                config,
+                "sys-R1",
+                "example-lpar",
+                "OS400",
+                LparResources(desired_memory=1024),
+                physical_io=io,
+            )
+        )
+    command.assert_not_awaited()
+
+
 def test_record_roundtrip():
     io = LparPhysicalIO(
         io_slots=(

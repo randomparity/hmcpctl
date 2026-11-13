@@ -36,7 +36,7 @@ PARTITION = "00000002-abcd-4ef0-8abc-000000000002"
 
 
 @pytest.fixture
-def target(monkeypatch):
+def target(monkeypatch, ibmi_console):
     hmc = AsyncMock(spec=HMCClient)
     hmc.config = HMCConfig.from_mapping({})
     entry = {
@@ -152,6 +152,7 @@ def target(monkeypatch):
         monkeypatch.setattr(module + ".run_hmc_command", b.command)
     b.assign = AsyncMock(return_value=AssignmentResult(True, False, ()))
     monkeypatch.setattr(workflows, "apply_validated_lpar_pcie_assignments", b.assign)
+    b.console = ibmi_console
     return b
 
 
@@ -166,6 +167,7 @@ async def invoke(b, kind="workflow", value=1, **options):
             affinity_group_id=value,
             **options,
         )
+    options.setdefault("physical_io", b.console(b.entry["Resource"]["PartitionType"]))
     creation = core.LparCreation(
         "part-R1",
         b.entry["Resource"]["PartitionType"],
