@@ -9,7 +9,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `hmc_get_proc_compat_modes` | `read` | `system.get_proc_compat_modes` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List processor compatibility modes supported by a managed system. |
-| `hmc_get_system` | `read` | `system.get` | `managed_system` | `implemented` | `current` | `existing-runtime-guards` | Get a managed system by exact SystemName or UUID. |
+| `hmc_get_system` | `read` | `system.get` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Get a managed system by exact SystemName or UUID. |
 | `hmc_get_system_memopt_score` | `read` | `system.get_memopt_score` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return a managed system's current memory-optimization affinity score. |
 | `hmc_list_systems` | `read` | `system.list` | `console` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List managed systems, optionally filtered by state. |
 | `hmc_modify_system` | `mutate` | `system.modify` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | Modify a managed system's configuration, leaving omitted fields unchanged. |

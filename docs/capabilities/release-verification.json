@@ -32,9 +32,15 @@
       "observed_at": "2026-10-07T11:36:47Z"
     },
     {
-      "operation": "boot_order.clear",
-      "verification": "current",
+      "operation": "adapter.update_network",
+      "verification": "unevidenced",
       "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "boot_order.clear",
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-08T18:52:55Z"
     },
     {
@@ -45,8 +51,8 @@
     },
     {
       "operation": "boot_order.set",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-08T18:52:55Z"
     },
     {
@@ -86,6 +92,18 @@
       "observed_at": null
     },
     {
+      "operation": "command.run",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "config.list_hosts",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "console.info",
       "verification": "stale",
       "reason": "closure-changed",
@@ -105,9 +123,9 @@
     },
     {
       "operation": "inventory.logical",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-06T20:36:49Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "io_slot.list",
@@ -117,38 +135,62 @@
     },
     {
       "operation": "job.get",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:44:58Z"
     },
     {
       "operation": "job.wait",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:45:01Z"
     },
     {
       "operation": "lpar.capture_console",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
-      "operation": "lpar.create",
-      "verification": "current",
+      "operation": "lpar.configure",
+      "verification": "unevidenced",
       "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.configure_reporting",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.configure_security_policy",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.configure_vtpm",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.create",
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
       "operation": "lpar.decommission",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-09T16:12:54Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.delete",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
@@ -171,8 +213,8 @@
     },
     {
       "operation": "lpar.get",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:29:06Z"
     },
     {
@@ -206,16 +248,40 @@
       "observed_at": "2026-10-06T09:42:24Z"
     },
     {
-      "operation": "lpar.get_state",
-      "verification": "current",
+      "operation": "lpar.get_reporting_settings",
+      "verification": "unevidenced",
       "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.get_security_policy",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.get_settings",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.get_state",
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:44:54Z"
     },
     {
+      "operation": "lpar.get_vtpm_settings",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar.inspect",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-06T20:36:43Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.list",
@@ -237,9 +303,39 @@
     },
     {
       "operation": "lpar.list_refcodes",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:45:03Z"
+    },
+    {
+      "operation": "lpar.migrate",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_abort",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_affinity",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_recover",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.migrate_validate",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar.modify",
@@ -248,10 +344,22 @@
       "observed_at": "2026-10-08T18:52:55Z"
     },
     {
-      "operation": "lpar.plan",
+      "operation": "lpar.move_memory",
       "verification": "unevidenced",
       "reason": null,
       "observed_at": null
+    },
+    {
+      "operation": "lpar.move_processors",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.plan",
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.plan_memopt_scores",
@@ -261,27 +369,57 @@
     },
     {
       "operation": "lpar.power",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-07T02:44:34Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.power_off",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
       "operation": "lpar.power_on",
+      "verification": "stale",
+      "reason": "closure-changed",
+      "observed_at": "2026-10-12T22:11:29Z"
+    },
+    {
+      "operation": "lpar.prepare_host_handoff",
       "verification": "current",
       "reason": null,
-      "observed_at": "2026-10-12T22:11:29Z"
+      "observed_at": "2026-11-13T08:21:17Z"
+    },
+    {
+      "operation": "lpar.reconfigure",
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
+    },
+    {
+      "operation": "lpar.remote_restart",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar.rename",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-08T18:52:55Z"
+    },
+    {
+      "operation": "lpar.reset_memory_statistics",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar.set_accelerator_qos",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar.set_description",
@@ -309,9 +447,15 @@
     },
     {
       "operation": "lpar.summary",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:31:12Z"
+    },
+    {
+      "operation": "lpar.switch_paging_vios",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "lpar_profile.backup",
@@ -320,16 +464,64 @@
       "observed_at": "2026-10-06T09:47:30Z"
     },
     {
+      "operation": "lpar_profile.delete",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.delete_backup",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.list",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.list_backups",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.read",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar_profile.restore",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T09:47:30Z"
     },
     {
+      "operation": "lpar_profile.save_current",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "lpar_profile.set_default",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "lpar_profile.sync",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T09:45:57Z"
+    },
+    {
+      "operation": "lpar_profile.update",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "media.create",
@@ -374,10 +566,22 @@
       "observed_at": "2026-10-07T16:37:00Z"
     },
     {
+      "operation": "media.load",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "media.mount",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-07T22:09:08Z"
+    },
+    {
+      "operation": "media.unload",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "media.unmount",
@@ -470,15 +674,21 @@
       "observed_at": "2026-10-07T11:35:53Z"
     },
     {
-      "operation": "pcie.assign_dedicated_slot",
-      "verification": "current",
+      "operation": "operation.status",
+      "verification": "unevidenced",
       "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "pcie.assign_dedicated_slot",
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:40:52Z"
     },
     {
       "operation": "pcie.list_dedicated_slots",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:35:24Z"
     },
     {
@@ -501,8 +711,8 @@
     },
     {
       "operation": "pcie.unassign_dedicated_slot",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:39:53Z"
     },
     {
@@ -513,6 +723,12 @@
     },
     {
       "operation": "pcm.set_preferences",
+      "verification": "stale",
+      "reason": "closure-changed",
+      "observed_at": "2026-10-14T14:30:31Z"
+    },
+    {
+      "operation": "permissions.describe",
       "verification": "unevidenced",
       "reason": null,
       "observed_at": null
@@ -525,9 +741,9 @@
     },
     {
       "operation": "provision.lpar",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-07T02:44:34Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "remote_access.configure",
@@ -651,8 +867,8 @@
     },
     {
       "operation": "system.get",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:28:22Z"
     },
     {
@@ -704,6 +920,36 @@
       "observed_at": "2026-10-06T12:35:03Z"
     },
     {
+      "operation": "system_profile.activate",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.create",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.delete",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.list",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "system_profile.update",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "task_role.list",
       "verification": "stale",
       "reason": "closure-changed",
@@ -726,6 +972,18 @@
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T17:15:35Z"
+    },
+    {
+      "operation": "tools.invoke",
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
+    },
+    {
+      "operation": "tools.search",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "update.console",
@@ -794,6 +1052,48 @@
       "observed_at": "2026-10-06T15:27:07Z"
     },
     {
+      "operation": "vios.configure_security_policy",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.configure_vtpm",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.create",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.delete",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.get",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.get_security_policy",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.get_vtpm_settings",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "vios.install",
       "verification": "unevidenced",
       "reason": null,
@@ -812,10 +1112,34 @@
       "observed_at": "2026-10-06T15:24:49Z"
     },
     {
+      "operation": "vios.power_off",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.power_on",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios.read_boot_order",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "vios.restore",
       "verification": "stale",
       "reason": "closure-changed",
       "observed_at": "2026-10-06T15:27:07Z"
+    },
+    {
+      "operation": "vios.set_boot_order",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
     },
     {
       "operation": "vios_label.create_vfc_group",
@@ -860,6 +1184,42 @@
       "observed_at": "2026-10-07T11:41:11Z"
     },
     {
+      "operation": "vios_profile.delete",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.list",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.read",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.save_current",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.set_default",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vios_profile.update",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "vnic.add",
       "verification": "unevidenced",
       "reason": null,
@@ -873,6 +1233,12 @@
     },
     {
       "operation": "vnic.remove",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
+      "operation": "vnic.update_policy",
       "verification": "unevidenced",
       "reason": null,
       "observed_at": null

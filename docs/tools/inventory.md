@@ -8,4 +8,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_inventory` | `read` | `inventory.logical` | `console` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List one connection's managed systems and partitions, with capacity and owner. |
+| `hmc_inventory` | `read` | `inventory.logical` | `console` | `implemented` | `current` | `existing-runtime-guards` | List one connection's managed systems and partitions, with capacity and owner. |

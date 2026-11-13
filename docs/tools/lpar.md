@@ -8,18 +8,18 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 
 | Tool | Effect | Operation | Target | Implementation | Verification | Runtime eligibility | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `hmc_capture_lpar_console` | `mutate` | `lpar.capture_console` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Capture a bounded snapshot of an LPAR's virtual console (mkvterm). |
+| `hmc_capture_lpar_console` | `mutate` | `lpar.capture_console` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Capture a bounded snapshot of an LPAR's virtual console (mkvterm). |
 | `hmc_configure_lpar` | `mutate` | `lpar.configure` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure partition settings and verify preserved/supplied values. |
 | `hmc_configure_lpar_reporting` | `mutate` | `lpar.configure_reporting` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure partition reporting once and verify applicable readback. |
 | `hmc_configure_lpar_security_policy` | `destructive` | `lpar.configure_security_policy` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure security policy once; verify pending policy separately from current boot. |
 | `hmc_configure_lpar_vtpm` | `destructive` | `lpar.configure_vtpm` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Configure an inactive AIX/Linux partition's advertised vTPM settings. |
-| `hmc_create_lpar` | `mutate` | `lpar.create` | `managed_system` | `partial` | `current` | `existing-runtime-guards` | Create a new LPAR on a managed system. |
-| `hmc_decommission_lpar` | `destructive` | `lpar.decommission` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Inventory, authorize, and optionally decommission one LPAR. |
-| `hmc_delete_lpar` | `destructive` | `lpar.delete` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Delete (destroy) an LPAR by name or UUID. |
+| `hmc_create_lpar` | `mutate` | `lpar.create` | `managed_system` | `partial` | `stale (closure-changed)` | `existing-runtime-guards` | Create a new LPAR on a managed system. |
+| `hmc_decommission_lpar` | `destructive` | `lpar.decommission` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Inventory, authorize, and optionally decommission one LPAR. |
+| `hmc_delete_lpar` | `destructive` | `lpar.delete` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Delete (destroy) an LPAR by name or UUID. |
 | `hmc_dlpar_mem` | `mutate` | `lpar.dlpar_mem` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Change absolute memory resources or typed native current-memory quantities. |
 | `hmc_dlpar_proc` | `mutate` | `lpar.dlpar_proc` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Change absolute processor resources or native current-processor quantities. |
 | `hmc_dump_restart_lpar` | `destructive` | `lpar.dump_restart` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Crash a logical partition and take a platform dump (PowerOff operation=dumprestart). |
-| `hmc_get_lpar` | `read` | `lpar.get` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Get one logical partition by partition name or UUID. |
+| `hmc_get_lpar` | `read` | `lpar.get` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Get one logical partition by partition name or UUID. |
 | `hmc_get_lpar_description` | `read` | `lpar.get_description` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return an LPAR's CLI-only description, resolving names or UUIDs. |
 | `hmc_get_lpar_memopt_score` | `read` | `lpar.get_memopt_score` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return an LPAR's current memory-optimization affinity score. |
 | `hmc_get_lpar_msp` | `read` | `lpar.get_msp` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return an LPAR's CLI-only Migratable Service Partition flag. |
@@ -27,14 +27,14 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_get_lpar_reporting_settings` | `read` | `lpar.get_reporting_settings` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read applicable C02 update settings after proving partition containment. |
 | `hmc_get_lpar_security_policy` | `read` | `lpar.get_security_policy` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read contained partition pending policy and separate current secure boot. |
 | `hmc_get_lpar_settings` | `read` | `lpar.get_settings` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read the five C01 partition settings after proving system containment. |
-| `hmc_get_lpar_state` | `read` | `lpar.get_state` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Return the current state of one LPAR by partition name or UUID. |
+| `hmc_get_lpar_state` | `read` | `lpar.get_state` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return the current state of one LPAR by partition name or UUID. |
 | `hmc_get_lpar_vtpm_settings` | `read` | `lpar.get_vtpm_settings` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read one contained AIX/Linux partition's vTPM configuration. |
 | `hmc_get_minimum_affinity_policy` | `read` | `lpar.get_minimum_affinity_policy` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return an LPAR's minimum-affinity policy when supported. |
-| `hmc_inspect_lpar` | `read` | `lpar.inspect` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Inspect one LPAR: state, RMC, resources, reference codes and next actions. |
+| `hmc_inspect_lpar` | `read` | `lpar.inspect` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Inspect one LPAR: state, RMC, resources, reference codes and next actions. |
 | `hmc_list_lpar_memopt_scores` | `read` | `lpar.list_memopt_scores` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List current memory-optimization affinity scores for a system's LPARs. |
 | `hmc_list_lpar_ownership` | `read` | `lpar.list_ownership` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Read parsed ownership for every LPAR on a system in one REST call. |
 | `hmc_list_lpars` | `read` | `lpar.list` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List LPARs, optionally filtered by system and state. |
-| `hmc_lpar_summary` | `read` | `lpar.summary` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Return state, resources, OS details, adapters, and description for one LPAR. |
+| `hmc_lpar_summary` | `read` | `lpar.summary` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return state, resources, OS details, adapters, and description for one LPAR. |
 | `hmc_migrate_abort_lpar` | `destructive` | `lpar.migrate_abort` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Abort an in-progress LPM migration of an LPAR. |
 | `hmc_migrate_lpar` | `mutate` | `lpar.migrate` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Live-migrate (LPM) an LPAR to another managed system. |
 | `hmc_migrate_lpar_with_affinity_preflight` | `mutate` | `lpar.migrate_affinity` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Run explicit affinity preflight before validation-first LPM. |
@@ -43,14 +43,14 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_modify_lpar` | `mutate` | `lpar.modify` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Modify an LPAR's memory or CPU resource assignment. |
 | `hmc_move_lpar_memory` | `mutate` | `lpar.move_memory` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Move dedicated memory once and independently observe both partitions. |
 | `hmc_move_lpar_processors` | `mutate` | `lpar.move_processors` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Move processor quantities once and independently observe both partitions. |
-| `hmc_plan_lpar` | `read` | `lpar.plan` | `console` | `implemented` | `unevidenced` | `existing-runtime-guards` | Plan provisioning an LPAR on one connection: fit, targets, blockers and changes. |
+| `hmc_plan_lpar` | `read` | `lpar.plan` | `console` | `implemented` | `current` | `existing-runtime-guards` | Plan provisioning an LPAR on one connection: fit, targets, blockers and changes. |
 | `hmc_plan_lpar_memopt_scores` | `read` | `lpar.plan_memopt_scores` | `managed_system` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Return predicted LPAR affinity scores without applying optimization. |
-| `hmc_power_lpar` | `destructive` | `lpar.power` | `console` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Start, stop or restart one LPAR, wait a bounded time, and verify its state. |
-| `hmc_power_off_lpar` | `destructive` | `lpar.power_off` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Submit a PowerOff job for a logical partition, optionally restarting it or selecting the shutdown operation. |
-| `hmc_power_on_lpar` | `mutate` | `lpar.power_on` | `lpar` | `partial` | `current` | `existing-runtime-guards` | Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection. |
-| `hmc_prepare_host_handoff` | `mutate` | `lpar.prepare_host_handoff` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Prepare a partition for an external consumer such as kdive, or release it. |
-| `hmc_read_lpar_refcodes` | `read` | `lpar.list_refcodes` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Read recent partition reference codes with offline POWER9 definitions. |
-| `hmc_reconfigure_lpar` | `destructive` | `lpar.reconfigure` | `console` | `partial` | `unevidenced` | `existing-runtime-guards` | Change an LPAR's processors, memory, name, boot, virtual disks or network |
+| `hmc_power_lpar` | `destructive` | `lpar.power` | `console` | `implemented` | `current` | `existing-runtime-guards` | Start, stop or restart one LPAR, wait a bounded time, and verify its state. |
+| `hmc_power_off_lpar` | `destructive` | `lpar.power_off` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Submit a PowerOff job for a logical partition, optionally restarting it or selecting the shutdown operation. |
+| `hmc_power_on_lpar` | `mutate` | `lpar.power_on` | `lpar` | `partial` | `stale (closure-changed)` | `existing-runtime-guards` | Submit a PowerOn job for a logical partition, optionally against a partition-profile UUID — not `profile`, which selects the HMC connection. |
+| `hmc_prepare_host_handoff` | `mutate` | `lpar.prepare_host_handoff` | `lpar` | `implemented` | `current` | `existing-runtime-guards` | Prepare a partition for an external consumer such as kdive, or release it. |
+| `hmc_read_lpar_refcodes` | `read` | `lpar.list_refcodes` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Read recent partition reference codes with offline POWER9 definitions. |
+| `hmc_reconfigure_lpar` | `destructive` | `lpar.reconfigure` | `console` | `partial` | `current` | `existing-runtime-guards` | Change an LPAR's processors, memory, name, boot, virtual disks or network |
 | `hmc_remote_restart_lpar` | `destructive` | `lpar.remote_restart` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Remote-restart a failed LPAR on another managed system. |
 | `hmc_rename_lpar` | `mutate` | `lpar.rename` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Rename one LPAR after enforcing its ownership token. |
 | `hmc_reset_lpar_memory_statistics` | `destructive` | `lpar.reset_memory_statistics` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Reset memory statistics history once on a contained Running shared partition. |
