@@ -26,6 +26,7 @@ from hmcpctl.server_tools.catalog import PRIMARY_TOOLS
 
 PATCH = logical_workflow.PATCH
 SAVED = "hmcpctl_000000000000"
+SYSTEM_UUID = "5A5A5A5A-0000-4000-8000-000000000386"
 
 
 @pytest.fixture(scope="module")
@@ -99,6 +100,75 @@ class WorkflowWorld(World):
         #: partition UUID -> (consumer label, hold_id), as the ADR 0193 store keeps it.
         self.holds: dict[str, tuple[str, str]] = {}
         self.hold_enforced = True
+
+    def _hmc_plan_lpar(self, kwargs: dict[str, Any]) -> Any:
+        system = {"id": f"c/{SYSTEM_UUID}", "uuid": SYSTEM_UUID, "name": SYSTEM}
+        targets = {"system": system, "vios": None, "volume_group": None}
+        return {
+            "connection": "<default>",
+            "plan_digest": "d" * 64,
+            "selected": targets,
+            "blockers": [],
+            "candidates": [
+                {
+                    "targets": targets,
+                    "selector": SYSTEM,
+                    "free_memory_mib": 100000,
+                    "free_proc_units": 8.0,
+                    "blockers": [],
+                    "blockers_truncated": False,
+                }
+            ],
+            "candidates_limit": 16,
+            "candidates_truncated": False,
+            "intended_changes": [],
+            "unverified": [],
+        }
+
+    def _hmc_inventory(self, kwargs: dict[str, Any]) -> Any:
+        ok = {"status": "ok", "tool": "hmc_list_systems", "detail": None}
+        system_id = f"c/{SYSTEM_UUID}"
+        return {
+            "connection": "<default>",
+            "systems_source": None,
+            "systems": [
+                {
+                    "id": system_id,
+                    "selector": SYSTEM,
+                    "uuid": SYSTEM_UUID,
+                    "name": SYSTEM,
+                    "state": "operating",
+                    "total_memory_mib": None,
+                    "free_memory_mib": None,
+                    "total_proc_units": None,
+                    "free_proc_units": None,
+                    "sources": {"capacity": ok, "partitions": ok, "ownership": ok},
+                }
+            ],
+            "systems_limit": 16,
+            "systems_truncated": False,
+            "partitions": [
+                {
+                    "id": f"{system_id}/{entry['uuid']}",
+                    "system_id": system_id,
+                    "uuid": entry["uuid"].lower(),
+                    "name": name,
+                    "partition_id": 9,
+                    "partition_type": "AIX/Linux",
+                    "state": entry["state"].lower(),
+                    "rmc_state": None,
+                    "current_memory_mib": None,
+                    "current_proc_units": None,
+                    "has_dedicated_processors": False,
+                    "owned": True,
+                    "owner": "agent",
+                }
+                for name, entry in self.partitions.items()
+            ],
+            "limit": 50,
+            "truncated": False,
+            "next_cursor": None,
+        }
 
     def _hmc_prepare_host_handoff(self, kwargs: dict[str, Any]) -> Any:
         entry = self.by_selector(kwargs["lpar_name_or_uuid"])
@@ -305,6 +375,8 @@ def _held(state, operation: str) -> list[str]:
 
 
 _OPERATIONS = {
+    "lpar.plan",
+    "inventory.logical",
     "provision.lpar",
     "lpar.reconfigure",
     "lpar.inspect",
@@ -407,7 +479,9 @@ def test_a_change_not_classified_profile_ends_the_workflow_and_cleans_up(schemas
     state = _run(schemas, world)
 
     assert _results(state) == {
+        "lpar.plan": "passed",
         "provision.lpar": "passed",
+        "inventory.logical": "passed",
         "lpar.reconfigure": "failed",
     }
     assert "hmc_power_lpar" not in world.tools()
@@ -851,3 +925,106 @@ def test_a_release_answering_with_a_document_fails_that_assertion(schemas):
 
     assert "release-drops-the-hold" not in _held(state, "lpar.prepare_host_handoff")
     assert world.holds == {} and world.partitions == {}
+
+
+def test_the_plan_asks_about_provisions_own_inputs_before_it_runs(schemas):
+    world = WorkflowWorld()
+
+    _run(schemas, world)
+
+    (plan,) = world.calls_to("hmc_plan_lpar")
+    (provision,) = world.calls_to("hmc_provision_lpar")
+    for key in ("name", "adapters", "storage", "resources", "system_name_or_uuid"):
+        assert plan[key] == provision[key], key
+    assert world.tools().index("hmc_plan_lpar") < world.tools().index(
+        "hmc_provision_lpar"
+    )
+    assert world.tools().index("hmc_inventory") > world.tools().index(
+        "hmc_provision_lpar"
+    )
+
+
+def _plan_digest_without_selection(world: WorkflowWorld) -> None:
+    _changes(world, "hmc_plan_lpar", lambda k, a: {**a, "selected": None})
+
+
+def _plan_for_another_system(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        for candidate in answer["candidates"]:
+            candidate["targets"] = {
+                **candidate["targets"],
+                "system": {"id": "c/x", "uuid": "0" * 8, "name": "other"},
+            }
+        return answer
+
+    _changes(world, "hmc_plan_lpar", change)
+
+
+def _inventory_without_the_run_partition(world: WorkflowWorld) -> None:
+    """Another partition of the system is listed in its place."""
+
+    def change(kwargs, answer):
+        for partition in answer["partitions"]:
+            partition["uuid"] = "0" * 8 + partition["uuid"][8:]
+            partition["name"] = "lpar-A"
+        return answer
+
+    _changes(world, "hmc_inventory", change)
+
+
+def _inventory_partition_on_another_system(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        for partition in answer["partitions"]:
+            partition["system_id"] = "c/other"
+        return answer
+
+    _changes(world, "hmc_inventory", change)
+
+
+def _inventory_ownership_unavailable(world: WorkflowWorld) -> None:
+    def change(kwargs, answer):
+        sources = answer["systems"][0]["sources"]
+        sources["ownership"] = {**sources["ownership"], "status": "unavailable"}
+        return answer
+
+    _changes(world, "hmc_inventory", change)
+
+
+def _inventory_without_the_system(world: WorkflowWorld) -> None:
+    _changes(world, "hmc_inventory", lambda k, a: {**a, "systems": []})
+
+
+@pytest.mark.parametrize(
+    ("change", "operation", "assertion"),
+    [
+        (_plan_digest_without_selection, "lpar.plan", "plan-outcome-consistent"),
+        (_plan_for_another_system, "lpar.plan", "plan-targets-boundary-system"),
+        (
+            _inventory_without_the_run_partition,
+            "inventory.logical",
+            "run-partition-listed",
+        ),
+        (
+            _inventory_partition_on_another_system,
+            "inventory.logical",
+            "partitions-belong-to-system",
+        ),
+        (
+            _inventory_ownership_unavailable,
+            "inventory.logical",
+            "system-sources-read",
+        ),
+        (_inventory_without_the_system, "inventory.logical", "boundary-system-listed"),
+        (_inventory_without_the_system, "lpar.plan", "plan-targets-boundary-system"),
+    ],
+)
+def test_each_unmet_plan_or_inventory_postcondition_fails(
+    schemas, change, operation, assertion
+):
+    world = WorkflowWorld()
+    change(world)
+
+    state = _run(schemas, world)
+
+    assert assertion not in _held(state, operation)
+    assert _results(state)[operation] == "failed"

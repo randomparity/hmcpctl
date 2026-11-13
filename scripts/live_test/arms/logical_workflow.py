@@ -1,8 +1,9 @@
-"""ST73: the logical create, reconfigure, hand-off and destroy workflow on one partition.
+"""ST73: the logical plan, create, reconfigure, hand-off and destroy workflow on one partition.
 
 One `hmcpctl-live-pwr-<8 hex>-p` partition goes through the primary catalog's workflow
-tools only: `hmc_provision_lpar` creates it inactive on a run-owned 1 GiB volume and the
-provision VLAN, `hmc_reconfigure_lpar` changes its memory and processors (read back
+tools only: `hmc_plan_lpar` plans it with provision's own inputs and writes nothing,
+`hmc_provision_lpar` creates it inactive on a run-owned 1 GiB volume and the
+provision VLAN, `hmc_inventory` lists it on its system, `hmc_reconfigure_lpar` changes its memory and processors (read back
 `profile`), `hmc_inspect_lpar` reports the change and the volume's mapping,
 `hmc_prepare_host_handoff` holds it for a run-labelled consumer (ADR 0193) while
 `hmc_invoke_tool` dispatches a read and a hold-less start that the hold must refuse,
@@ -47,6 +48,8 @@ WORKFLOW_TOOLS = frozenset(
         "hmc_operation_status",
         "hmc_prepare_host_handoff",
         "hmc_invoke_tool",
+        "hmc_plan_lpar",
+        "hmc_inventory",
     }
 )
 HANDOFF = "hmc_prepare_host_handoff"
@@ -87,10 +90,110 @@ def _operation(st: str, data: object) -> Mapping[str, Any] | None:
     return found if isinstance(found, Mapping) else None
 
 
-async def _provision(client: Client, state: RunState, run: lpar_power.Run) -> bool:
-    """Create P inactive on the run volume; whether it exists as the run's."""
+def _storage(run: lpar_power.Run) -> dict[str, Any]:
+    """The run volume as provision creates it, which the plan is asked about too."""
     vios = run.vios
     assert vios is not None
+    return {
+        "vios_uuid": vios.uuid,
+        "storage_name": run.volume,
+        "kind": "VirtualDisk",
+        "vg_uuid": vios.group_uuid,
+        "capacity_mib": lpar_power.VOLUME_MIB,
+    }
+
+
+async def _plan(client: Client, state: RunState, run: lpar_power.Run) -> None:
+    """Plan P with provision's own inputs; it writes nothing.
+
+    Whether the plan targets the boundary system is judged once `hmc_inventory` has
+    named that system's UUID.
+    """
+    st, data = await state.call(
+        client,
+        "hmc_plan_lpar",
+        name=run.p_name,
+        adapters={"port_vlan_id": run.vlan},
+        storage=_storage(run),
+        resources=lpar_power.RESOURCES,
+        system_name_or_uuid=run.system,
+    )
+    state.record(SUBTASK, "hmc_plan_lpar", st, data)
+    run.data["lpar.plan"] = data if st == "PASS" else None
+    blockers = _field(data, "blockers")
+    # plan_lpar sets the digest exactly when a candidate is selected and the request
+    # carries no blocker of its own.
+    run.hold(
+        "lpar.plan",
+        "plan-outcome-consistent",
+        st == "PASS"
+        and isinstance(blockers, list)
+        and (_field(data, "plan_digest") is not None)
+        == (_field(data, "selected") is not None and not blockers),
+    )
+
+
+async def _inventory(client: Client, state: RunState, run: lpar_power.Run) -> None:
+    """The logical inventory of the run's system lists P; then judge the plan's target."""
+    op = "inventory.logical"
+    st, data = await state.call(client, "hmc_inventory", systems=[run.system])
+    state.record(SUBTASK, "hmc_inventory", st, data)
+    run.data[op] = data
+    answered = st == "PASS"
+    systems = _list(data, "systems") if answered else []
+    partitions = _list(data, "partitions") if answered else []
+    boundary = next(
+        (s for s in systems if str(s.get("name") or "").lower() == run.system.lower()),
+        None,
+    )
+    system_id = _field(boundary, "id")
+    run.hold(op, "boundary-system-listed", isinstance(system_id, str))
+    run.hold(
+        op,
+        "run-partition-listed",
+        any(
+            _same_uuid(p.get("uuid"), run.p_uuid) and p.get("name") == run.p_name
+            for p in partitions
+        ),
+    )
+    run.hold(
+        op,
+        "partitions-belong-to-system",
+        isinstance(system_id, str)
+        and bool(partitions)
+        and all(p.get("system_id") == system_id for p in partitions),
+    )
+    # A denied or failed capacity or ownership part still lists the system and its
+    # partitions, with those figures null.
+    run.hold(
+        op,
+        "system-sources-read",
+        all(
+            _field(boundary, "sources", part, "status") == "ok"
+            for part in ("capacity", "partitions", "ownership")
+        ),
+    )
+    system_uuid = _field(boundary, "uuid")
+    run.hold(
+        "lpar.plan",
+        "plan-targets-boundary-system",
+        isinstance(system_uuid, str)
+        and any(
+            _same_uuid(_field(c, "targets", "system", "uuid"), system_uuid)
+            for c in _list(run.data.get("lpar.plan"), "candidates")
+        ),
+    )
+
+
+def _list(data: object, key: str) -> list[Mapping[str, Any]]:
+    found = _field(data, key)
+    return (
+        [i for i in found if isinstance(i, Mapping)] if isinstance(found, list) else []
+    )
+
+
+async def _provision(client: Client, state: RunState, run: lpar_power.Run) -> bool:
+    """Create P inactive on the run volume; whether it exists as the run's."""
     run.volume_attempted = True
     request_id = f"{run.token}-p"
     st, data = await state.call(
@@ -102,13 +205,7 @@ async def _provision(client: Client, state: RunState, run: lpar_power.Run) -> bo
         name=run.p_name,
         caller_token=run.token,
         adapters={"port_vlan_id": run.vlan},
-        storage={
-            "vios_uuid": vios.uuid,
-            "storage_name": run.volume,
-            "kind": "VirtualDisk",
-            "vg_uuid": vios.group_uuid,
-            "capacity_mib": lpar_power.VOLUME_MIB,
-        },
+        storage=_storage(run),
         resources=lpar_power.RESOURCES,
         power_on=False,
         exclusive_writer_window=True,
@@ -509,8 +606,10 @@ def _moved(record: Mapping[str, Any] | None, wanted: frozenset[str]) -> bool:
 
 async def _workflow(client: Client, state: RunState, run: lpar_power.Run) -> None:
     """Each step needs the one before it; a failed step ends the workflow."""
+    await _plan(client, state, run)
     if not await _provision(client, state, run):
         return
+    await _inventory(client, state, run)
     if not await _reconfigure(client, state, run):
         return
     await _inspect(client, state, run)
@@ -581,6 +680,13 @@ async def _preconditions(
 
 
 _ASSERTIONS: dict[str, tuple[str, ...]] = {
+    "lpar.plan": ("plan-outcome-consistent", "plan-targets-boundary-system"),
+    "inventory.logical": (
+        "boundary-system-listed",
+        "run-partition-listed",
+        "partitions-belong-to-system",
+        "system-sources-read",
+    ),
     "provision.lpar": (
         "workflow-completed",
         "ownership-stamped",
@@ -628,6 +734,26 @@ def _assertions(run: lpar_power.Run, operation: str) -> list[Assertion]:
 
 def _observe(state: RunState, run: lpar_power.Run, cleanup: str) -> None:
     """One verified row per workflow operation the run reached."""
+    if "lpar.plan" in run.ran:
+        state.record_verified(
+            SUBTASK,
+            "hmc_plan_lpar",
+            operation="lpar.plan",
+            scenario=SCENARIO,
+            assertions=_assertions(run, "lpar.plan"),
+            cleanup=cleanup,
+            data=run.data.get("lpar.plan"),
+        )
+    if "inventory.logical" in run.ran:
+        state.record_verified(
+            SUBTASK,
+            "hmc_inventory",
+            operation="inventory.logical",
+            scenario=SCENARIO,
+            assertions=_assertions(run, "inventory.logical"),
+            cleanup=cleanup,
+            data=run.data.get("inventory.logical"),
+        )
     if "provision.lpar" in run.ran:
         state.record_verified(
             SUBTASK,
@@ -714,7 +840,7 @@ def _observe(state: RunState, run: lpar_power.Run, cleanup: str) -> None:
 
 
 async def exercise_logical_workflow(client: Client, state: RunState) -> None:
-    print("\n=== ST73: logical create, reconfigure, hand-off and destroy ===")
+    print("\n=== ST73: logical plan, create, reconfigure, hand-off and destroy ===")
     run = lpar_power.Run(state.config.system_name, uuid.uuid4().hex[:8])
     ready = await _preconditions(client, state, run)
     if isinstance(ready, str):
