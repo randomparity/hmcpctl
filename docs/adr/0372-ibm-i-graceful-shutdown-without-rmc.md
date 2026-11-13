@@ -20,8 +20,9 @@ partition type is `OS400` or RMC is active, and `pypowervm/tasks/power.py:123` r
 
 ## Decision
 
-The graceful precondition admits a partition whose `PartitionType` is exactly `OS400` in any RMC
-state. Every other value — `AIX/Linux`, `Virtual IO Server`, an absent or any unrecognised
+The graceful precondition admits a partition whose `PartitionType` leaf text (read through
+`leaf_text`, since the leaf may carry a `ksv` attribute) is exactly `OS400` — the enumeration key
+`docs/refs/hmc-rest-api-p11/managed-system/165-logical-partition.md:92` names — in any RMC state. Every other value — `AIX/Linux`, `Virtual IO Server`, an absent or any unrecognised
 type — still needs RMC `active`, and the refusal still writes nothing. Graceful never falls back
 to `immediate`. The IBM i path is implemented and unevidenced: the lpar-power arm records it as
 a SKIP gap naming its prerequisite (ADR 0212: live execution is not a merge gate).
@@ -30,6 +31,9 @@ a SKIP gap naming its prerequisite (ADR 0212: live execution is not a merge gate
 
 - An IBM i graceful job the OS cannot honour now reaches the HMC and fails or times out there,
   reported through ADR 0199's existing failed / `needs_attention` outcomes, instead of a precheck.
+- An honoured IBM i normal shutdown "will take longer to complete" (`chsysstate.md:106`), so it may
+  outrun the 300 s job / 120 s settle bounds and pause as `needs_attention`;
+  `continuation=resume` finishes it without a second job. The bounds do not change.
 - `hmc_power_off_lpar` is unchanged; it never had an RMC precheck.
 - A case or spelling variant of `OS400` is treated as unknown and keeps the RMC requirement.
 
@@ -39,8 +43,6 @@ a SKIP gap naming its prerequisite (ADR 0212: live execution is not a merge gate
   the operator excluded acquiring IBM i, and a refusal with no source behind it blocks a
   supported path indefinitely.
 - **Drop the RMC precheck for every type.** verified: pypowervm `8613035`
-  `pypowervm/tasks/power.py:123` refuses OS shutdown without RMC on non-IBM i partitions, and
-  the bare-cec arm records `osshutdown` on a partition with no RMC as an expected refusal
-  (`scripts/live_test/arms/bare_cec.py:115`).
-- **Normalise the type case-insensitively.** judgment: the HMC emits `OS400` exactly; widening
-  the match admits values no source names.
+  `pypowervm/tasks/power.py:123` refuses OS shutdown without RMC on non-IBM i partitions.
+- **Normalise the type case-insensitively.** judgment: the reference names the key `OS400`;
+  widening the match admits values no source names.
