@@ -55,8 +55,7 @@ _TRANSITIONAL = frozenset(
     }
 )
 _PROFILE_DRIFT = (
-    "no read-only partition-profile tool exists yet (#637), "
-    "so profile drift is not checked"
+    "profile drift is not checked; read the profile with hmc_read_partition_profile"
 )
 
 Admit = Callable[[str, Mapping[str, str | None]], str | None]
