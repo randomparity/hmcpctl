@@ -146,6 +146,7 @@ STATIC_GATES = {
     "tool-docs-check",
     "adr-numbering",
     "doc-freshness",
+    "doc-links",
     "live-vocabulary",
     "scenario-gap",
 }
@@ -327,6 +328,7 @@ def test_justfile_exposes_one_composed_verification_graph(just_recipes) -> None:
     python_recipes = {
         "adr-numbering": ["scripts/check_adr_numbering.py"],
         "doc-freshness": ["scripts/check_generated_docs.py"],
+        "doc-links": ["scripts/check_doc_links.py"],
         "tool-docs": ["scripts/gen_tool_reference.py"],
         "tool-docs-check": ["scripts/gen_tool_reference.py", "--check"],
         "verify-artifacts": ["tests/validate_release_artifacts.py", "dist", "."],
