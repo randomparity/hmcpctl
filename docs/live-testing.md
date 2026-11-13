@@ -273,7 +273,9 @@ and expects the profile to read `none`.
 ### The profiles arm
 
 The profiles arm verifies the partition-property, profile, memory-pool and
-affinity operations (#627). Subtask 10 changes each property it tests and
+affinity operations (#627). Subtask 4 also reads the shared processor pools and
+compares the configured ones with `lshwres -r procpool`, read-only (#1975, ADR 0375).
+Subtask 10 changes each property it tests and
 restores the value it read just before:
 
 - the test partition's description;

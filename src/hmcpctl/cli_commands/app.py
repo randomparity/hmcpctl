@@ -206,6 +206,9 @@ app.add_typer(snapshot_app, name="snapshot")
 memory_pools_app = typer.Typer(help="Shared memory pools.", no_args_is_help=True)
 app.add_typer(memory_pools_app, name="memory-pools")
 
+processor_pools_app = typer.Typer(help="Shared processor pools.", no_args_is_help=True)
+app.add_typer(processor_pools_app, name="processor-pools")
+
 report_app = typer.Typer(
     help="Reports surveyed across every configured connection profile.",
     no_args_is_help=True,

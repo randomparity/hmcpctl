@@ -317,3 +317,18 @@ captures, the deterministic projection, corpus, reproduction commands and comple
 receipt hashes remain in the private campaign evidence archive for #638/#1766.
 Status stdout SHA-256: `ed42916acb488c60b6283beb94ce6a0b3943a0a2a10ce57ecf74d96e165dbbc7`.
 Projection SHA-256: `1e27f0aa19563f059c2737ddc2112fbe9d3940afb86f18046b45b8ece533a565`.
+
+`rest-shared-processor-pool-feed` and `cli-procpool` (`capture` prefix `2026-11-13-q1975/`)
+are a read-only capture for #1975 on an HMC at V10R3 SP1060 managing an 8375-42A (POWER9):
+the `ManagedSystem/{uuid}/SharedProcessorPool` feed (HTTP 200, 64 entries, PoolID 0–63,
+requested with `Accept: application/atom+xml`, while the client sends the typed
+`application/vnd.ibm.powervm.uom+xml; type=SharedProcessorPool`, which this capture does
+not cover; ST4's pool reads are the evidence for the typed request) and `lshwres -r procpool -m <system>` in its
+default `name=value` form. They were taken by hand rather than by the capture harness and
+tokenized with the same rules: UUIDs map to `0000000N-abcd-4ef0-8abc-00000000000N` tokens in
+first-seen order (keeping the HMC's upper case on the partition link), the HMC host is
+`hmc.test:443`, the system is `sys-R1` and the one partition name is `example-lpar`. Every
+other byte of the feed and the CLI stdout is unchanged. The CLI lists the two configured
+pools, `DefaultPool` (0) and `SharedPool01` (1), and the default pool held one partition.
+`vocabulary/v10r3-8375-42a-shared-processor-pool-source.json` records that endpoint and
+command for `just live-vocabulary`.

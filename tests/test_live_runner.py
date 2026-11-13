@@ -620,6 +620,10 @@ async def test_profile_inventory_records_all_selector_scoped_probes() -> None:
         "hmc_get_lpar_proc_compat",
         "hmc_list_memory_pools",
         "hmc_list_vnics",
+        "hmc_list_shared_processor_pools",
+        "hmc_run_command",
+        "hmc_get_shared_processor_pool",
+        "hmc_get_shared_processor_pool",
         "hmc_get_lpar_memopt_score",
         "hmc_list_lpar_memopt_scores",
         "hmc_get_system_memopt_score",
@@ -639,6 +643,7 @@ async def test_profile_inventory_records_all_selector_scoped_probes() -> None:
         if tool in {
             "hmc_get_proc_compat_modes",
             "hmc_list_memory_pools",
+            "hmc_list_shared_processor_pools",
             "hmc_list_lpar_memopt_scores",
             "hmc_get_system_memopt_score",
             "hmc_plan_lpar_memopt_scores",
@@ -647,6 +652,13 @@ async def test_profile_inventory_records_all_selector_scoped_probes() -> None:
             "hmc_plan_resource_group_memopt_scores",
         }:
             assert kwargs == {"system_name_or_uuid": state.config.system_name}
+        elif tool == "hmc_run_command":
+            assert kwargs == {
+                "cmd": f"lshwres -r procpool -m {state.config.system_name}"
+            }
+        elif tool == "hmc_get_shared_processor_pool":
+            assert kwargs["system_name_or_uuid"] == state.config.system_name
+            assert kwargs["pool"] in (0, "DefaultPool")
         else:
             assert kwargs["system_name_or_uuid"] == state.config.system_name
             if tool != "hmc_get_proc_compat_modes":
@@ -1597,6 +1609,34 @@ _ST4_ANSWERS: dict[str, object] = {
         {"curr": "POWER9_base", "profile_mode": "default"},
     ),
     "hmc_list_memory_pools": ("PASS", []),
+    "hmc_list_shared_processor_pools": (
+        "PASS",
+        {
+            "pools": [
+                {
+                    "pool_id": 0,
+                    "name": "DefaultPool",
+                    "maximum_processing_units": None,
+                    "reserved_processing_units": None,
+                    "pending_reserved_processing_units": None,
+                    "assigned_partition_uuids": ["A1"],
+                },
+                {
+                    "pool_id": 1,
+                    "name": "SharedPool01",
+                    "maximum_processing_units": 20.0,
+                    "reserved_processing_units": 1.0,
+                    "pending_reserved_processing_units": 1.0,
+                    "assigned_partition_uuids": None,
+                },
+            ]
+        },
+    ),
+    "hmc_run_command": ("PASS", live_fixture("cli-procpool")["stdout"]),
+    "hmc_get_shared_processor_pool": (
+        "PASS",
+        {"pool": {"pool_id": 0, "configured": True}},
+    ),
     "hmc_get_lpar_memopt_score": (
         "PASS",
         {"lpar_name": "lpar-name", "curr_lpar_score": "100"},
@@ -1643,10 +1683,22 @@ async def test_profile_inventory_promotes_reads_with_assertions(monkeypatch) -> 
 
     await profiles.inventory_lpar_profiles(None, state)
 
+    ids = [entry["observation"]["id"] for entry in state.observations]
+    assert len(ids) == len(set(ids)), "the evidence emitter refuses repeated ids"
     observations = _verified(state)
-    assert len(observations) == 13
+    assert len(observations) == 15
     assert {o["result"] for o in observations.values()} == {"passed"}
     assert _held(observations["memory_pool.list"]) == {"memory-pools-empty-branch"}
+    assert _held(observations["processor_pool.list"]) == {
+        "pool-ids-match",
+        "pool-names-match",
+        "pool-units-match",
+        "pool-membership-match",
+    }
+    assert _held(observations["processor_pool.get"]) == {
+        "default-pool-by-id",
+        "default-pool-by-name",
+    }
     assert _held(observations["resource_group.list_memopt_scores"]) == {
         "capability-unavailable-reason"
     }
@@ -1691,6 +1743,95 @@ async def test_a_wrong_read_shape_fails_its_observation(
     await profiles.inventory_lpar_profiles(None, state)
 
     assert _verified(state)[operation]["result"] == "failed"
+
+
+_POOL_ROWS = live_fixture("cli-procpool")["stdout"]
+
+
+@pytest.mark.parametrize(
+    ("stdout", "failing"),
+    [
+        (
+            _POOL_ROWS.replace(
+                "SharedPool01,shared_proc_pool_id=1", "x,shared_proc_pool_id=2"
+            ),
+            "pool-ids-match",
+        ),
+        (_POOL_ROWS.replace("name=SharedPool01", "name=Other"), "pool-names-match"),
+        (
+            _POOL_ROWS.replace("max_pool_proc_units=20.0", "max_pool_proc_units=21.0"),
+            "pool-units-match",
+        ),
+        (_POOL_ROWS.replace("lpar_ids=1\n", "lpar_ids=1,2\n"), "pool-membership-match"),
+        # REST omits pool 1's AssignedPartitions while the CLI lists members.
+        (_POOL_ROWS.replace("lpar_ids=none", "lpar_ids=3,4"), "pool-membership-match"),
+    ],
+)
+def test_pool_assertions_fail_alone_on_one_disagreement(stdout, failing) -> None:
+    from hmcpctl.ssh.commands import _parse_lshwres_output
+
+    pools = _ST4_ANSWERS["hmc_list_shared_processor_pools"][1]["pools"]
+    held = {
+        a.id
+        for a in profiles.pool_assertions(pools, _parse_lshwres_output(stdout))
+        if a.holds
+    }
+    expected = {
+        "pool-ids-match",
+        "pool-names-match",
+        "pool-units-match",
+        "pool-membership-match",
+    }
+    if failing == "pool-ids-match":
+        assert held == set()
+    else:
+        assert held == expected - {failing}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"hmc_list_shared_processor_pools": ("FAIL", "lost")},
+        {"hmc_run_command": ("FAIL", "ssh lost")},
+        {"hmc_run_command": ("PASS", 'name="unterminated\n')},
+    ],
+)
+async def test_failed_pool_reads_record_a_failed_read_and_st4_continues(
+    monkeypatch, override
+) -> None:
+    _calls, scripted = _answer({**_ST4_ANSWERS, **override})
+    monkeypatch.setattr(runner.RunState, "call", scripted)
+    state = runner.RunState()
+    state.config = dataclasses.replace(state.config, lp3_name="lpar-name")
+
+    await profiles.inventory_lpar_profiles(None, state)
+
+    observation = _verified(state)["processor_pool.list"]
+    assert observation["result"] == "failed"
+    assert "lpar.get_minimum_affinity_policy" in _verified(state)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_pool_get_fails_the_one_get_observation(monkeypatch) -> None:
+    def get_pool(kwargs):
+        if kwargs["pool"] == 0:
+            return "FAIL", "lost"
+        return "PASS", {"pool": {"pool_id": 0, "configured": True}}
+
+    _calls, scripted = _answer(
+        {**_ST4_ANSWERS, "hmc_get_shared_processor_pool": get_pool}
+    )
+    monkeypatch.setattr(runner.RunState, "call", scripted)
+    state = runner.RunState()
+    state.config = dataclasses.replace(state.config, lp3_name="lpar-name")
+
+    await profiles.inventory_lpar_profiles(None, state)
+
+    gets = [o for o in state.observations if o["operation"] == "processor_pool.get"]
+    assert len(gets) == 1
+    assert gets[0]["observation"]["result"] == "failed"
+    assert _held(gets[0]["observation"]) == {"default-pool-by-name"}
 
 
 def _st10_answers(
@@ -8149,6 +8290,14 @@ def test_scenarios_declare_their_expected_assertion_ids():
             "profile-mode-supported",
             "memory-pools-empty-branch",
             "memory-pool-rows-parsed",
+        },
+        "st4-processor-pool-reads": {
+            "pool-ids-match",
+            "pool-names-match",
+            "pool-units-match",
+            "pool-membership-match",
+            "default-pool-by-id",
+            "default-pool-by-name",
         },
         "st4-affinity-reads": {
             "score-names-partition",

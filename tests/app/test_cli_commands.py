@@ -6719,3 +6719,105 @@ def test_sharing_presentation_preserves_complete_outcome(
     assert ("Modified LPAR" in result.output) is completed
     payload = json.loads(result.output[result.output.index("{") :])
     assert payload == json.loads(json.dumps(asdict(workflow)))
+
+
+def _pool(pool_id: int, name: str, maximum: float | None, partitions):
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPool
+
+    return SharedProcessorPool(
+        uuid=f"0000000{pool_id}-abcd-4ef0-8abc-00000000000{pool_id}",
+        pool_id=pool_id,
+        name=name,
+        configured=True,
+        maximum_processing_units=maximum,
+        reserved_processing_units=maximum and 1.0,
+        pending_reserved_processing_units=maximum and 1.0,
+        available_processing_units=0.0,
+        assigned_partition_uuids=partitions,
+    )
+
+
+def _patch_pool_cli(monkeypatch, name: str, value):
+    module = "hmcpctl.cli_commands.systems.processor_pools"
+    operation = AsyncMock(return_value=value)
+    monkeypatch.setattr(f"{module}.{name}", operation)
+    monkeypatch.setattr(f"{module}.with_client", lambda fn: asyncio.run(fn(object())))
+    return operation
+
+
+def test_processor_pools_list_renders_null_semantics_and_the_rule(monkeypatch):
+    from hmcpctl.operations.systems.processor_pools import (
+        CONFIGURED_RULE,
+        SharedProcessorPoolListing,
+    )
+
+    listing = SharedProcessorPoolListing(
+        "sys-uuid",
+        CONFIGURED_RULE,
+        64,
+        62,
+        (_pool(0, "DefaultPool", None, ("A1",)), _pool(1, "SharedPool01", 20.0, None)),
+    )
+    operation = _patch_pool_cli(monkeypatch, "list_shared_processor_pools", listing)
+
+    result = RUNNER.invoke(
+        cli.app, ["processor-pools", "list", "sys-R1", "--all", "--format", "tsv"]
+    )
+
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    assert lines[1].split("\t")[:4] == ["0", "DefaultPool", "yes", "n/a"]
+    assert lines[1].split("\t")[-1] == "A1"
+    assert lines[2].split("\t")[-1] == "not reported"
+    assert CONFIGURED_RULE in result.stderr and "62" in result.stderr
+    assert operation.await_args.kwargs == {"include_unconfigured": True}
+
+
+def test_processor_pools_list_json_keeps_nulls(monkeypatch):
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPoolListing
+
+    listing = SharedProcessorPoolListing(
+        "sys-uuid", "rule", 64, 63, (_pool(0, "DefaultPool", None, None),)
+    )
+    _patch_pool_cli(monkeypatch, "list_shared_processor_pools", listing)
+
+    result = RUNNER.invoke(cli.app, ["processor-pools", "list", "sys-R1", "--json"])
+
+    assert result.exit_code == 0, result.output
+    pool = json.loads(result.stdout)["pools"][0]
+    assert pool["maximum_processing_units"] is None
+    assert pool["assigned_partition_uuids"] is None
+
+
+@pytest.mark.parametrize(
+    ("arguments", "selector"),
+    [(["--id", "0"], 0), (["--name", "SharedPool01"], "SharedPool01")],
+)
+def test_processor_pools_get_passes_one_typed_selector(
+    monkeypatch, arguments, selector
+):
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPoolResult
+
+    result_value = SharedProcessorPoolResult(
+        "sys-uuid", "rule", _pool(1, "SharedPool01", 20.0, None)
+    )
+    operation = _patch_pool_cli(monkeypatch, "get_shared_processor_pool", result_value)
+
+    result = RUNNER.invoke(
+        cli.app, ["processor-pools", "get", "sys-R1", *arguments, "--json"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["pool"]["pool_id"] == 1
+    assert operation.await_args.args[1:] == ("sys-R1", selector)
+
+
+@pytest.mark.parametrize("arguments", [[], ["--id", "1", "--name", "x"]])
+def test_processor_pools_get_requires_exactly_one_selector(monkeypatch, arguments):
+    operation = _patch_pool_cli(monkeypatch, "get_shared_processor_pool", None)
+
+    result = RUNNER.invoke(cli.app, ["processor-pools", "get", "sys-R1", *arguments])
+
+    assert result.exit_code == 2
+    assert "exactly one of --id or --name" in result.stderr
+    operation.assert_not_awaited()
