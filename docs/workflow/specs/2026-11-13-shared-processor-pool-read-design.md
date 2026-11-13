@@ -104,7 +104,9 @@ carries (`max_pool_proc_units`, `curr_reserved_pool_proc_units`,
 is 0; otherwise the comma-separated count) equals the `assigned_partition_uuids` length
 wherever REST reports membership. Units compare as `Decimal(cli) == Decimal(str(rest))`.
 Assertion ids: `pool-ids-match`, `pool-names-match`, `pool-units-match`,
-`pool-membership-match`; the gets record `default-pool-by-id` and `default-pool-by-name`.
+`pool-membership-match`; the two gets record one `processor_pool.get` observation holding
+`default-pool-by-id` and `default-pool-by-name`, because an observation id derives from
+the subtask and tool and the evidence emitter refuses a run whose ids repeat.
 A failed tool call, a failed `hmc_run_command`, or CLI output `_parse_lshwres_output`
 refuses (`HMCCLIError`) records the read as failed (`_READ_FAILED`) and lets ST4's later
 reads run. It then gets the

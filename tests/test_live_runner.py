@@ -1683,6 +1683,8 @@ async def test_profile_inventory_promotes_reads_with_assertions(monkeypatch) -> 
 
     await profiles.inventory_lpar_profiles(None, state)
 
+    ids = [entry["observation"]["id"] for entry in state.observations]
+    assert len(ids) == len(set(ids)), "the evidence emitter refuses repeated ids"
     observations = _verified(state)
     assert len(observations) == 15
     assert {o["result"] for o in observations.values()} == {"passed"}
@@ -1693,7 +1695,10 @@ async def test_profile_inventory_promotes_reads_with_assertions(monkeypatch) -> 
         "pool-units-match",
         "pool-membership-match",
     }
-    assert _held(observations["processor_pool.get"]) == {"default-pool-by-name"}
+    assert _held(observations["processor_pool.get"]) == {
+        "default-pool-by-id",
+        "default-pool-by-name",
+    }
     assert _held(observations["resource_group.list_memopt_scores"]) == {
         "capability-unavailable-reason"
     }
@@ -1803,6 +1808,28 @@ async def test_failed_pool_reads_record_a_failed_read_and_st4_continues(
     observation = _verified(state)["processor_pool.list"]
     assert observation["result"] == "failed"
     assert "lpar.get_minimum_affinity_policy" in _verified(state)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_pool_get_fails_the_one_get_observation(monkeypatch) -> None:
+    def get_pool(kwargs):
+        if kwargs["pool"] == 0:
+            return "FAIL", "lost"
+        return "PASS", {"pool": {"pool_id": 0, "configured": True}}
+
+    _calls, scripted = _answer(
+        {**_ST4_ANSWERS, "hmc_get_shared_processor_pool": get_pool}
+    )
+    monkeypatch.setattr(runner.RunState, "call", scripted)
+    state = runner.RunState()
+    state.config = dataclasses.replace(state.config, lp3_name="lpar-name")
+
+    await profiles.inventory_lpar_profiles(None, state)
+
+    gets = [o for o in state.observations if o["operation"] == "processor_pool.get"]
+    assert len(gets) == 1
+    assert gets[0]["observation"]["result"] == "failed"
+    assert _held(gets[0]["observation"]) == {"default-pool-by-name"}
 
 
 def _st10_answers(

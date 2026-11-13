@@ -281,30 +281,37 @@ async def _processor_pool_reads(client: Client, state: RunState) -> None:
         cleanup="not-required",
         data=listing,
     )
-    for selector in (0, "DefaultPool"):
+    # One observation for both gets: its id derives from (subtask, tool), and the
+    # evidence emitter refuses a run whose observation ids repeat.
+    assertions: list[Assertion] = []
+    reads: dict[str, object] = {}
+    read_failed = False
+    for assertion_id, selector in (
+        ("default-pool-by-id", 0),
+        ("default-pool-by-name", "DefaultPool"),
+    ):
         status, data = await state.call(
             client,
             "hmc_get_shared_processor_pool",
             system_name_or_uuid=system,
             pool=selector,
         )
+        reads[assertion_id] = data
         pool = field(data, "pool")
         default = field(pool, "pool_id") == 0 and field(pool, "configured") is True
-        state.record_verified(
-            4,
-            "hmc_get_shared_processor_pool",
-            operation="processor_pool.get",
-            scenario=_POOL_READS,
-            assertions=(
-                [Assertion("default-pool-by-id", default)]
-                if selector == 0
-                else [Assertion("default-pool-by-name", default)]
-            )
-            if status == "PASS"
-            else [_READ_FAILED],
-            cleanup="not-required",
-            data=data,
-        )
+        assertions.append(Assertion(assertion_id, status == "PASS" and default))
+        read_failed = read_failed or status != "PASS"
+    if read_failed:
+        assertions.append(_READ_FAILED)
+    state.record_verified(
+        4,
+        "hmc_get_shared_processor_pool",
+        operation="processor_pool.get",
+        scenario=_POOL_READS,
+        assertions=assertions,
+        cleanup="not-required",
+        data=reads,
+    )
 
 
 async def _score_reads(client: Client, state: RunState) -> None:
