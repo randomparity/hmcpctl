@@ -329,11 +329,11 @@ def _create_status(
 
 async def create_persistent_memory_volume(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     name: str,
     size_mib: int,
     *,
+    system_name_or_uuid: str,
     affinity: bool = False,
     ownership_override: bool = False,
 ) -> PersistentMemoryVolumeResult:
@@ -413,11 +413,11 @@ async def _authorized_assigned_volume(
 
 async def rename_persistent_memory_volume(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     volume: str,
     new_name: str,
     *,
+    system_name_or_uuid: str,
     ownership_override: bool = False,
 ) -> PersistentMemoryVolumeResult:
     """Rename a volume assigned to the named partition."""
@@ -464,10 +464,10 @@ async def rename_persistent_memory_volume(
 
 async def delete_persistent_memory_volume(
     hmc: HMCClient,
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     volume: str,
     *,
+    system_name_or_uuid: str,
     acknowledge_data_loss: bool = False,
     ownership_override: bool = False,
 ) -> PersistentMemoryVolumeResult:

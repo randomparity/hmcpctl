@@ -21,9 +21,10 @@ tool, register_tools, tool_security = tool_module()
 
 @tool(effect="read", operation="pmem.list_volumes", target_kind="managed_system")
 def hmc_list_persistent_memory_volumes(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str | None = None,
     limit: int | None = None,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> list[PersistentMemoryVolume]:
     """List a managed system's virtual persistent-memory volumes.
@@ -64,12 +65,13 @@ def hmc_get_persistent_memory_volume(
 
 @tool(effect="mutate", operation="pmem.create_volume", target_kind="lpar")
 def hmc_create_persistent_memory_volume(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     name: str,
     size_mib: StrictInt,
     affinity: StrictBool = False,
     ownership_override: StrictBool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PersistentMemoryVolumeResult:
     """Create a DRAM persistent-memory volume assigned to an inactive partition.
@@ -92,10 +94,10 @@ def hmc_create_persistent_memory_volume(
     return with_client(
         lambda hmc: create_persistent_memory_volume(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             name,
             size_mib,
+            system_name_or_uuid=system_name_or_uuid,
             affinity=affinity,
             ownership_override=ownership_override,
         ),
@@ -105,11 +107,12 @@ def hmc_create_persistent_memory_volume(
 
 @tool(effect="mutate", operation="pmem.rename_volume", target_kind="lpar")
 def hmc_rename_persistent_memory_volume(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     volume: str,
     new_name: str,
     ownership_override: StrictBool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PersistentMemoryVolumeResult:
     """Rename a persistent-memory volume assigned to the named partition.
@@ -126,10 +129,10 @@ def hmc_rename_persistent_memory_volume(
     return with_client(
         lambda hmc: rename_persistent_memory_volume(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             volume,
             new_name,
+            system_name_or_uuid=system_name_or_uuid,
             ownership_override=ownership_override,
         ),
         profile=profile,
@@ -138,11 +141,12 @@ def hmc_rename_persistent_memory_volume(
 
 @tool(effect="destructive", operation="pmem.delete_volume", target_kind="lpar")
 def hmc_delete_persistent_memory_volume(
-    system_name_or_uuid: str,
     lpar_name_or_uuid: str,
     volume: str,
     acknowledge_data_loss: StrictBool = False,
     ownership_override: StrictBool = False,
+    *,
+    system_name_or_uuid: str,
     profile: str | None = None,
 ) -> PersistentMemoryVolumeResult:
     """Delete a persistent-memory volume; the data it holds is destroyed.
@@ -161,9 +165,9 @@ def hmc_delete_persistent_memory_volume(
     return with_client(
         lambda hmc: delete_persistent_memory_volume(
             hmc,
-            system_name_or_uuid,
             lpar_name_or_uuid,
             volume,
+            system_name_or_uuid=system_name_or_uuid,
             acknowledge_data_loss=acknowledge_data_loss,
             ownership_override=ownership_override,
         ),

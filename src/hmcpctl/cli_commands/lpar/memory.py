@@ -286,10 +286,10 @@ def lpars_pmem_create(
     result = with_client(
         lambda hmc: create_persistent_memory_volume(
             hmc,
-            system,
             lpar,
             name,
             size_mib,
+            system_name_or_uuid=system,
             affinity=affinity,
             ownership_override=ownership_override,
         )
@@ -313,10 +313,10 @@ def lpars_pmem_rename(
     result = with_client(
         lambda hmc: rename_persistent_memory_volume(
             hmc,
-            system,
             lpar,
             volume,
             new_name,
+            system_name_or_uuid=system,
             ownership_override=ownership_override,
         )
     )
@@ -346,9 +346,9 @@ def lpars_pmem_delete(
     result = with_client(
         lambda hmc: delete_persistent_memory_volume(
             hmc,
-            system,
             lpar,
             volume,
+            system_name_or_uuid=system,
             acknowledge_data_loss=acknowledge_data_loss,
             ownership_override=ownership_override,
         )

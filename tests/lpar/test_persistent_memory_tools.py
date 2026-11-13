@@ -93,7 +93,7 @@ def tools(monkeypatch):
 
 def test_list_tool_forwards_partition_and_applies_limit(tools):
     assert pmem.hmc_list_persistent_memory_volumes(
-        "sys-R1", "example-lpar", limit=1
+        "example-lpar", limit=1, system_name_or_uuid="sys-R1"
     ) == [VOLUME]
     tools["list_persistent_memory_volumes"].assert_awaited_once_with(
         HMC, "sys-R1", "example-lpar"
@@ -103,39 +103,46 @@ def test_list_tool_forwards_partition_and_applies_limit(tools):
 def test_mutating_tools_forward_every_argument(tools):
     pmem.hmc_get_persistent_memory_volume("sys-R1", "example-vol")
     pmem.hmc_create_persistent_memory_volume(
-        "sys-R1", "example-lpar", "example-vol", 512, affinity=True
+        "example-lpar", "example-vol", 512, affinity=True, system_name_or_uuid="sys-R1"
     )
     pmem.hmc_rename_persistent_memory_volume(
-        "sys-R1", "example-lpar", "example-vol", "renamed", ownership_override=True
+        "example-lpar",
+        "example-vol",
+        "renamed",
+        ownership_override=True,
+        system_name_or_uuid="sys-R1",
     )
     pmem.hmc_delete_persistent_memory_volume(
-        "sys-R1", "example-lpar", "example-vol", acknowledge_data_loss=True
+        "example-lpar",
+        "example-vol",
+        acknowledge_data_loss=True,
+        system_name_or_uuid="sys-R1",
     )
     tools["get_persistent_memory_volume"].assert_awaited_once_with(
         HMC, "sys-R1", "example-vol"
     )
     tools["create_persistent_memory_volume"].assert_awaited_once_with(
         HMC,
-        "sys-R1",
         "example-lpar",
         "example-vol",
         512,
+        system_name_or_uuid="sys-R1",
         affinity=True,
         ownership_override=False,
     )
     tools["rename_persistent_memory_volume"].assert_awaited_once_with(
         HMC,
-        "sys-R1",
         "example-lpar",
         "example-vol",
         "renamed",
+        system_name_or_uuid="sys-R1",
         ownership_override=True,
     )
     tools["delete_persistent_memory_volume"].assert_awaited_once_with(
         HMC,
-        "sys-R1",
         "example-lpar",
         "example-vol",
+        system_name_or_uuid="sys-R1",
         acknowledge_data_loss=True,
         ownership_override=False,
     )
@@ -174,7 +181,13 @@ def test_cli_create_forwards_and_succeeds_on_verified(commands):
     )
     assert result.exit_code == 0, result.output
     commands["create"].assert_awaited_once_with(
-        HMC, "sys-R1", "lp", "example-vol", 256, affinity=True, ownership_override=False
+        HMC,
+        "lp",
+        "example-vol",
+        256,
+        system_name_or_uuid="sys-R1",
+        affinity=True,
+        ownership_override=False,
     )
 
 
@@ -215,9 +228,9 @@ def test_cli_delete_forwards_acknowledgement(commands):
     assert result.exit_code == 0, result.output
     commands["delete"].assert_awaited_once_with(
         HMC,
-        "sys-R1",
         "lp",
         "example-vol",
+        system_name_or_uuid="sys-R1",
         acknowledge_data_loss=True,
         ownership_override=False,
     )

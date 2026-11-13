@@ -285,10 +285,10 @@ async def test_create_refuses_without_writing(guard, change, message):
     with pytest.raises(ValueError, match=message):
         await create_persistent_memory_volume(
             hmc,
-            SYSTEM,
             "example-lpar",
             change.get("name", "new-vol"),
             change.get("size_mib", 256),
+            system_name_or_uuid=SYSTEM,
         )
     assert hmc.writes == []
 
@@ -297,7 +297,7 @@ async def test_create_refuses_without_writing(guard, change, message):
 async def test_create_rejects_non_boolean_affinity(guard):
     with pytest.raises(TypeError, match="affinity"):
         await create_persistent_memory_volume(
-            FakeHMC(), SYSTEM, "lp", "new-vol", 256, affinity=1
+            FakeHMC(), "lp", "new-vol", 256, system_name_or_uuid=SYSTEM, affinity=1
         )
     guard.assert_not_called()
 
@@ -306,7 +306,7 @@ async def test_create_rejects_non_boolean_affinity(guard):
 async def test_create_verified_sends_captured_document(guard):
     hmc = FakeHMC()
     result = await create_persistent_memory_volume(
-        hmc, SYSTEM, "example-lpar", "new-vol", 256
+        hmc, "example-lpar", "new-vol", 256, system_name_or_uuid=SYSTEM
     )
     assert result.status == "verified"
     assert result.observed is not None and result.observed.name == "new-vol"
@@ -325,7 +325,9 @@ async def test_create_verified_sends_captured_document(guard):
 async def test_create_mismatch_when_not_yet_visible(guard):
     hmc = FakeHMC()
     hmc.apply_writes = False
-    result = await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+    result = await create_persistent_memory_volume(
+        hmc, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+    )
     assert result.status == "mismatch"
     assert "re-read" in result.warnings[-1]
 
@@ -334,7 +336,9 @@ async def test_create_mismatch_when_not_yet_visible(guard):
 async def test_create_mismatch_on_differing_readback(guard):
     hmc = FakeHMC()
     hmc.created = _volume_entry(Name="new-vol", Size="512")
-    result = await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+    result = await create_persistent_memory_volume(
+        hmc, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+    )
     assert result.status == "mismatch"
     assert "size_mib" in result.warnings[0]
 
@@ -349,7 +353,9 @@ async def test_create_mismatch_on_other_partition_or_affinity(
 ):
     hmc = FakeHMC()
     hmc.created = _volume_entry(Name="new-vol", **{field: value})
-    result = await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+    result = await create_persistent_memory_volume(
+        hmc, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+    )
     assert result.status == "mismatch"
     assert label in result.warnings[0]
 
@@ -358,7 +364,9 @@ async def test_create_mismatch_on_other_partition_or_affinity(
 async def test_create_readback_unavailable(guard):
     hmc = FakeHMC()
     hmc.read_error_after_write = HMCError("GET failed", 503, "")
-    result = await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+    result = await create_persistent_memory_volume(
+        hmc, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+    )
     assert result.status == "readback-unavailable"
 
 
@@ -366,7 +374,9 @@ async def test_create_readback_unavailable(guard):
 async def test_create_write_outcome_unknown_reports_readback(guard):
     hmc = FakeHMC()
     hmc.write_error = HMCError("PUT failed", 500, "")
-    result = await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+    result = await create_persistent_memory_volume(
+        hmc, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+    )
     assert result.status == "write-outcome-unknown"
     assert result.observed is None
     assert "no replay" in result.warnings[0]
@@ -379,7 +389,7 @@ async def test_create_write_outcome_unknown_reports_readback(guard):
 async def test_rename_verified_resends_size_and_partition(guard):
     hmc = FakeHMC([_volume_entry()])
     result = await rename_persistent_memory_volume(
-        hmc, SYSTEM, "lp", "example-vol", "renamed"
+        hmc, "lp", "example-vol", "renamed", system_name_or_uuid=SYSTEM
     )
     assert result.status == "verified"
     ((kind, document),) = hmc.writes
@@ -391,7 +401,9 @@ async def test_rename_verified_resends_size_and_partition(guard):
 async def test_rename_mismatch_when_name_unchanged(guard):
     hmc = FakeHMC([_volume_entry()])
     hmc.apply_writes = False
-    result = await rename_persistent_memory_volume(hmc, SYSTEM, "lp", VOLUME, "renamed")
+    result = await rename_persistent_memory_volume(
+        hmc, "lp", VOLUME, "renamed", system_name_or_uuid=SYSTEM
+    )
     assert result.status == "mismatch"
 
 
@@ -399,7 +411,9 @@ async def test_rename_mismatch_when_name_unchanged(guard):
 async def test_rename_write_error_is_outcome_unknown(guard):
     hmc = FakeHMC([_volume_entry()])
     hmc.write_error = HMCError("POST failed", 500, "")
-    result = await rename_persistent_memory_volume(hmc, SYSTEM, "lp", VOLUME, "renamed")
+    result = await rename_persistent_memory_volume(
+        hmc, "lp", VOLUME, "renamed", system_name_or_uuid=SYSTEM
+    )
     assert result.status == "write-outcome-unknown"
     assert result.observed is not None and result.observed.name == "example-vol"
 
@@ -408,7 +422,9 @@ async def test_rename_write_error_is_outcome_unknown(guard):
 async def test_rename_readback_unavailable(guard):
     hmc = FakeHMC([_volume_entry()])
     hmc.read_error_after_write = HMCError("GET failed", 503, "")
-    result = await rename_persistent_memory_volume(hmc, SYSTEM, "lp", VOLUME, "renamed")
+    result = await rename_persistent_memory_volume(
+        hmc, "lp", VOLUME, "renamed", system_name_or_uuid=SYSTEM
+    )
     assert result.status == "readback-unavailable"
 
 
@@ -432,7 +448,9 @@ async def test_rename_readback_unavailable(guard):
 async def test_rename_refuses_without_writing(guard, entry, new_name, message):
     hmc = FakeHMC([_volume_entry(**entry)])
     with pytest.raises(ValueError, match=message):
-        await rename_persistent_memory_volume(hmc, SYSTEM, "lp", VOLUME, new_name)
+        await rename_persistent_memory_volume(
+            hmc, "lp", VOLUME, new_name, system_name_or_uuid=SYSTEM
+        )
     assert hmc.writes == []
 
 
@@ -441,7 +459,9 @@ async def test_rename_refuses_name_in_use(guard):
     other = _volume_entry(Uuid="00000009-ABCD-4EF0-8ABC-000000000009", Name="taken")
     hmc = FakeHMC([_volume_entry(), other])
     with pytest.raises(ValueError, match="already exists"):
-        await rename_persistent_memory_volume(hmc, SYSTEM, "lp", VOLUME, "taken")
+        await rename_persistent_memory_volume(
+            hmc, "lp", VOLUME, "taken", system_name_or_uuid=SYSTEM
+        )
     assert hmc.writes == []
 
 
@@ -452,7 +472,9 @@ async def test_rename_refuses_name_in_use(guard):
 async def test_delete_requires_acknowledgement(guard):
     hmc = FakeHMC([_volume_entry()])
     with pytest.raises(ValueError, match="acknowledge_data_loss"):
-        await delete_persistent_memory_volume(hmc, SYSTEM, "lp", VOLUME)
+        await delete_persistent_memory_volume(
+            hmc, "lp", VOLUME, system_name_or_uuid=SYSTEM
+        )
     guard.assert_not_called()
     assert hmc.writes == []
 
@@ -463,7 +485,7 @@ async def test_delete_refuses_active_partition(guard):
     hmc.lpar = _lpar(state="running")
     with pytest.raises(ValueError, match="inactive"):
         await delete_persistent_memory_volume(
-            hmc, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+            hmc, "lp", VOLUME, acknowledge_data_loss=True, system_name_or_uuid=SYSTEM
         )
     assert hmc.writes == []
 
@@ -473,7 +495,7 @@ async def test_delete_refuses_volume_of_other_partition(guard):
     hmc = FakeHMC([_volume_entry(AssociatedPartitionId="9")])
     with pytest.raises(ValueError, match="not the selected"):
         await delete_persistent_memory_volume(
-            hmc, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+            hmc, "lp", VOLUME, acknowledge_data_loss=True, system_name_or_uuid=SYSTEM
         )
     assert hmc.writes == []
 
@@ -482,7 +504,7 @@ async def test_delete_refuses_volume_of_other_partition(guard):
 async def test_delete_verified_absent(guard):
     hmc = FakeHMC([_volume_entry()])
     result = await delete_persistent_memory_volume(
-        hmc, SYSTEM, "lp", "example-vol", acknowledge_data_loss=True
+        hmc, "lp", "example-vol", acknowledge_data_loss=True, system_name_or_uuid=SYSTEM
     )
     assert (result.status, hmc.writes) == ("verified", [("delete", VOLUME)])
 
@@ -492,7 +514,7 @@ async def test_delete_mismatch_when_still_present(guard):
     hmc = FakeHMC([_volume_entry()])
     hmc.apply_writes = False
     result = await delete_persistent_memory_volume(
-        hmc, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+        hmc, "lp", VOLUME, acknowledge_data_loss=True, system_name_or_uuid=SYSTEM
     )
     assert result.status == "mismatch"
     assert isinstance(result.observed, PersistentMemoryVolume)
@@ -503,14 +525,14 @@ async def test_delete_write_error_and_unreadable(guard):
     hmc = FakeHMC([_volume_entry()])
     hmc.write_error = HMCError("DELETE failed", 500, "")
     unknown = await delete_persistent_memory_volume(
-        hmc, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+        hmc, "lp", VOLUME, acknowledge_data_loss=True, system_name_or_uuid=SYSTEM
     )
     assert unknown.status == "write-outcome-unknown"
     assert unknown.observed is not None
     hmc = FakeHMC([_volume_entry()])
     hmc.read_error_after_write = HMCError("GET failed", 503, "")
     unreadable = await delete_persistent_memory_volume(
-        hmc, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+        hmc, "lp", VOLUME, acknowledge_data_loss=True, system_name_or_uuid=SYSTEM
     )
     assert unreadable.status == "readback-unavailable"
 
@@ -523,10 +545,14 @@ async def test_create_refuses_unreadable_partition_and_counts(guard):
     hmc = FakeHMC()
     hmc.lpar = None
     with pytest.raises(ValueError, match="PartitionID"):
-        await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+        await create_persistent_memory_volume(
+            hmc, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+        )
     hmc.lpar = _lpar(current=None)
     with pytest.raises(ValueError, match="CurrentDram"):
-        await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+        await create_persistent_memory_volume(
+            hmc, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+        )
     assert hmc.writes == []
 
 
@@ -535,7 +561,9 @@ async def test_volume_selector_must_be_a_non_empty_string(guard):
     with pytest.raises(TypeError, match="volume"):
         await get_persistent_memory_volume(FakeHMC(), SYSTEM, "")
     with pytest.raises(TypeError, match="volume"):
-        await rename_persistent_memory_volume(FakeHMC(), SYSTEM, "lp", "", "renamed")
+        await rename_persistent_memory_volume(
+            FakeHMC(), "lp", "", "renamed", system_name_or_uuid=SYSTEM
+        )
 
 
 @pytest.mark.asyncio
@@ -548,10 +576,18 @@ async def test_failed_write_with_failed_readback_reports_no_observation(guard):
     deleted = FakeHMC([_volume_entry()])
     deleted.write_error = deleted.read_error_after_write = error
     results = [
-        await create_persistent_memory_volume(created, SYSTEM, "lp", "new-vol", 256),
-        await rename_persistent_memory_volume(renamed, SYSTEM, "lp", VOLUME, "x"),
+        await create_persistent_memory_volume(
+            created, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
+        ),
+        await rename_persistent_memory_volume(
+            renamed, "lp", VOLUME, "x", system_name_or_uuid=SYSTEM
+        ),
         await delete_persistent_memory_volume(
-            deleted, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+            deleted,
+            "lp",
+            VOLUME,
+            acknowledge_data_loss=True,
+            system_name_or_uuid=SYSTEM,
         ),
     ]
     assert [(r.status, r.observed) for r in results] == [
@@ -570,7 +606,11 @@ async def test_failed_delete_reports_whether_the_volume_is_gone(guard):
 
     gone.delete_persistent_memory_volume = delete_then_fail
     result = await delete_persistent_memory_volume(
-        gone, SYSTEM, "lp", VOLUME.lower(), acknowledge_data_loss=True
+        gone,
+        "lp",
+        VOLUME.lower(),
+        acknowledge_data_loss=True,
+        system_name_or_uuid=SYSTEM,
     )
     assert result.status == "write-outcome-unknown"
     assert "no longer lists" in result.warnings[-1]
@@ -583,9 +623,11 @@ async def test_failed_create_and_rename_report_their_readback(guard):
     renamed = FakeHMC([_volume_entry()])
     renamed.write_error = HMCError("POST failed", 500, "")
     create = await create_persistent_memory_volume(
-        created, SYSTEM, "lp", "new-vol", 256
+        created, "lp", "new-vol", 256, system_name_or_uuid=SYSTEM
     )
-    rename = await rename_persistent_memory_volume(renamed, SYSTEM, "lp", VOLUME, "x")
+    rename = await rename_persistent_memory_volume(
+        renamed, "lp", VOLUME, "x", system_name_or_uuid=SYSTEM
+    )
     assert "0 volume(s)" in create.warnings[-1]
     assert "'example-vol'" in rename.warnings[-1]
 
@@ -597,13 +639,13 @@ async def test_ownership_refusal_prevents_every_write(action):
     refusal = AsyncMock(side_effect=PermissionError("foreign ownership token"))
     calls = {
         "create": lambda: create_persistent_memory_volume(
-            hmc, SYSTEM, "lp", "new", 256
+            hmc, "lp", "new", 256, system_name_or_uuid=SYSTEM
         ),
         "rename": lambda: rename_persistent_memory_volume(
-            hmc, SYSTEM, "lp", VOLUME, "x"
+            hmc, "lp", VOLUME, "x", system_name_or_uuid=SYSTEM
         ),
         "delete": lambda: delete_persistent_memory_volume(
-            hmc, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+            hmc, "lp", VOLUME, acknowledge_data_loss=True, system_name_or_uuid=SYSTEM
         ),
     }
     with (
