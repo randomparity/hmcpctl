@@ -45,6 +45,7 @@ from hmcpctl.server_tools.virtualization.adapters import (
     hmc_add_vfc_adapter,
     hmc_add_vscsi_adapter,
     hmc_delete_adapter,
+    hmc_get_adapter,
     hmc_list_adapters,
 )
 
@@ -425,6 +426,43 @@ def test_add_vfc_adapter_builds_xml(monkeypatch, mock_hmc):
         '<ConnectingVirtualSlotNumber kb="CUR" kxe="false">11</ConnectingVirtualSlotNumber>'
         in body
     )
+
+
+def test_get_adapter_reads_the_owned_instance_with_its_pairing(monkeypatch, mock_hmc):
+    """hmc_get_adapter GETs the typed instance and projects its pairing (ADR 0374)."""
+    _hmc_env(monkeypatch)
+    lpar = _feed(LPAR_UUID, "LogicalPartition", PartitionID="7")
+    mock_hmc.get(f"/rest/api/uom/LogicalPartition/{LPAR_UUID}").mock(
+        return_value=httpx.Response(200, text=lpar)
+    )
+    route = mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{LPAR_UUID}"
+        f"/VirtualFibreChannelClientAdapter/{ADAPTER_UUID}"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            text=_feed(
+                ADAPTER_UUID,
+                "VirtualFibreChannelClientAdapter",
+                LocalPartitionID="7",
+                ConnectingPartitionID="100",
+                ConnectingVirtualSlotNumber="40",
+                WWPNs="c050760000aa0000 c050760000aa0001",
+            ),
+        )
+    )
+    result = hmc_get_adapter(
+        lpar_name_or_uuid=LPAR_UUID,
+        adapter_uuid=ADAPTER_UUID,
+        adapter_type="VirtualFibreChannelClientAdapter",
+    )
+    assert route.called
+    assert result["paired_identity"] == {
+        "remote_partition_id": 100,
+        "remote_slot": 40,
+        "remote_vios_uuid": None,
+        "wwpns": ["c050760000aa0000", "c050760000aa0001"],
+    }
 
 
 def test_delete_adapter_returns_confirmation(monkeypatch, mock_hmc):
