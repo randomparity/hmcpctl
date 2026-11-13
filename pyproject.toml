@@ -18,9 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 app = [
-    "fastmcp-slim[server]==4.0.10",
-    "mcp==2.2.0",
-    "mcp-types==2.2.0",
+    "fastmcp-slim[server]==4.1.4",
+    "mcp==2.3.0",
+    "mcp-types==2.3.0",
     "rich==15.0.0",
     "typer==0.27.3",
     "uvicorn==0.54.0",
@@ -55,7 +55,7 @@ include = [
 dev = [
     "cryptography==50.0.2",
     "detect-secrets==1.5.0",
-    "fastmcp-slim[client]==4.0.10",
+    "fastmcp-slim[client]==4.1.4",
     "hatch-vcs==0.5.0",
     "hatchling==1.32.4",
     "prek==0.5.5",
