@@ -52,7 +52,7 @@ RUFF_PER_FILE_IGNORE_MODULES = {
     "tests/unit/test_ownership.py",
 }
 BASELINED_FINDINGS = {
-    "docs/capabilities/maturity.json": 60,
+    "docs/capabilities/maturity.json": 70,
     "justfile": 1,
     # Public PDF checksum and extracted code-inventory checksum (#1690).
     "src/hmcpctl/_progress_codes.json": 2,
