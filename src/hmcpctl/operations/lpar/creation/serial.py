@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ....documents.lpar_serial import (
     VirtualSerialAdapter,
@@ -43,6 +43,20 @@ class SerialAdmission:
     adapters: tuple[VirtualSerialAdapter, ...]
     peers: tuple[SerialTarget | None, ...]
     preexisting: frozenset[str]
+    declared_families: frozenset[str] = frozenset()
+
+
+class CreatedScope(Protocol):
+    """The admitted identity a creation owner confirms its created partition against."""
+
+    @property
+    def system_uuid(self) -> str: ...
+
+    @property
+    def pending(self) -> SerialTarget: ...
+
+    @property
+    def preexisting(self) -> frozenset[str]: ...
 
 
 def _number(value: object, label: str) -> int:
@@ -126,6 +140,22 @@ async def _read_target(
     return observed, entry
 
 
+async def read_owned_target(
+    hmc: HMCClient, system_name: str, target: SerialTarget
+) -> SerialTarget:
+    """Read a contained peer fresh and authorize it under the ownership policy."""
+    observed, resource_entry = await _read_target(hmc, target)
+    description = leaf_text(resource_entry["Resource"].get("Description", ""))
+    if not isinstance(description, str):
+        raise ValueError(  # noqa: TRY004 — malformed HMC data, refused as ValueError
+            "serial peer ownership description is malformed"
+        )
+    authorize_lpar_ownership_description(
+        hmc, system_name, observed.name, description, operation="lpar-mutation"
+    )
+    return observed
+
+
 async def admit_serial_creation(
     hmc: HMCClient,
     system_uuid: str,
@@ -134,6 +164,8 @@ async def admit_serial_creation(
     maximum: int | None,
     adapters: tuple[VirtualSerialAdapter, ...],
     kind: PartitionKind,
+    *,
+    declared_families: frozenset[str] = frozenset(),
 ) -> SerialAdmission:
     """Authorize every exact contained peer before the creation owner writes once."""
     validate_serial_input(adapters, maximum)
@@ -185,22 +217,7 @@ async def admit_serial_creation(
             else:
                 key = peer.uuid.casefold()
                 if key not in cache:
-                    observed, resource_entry = await _read_target(hmc, peer)
-                    description = leaf_text(
-                        resource_entry["Resource"].get("Description", "")
-                    )
-                    if not isinstance(description, str):
-                        raise ValueError(
-                            "serial peer ownership description is malformed"
-                        )
-                    authorize_lpar_ownership_description(
-                        hmc,
-                        system_name,
-                        observed.name,
-                        description,
-                        operation="lpar-mutation",
-                    )
-                    cache[key] = observed
+                    cache[key] = await read_owned_target(hmc, system_name, peer)
                 peer = cache[key]
             if adapter.remote_slot is not None and (
                 peer.maximum is None or adapter.remote_slot >= peer.maximum
@@ -216,11 +233,12 @@ async def admit_serial_creation(
         adapters,
         tuple(peers),
         frozenset(t.uuid.casefold() for t in inventory),
+        declared_families,
     )
 
 
 async def confirm_serial_created(
-    hmc: HMCClient, admission: SerialAdmission, candidate: object
+    hmc: HMCClient, admission: CreatedScope, candidate: object
 ) -> dict[str, Any]:
     """Confirm fresh contained local identity independently of submission's reply."""
     target = _target(admission.pending.kind, candidate)
@@ -311,7 +329,12 @@ async def _profile(
     if not profile or target.partition_id is None:
         raise ValueError("serial saved-profile identity is unavailable")
     observed = await read_serial_profile(
-        hmc.config, admission.system_name, target.name, target.partition_id, profile
+        hmc.config,
+        admission.system_name,
+        target.name,
+        target.partition_id,
+        profile,
+        admission.declared_families,
     )
     if observed.maximum != target.maximum:
         raise ValueError("serial maximum observation is unavailable")

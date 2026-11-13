@@ -1,7 +1,7 @@
 # Power11 Minimum-Affinity Policy Write Design
 
 Issue: #316  
-Decision: [ADR 0087](../../../adr/0087-power11-minimum-affinity-policy-write.md)
+Decision: [ADR 0087](../../adr/0087-power11-minimum-affinity-policy-write.md)
 
 ## Outcome and boundaries
 

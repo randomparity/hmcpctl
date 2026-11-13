@@ -63,6 +63,11 @@ repos:
         entry: just doc-freshness
         language: system
         pass_filenames: false
+      - id: doc-links
+        name: Relative Markdown link guard
+        entry: just doc-links
+        language: system
+        pass_filenames: false
       - id: live-vocabulary
         name: Live vocabulary guard
         entry: just live-vocabulary

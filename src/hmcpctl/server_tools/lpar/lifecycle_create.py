@@ -18,6 +18,7 @@ from ...documents.lpar_memory_layout import LparMemoryLayout
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import VirtualSerialAdapter
 from ...documents.lpar_start import LparStartSettings
+from ...documents.lpar_vscsi import VirtualScsiClientAdapter
 from ...documents.lpar_vtpm import LparVtpmSettings
 from ...operations.lpar.assignments import LparPcieAssignments, LparPcieWorkflowResult
 from ...operations.lpar.creation.core import LparCreation, validate_lpar_creation
@@ -66,6 +67,7 @@ def hmc_create_lpar(
     creation_memory: LparCreationMemory | None = None,
     affinity_group_id: AffinityGroupID | None = None,
     start_settings: LparStartSettings | None = None,
+    virtual_scsi_adapters: tuple[VirtualScsiClientAdapter, ...] = (),
 ) -> LparPcieWorkflowResult:
     """Create a new LPAR on a managed system.
 
@@ -105,6 +107,12 @@ def hmc_create_lpar(
             Client eligibility is HMC-final in every environment. No reciprocal mutation,
             retry, activation or traffic proof. Saved configuration/pair observations gate
             follow-ups; controller current observations remain unavailable.
+        virtual_scsi_adapters: Optional typed vSCSI client records (64 KiB encoded
+            maximum); no server role. Each names one remote VIOS on the same system by
+            remote_lpar_id or remote_lpar_name, which must pass ownership authorization
+            before creation. Local slots >=2 are unique across serial and vSCSI records
+            and require explicit max_virtual_slots. No VIOS server adapter or mapping is
+            created; the saved-profile comparison reports pairing as unproven.
         memory_layout: Optional AIX/Linux huge-page counts, advertised HPT/PPT
             ratios, and Linux reservation. Reservation selection including zero
             declares intent, not installed OS proof; finite/two-decimal values,
@@ -177,6 +185,7 @@ def hmc_create_lpar(
         keylock=keylock,
         max_virtual_slots=max_virtual_slots,
         virtual_serial_adapters=virtual_serial_adapters,
+        virtual_scsi_adapters=virtual_scsi_adapters,
         creation_memory=creation_memory
         if creation_memory is not None
         else LparCreationMemory(),

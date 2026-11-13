@@ -18,6 +18,7 @@ from hmcpctl.documents.lpar_memory_layout import LparMemoryLayout
 from hmcpctl.documents.lpar_security_policy import LparSecurityPolicy
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.documents.lpar_start import LparStartSettings
+from hmcpctl.documents.lpar_vscsi import VirtualScsiClientAdapter
 from hmcpctl.documents.lpar_vtpm import LparVtpmSettings
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError
 from hmcpctl.operations.lpar.affinity_group import created_affinity_group_step
@@ -32,6 +33,12 @@ from hmcpctl.operations.lpar.creation.start import (
     admit_start_creation,
     confirm_start_created,
     created_start_step,
+)
+from hmcpctl.operations.lpar.creation.vscsi import (
+    VSCSI_FAMILY,
+    VscsiAdmission,
+    admit_vscsi_creation,
+    vscsi_creation_step,
 )
 from hmcpctl.operations.lpar.linux_roles import (
     read_creation_authority,
@@ -90,6 +97,7 @@ class _CreationFeatureInputs:
     partition_id: int | None = None
     max_virtual_slots: int | None = None
     virtual_serial_adapters: tuple[VirtualSerialAdapter, ...] = ()
+    virtual_scsi_adapters: tuple[VirtualScsiClientAdapter, ...] = ()
     creation_memory: LparCreationMemory = field(default_factory=LparCreationMemory)
     start_settings: LparStartSettings = field(default_factory=LparStartSettings)
     memory_layout: LparMemoryLayout = field(default_factory=LparMemoryLayout)
@@ -116,6 +124,10 @@ class _CreationFeatureInputs:
     @property
     def serial_requested(self) -> bool:
         return bool(self.virtual_serial_adapters)
+
+    @property
+    def vscsi_requested(self) -> bool:
+        return bool(self.virtual_scsi_adapters)
 
     @property
     def memory_requested(self) -> bool:
@@ -154,6 +166,7 @@ class _CreationFeatureInputs:
         return (
             self.layout_requested
             or self.serial_requested
+            or self.vscsi_requested
             or self.memory_requested
             or self.start_requested
             or self.affinity_requested
@@ -176,6 +189,7 @@ class _CreationObservations:
     hardware_memory_step: _CreationObservation
     memory_layout_step: _CreationObservation
     serial_step: _CreationObservation
+    vscsi_step: _CreationObservation
     creation_memory_step: _CreationObservation
     affinity_group_step: _CreationObservation
     apply_step: _CreationObservation
@@ -206,6 +220,7 @@ class _CreationObservations:
             serial_step=_CreationObservation(
                 "virtual_serial_adapters", inputs.serial_requested
             ),
+            vscsi_step=_CreationObservation(VSCSI_FAMILY, inputs.vscsi_requested),
             creation_memory_step=_CreationObservation(
                 "creation_memory", inputs.memory_requested
             ),
@@ -310,6 +325,7 @@ class _CreationFeatureCoordinator:
     _cli_system: str | None = field(default=None, init=False)
     controller_mode: bool = False
     serial_admission: SerialAdmission | None = field(default=None, init=False)
+    vscsi_admission: VscsiAdmission | None = field(default=None, init=False)
     memory_admission: CreationMemoryAdmission | None = field(default=None, init=False)
     start_admission: StartAdmission | None = field(default=None, init=False)
     _entry: dict[str, Any] | None = field(default=None, init=False)
@@ -383,6 +399,7 @@ class _CreationFeatureCoordinator:
             )
         elif (
             self.inputs.serial_requested
+            or self.inputs.vscsi_requested
             or self.inputs.memory_requested
             or self.inputs.start_requested
         ):
@@ -441,6 +458,20 @@ class _CreationFeatureCoordinator:
                 maximum=self.inputs.max_virtual_slots,
                 adapters=self.inputs.virtual_serial_adapters,
                 kind=self.inputs.kind,
+                declared_families=frozenset({VSCSI_FAMILY})
+                if self.inputs.vscsi_requested
+                else frozenset(),
+            )
+        if self.inputs.vscsi_requested:
+            self._attempted_feature = "vscsi_admission"
+            self.vscsi_admission = await admit_vscsi_creation(
+                self.hmc,
+                self.system_uuid,
+                name=self.inputs.name,
+                partition_id=self.inputs.partition_id,
+                maximum=self.inputs.max_virtual_slots,
+                adapters=self.inputs.virtual_scsi_adapters,
+                serial=self.inputs.virtual_serial_adapters,
             )
         if not self.inputs.vios and self.inputs.start_requested:
             self._attempted_feature = "start_admission"
@@ -455,6 +486,7 @@ class _CreationFeatureCoordinator:
                     or self.inputs.hardware_requested
                     or self.inputs.layout_requested
                     or self.inputs.serial_requested
+                    or self.inputs.vscsi_requested
                     or self.inputs.memory_requested
                     or self.inputs.start_requested
                 )
@@ -557,6 +589,18 @@ class _CreationFeatureCoordinator:
                         ),
                     )
                 )
+            if self.vscsi_admission is not None:
+                confirmations.append(
+                    (
+                        "vscsi_identity",
+                        partial(
+                            confirm_serial_created,
+                            self.hmc,
+                            self.vscsi_admission,
+                            created_lpar,
+                        ),
+                    )
+                )
             if self.memory_admission is not None:
                 confirmations.append(
                     (
@@ -605,6 +649,17 @@ class _CreationFeatureCoordinator:
                     controller_mode=self.controller_mode,
                 )
                 if self.serial_admission is not None and self.entry is None
+                else None,
+            )
+            await self.observe(
+                "vscsi_step",
+                vscsi_creation_step(
+                    self.hmc,
+                    self.vscsi_admission,
+                    self.entry,
+                    controller_mode=self.controller_mode,
+                )
+                if self.vscsi_admission is not None and self.entry is None
                 else None,
             )
 
@@ -717,6 +772,17 @@ class _CreationFeatureCoordinator:
                 controller_mode=self.controller_mode,
             )
             if self.serial_admission is not None
+            else None,
+        )
+        await self.observe(
+            "vscsi_step",
+            vscsi_creation_step(
+                self.hmc,
+                self.vscsi_admission,
+                self.entry,
+                controller_mode=self.controller_mode,
+            )
+            if self.vscsi_admission is not None
             else None,
         )
         await self.observe(

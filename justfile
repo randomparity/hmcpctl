@@ -82,6 +82,10 @@ adr-numbering:
 doc-freshness:
     uv run --no-sync python scripts/check_generated_docs.py
 
+# verify every relative Markdown link and anchor in a tracked file resolves
+doc-links:
+    uv run --no-sync python scripts/check_doc_links.py
+
 # verify HMC-shaped literals and read paths in src/ and tests/ match captured vocabularies
 live-vocabulary:
     uv run --no-sync python scripts/check_live_vocabulary.py
@@ -92,8 +96,8 @@ scenario-gap:
 
 # local and hosted static-analysis gate
 static: lint format-check typecheck secrets workflow-security env-vars nicknames test-layout \
-        capability-inventory tool-docs-check adr-numbering doc-freshness live-vocabulary \
-        scenario-gap
+        capability-inventory tool-docs-check adr-numbering doc-freshness doc-links \
+        live-vocabulary scenario-gap
 
 # run the full pytest suite with one semantic summary
 test:

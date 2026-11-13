@@ -760,6 +760,25 @@ _STATIC_VERDICTS = {
         ),
         "{config.system_name}",
     ),
+    "lpar-vscsi-client": ArmVerdict(
+        "lpar-vscsi-client",
+        True,
+        "configuration validated; at least one VIOS on the selected system required",
+        (
+            (
+                "one inactive OS400 partition {lpar_config.NAME_PREFIX}<8 hex>: explicit "
+                "console_slot=hmc, max_virtual_slots=10 and one vSCSI client record naming "
+                "the first listed VIOS; verify the saved-profile record; apply the profile; "
+                "delete matching-token fixture"
+            ),
+            (
+                "no VIOS server adapter, mapping or disk, no activation, foreign partition or "
+                "retry; pairing stays unproven; independent recovery and resource comparison "
+                "required"
+            ),
+        ),
+        "{config.system_name}",
+    ),
     "lpar-linux-roles": ArmVerdict(
         "lpar-linux-roles",
         True,
