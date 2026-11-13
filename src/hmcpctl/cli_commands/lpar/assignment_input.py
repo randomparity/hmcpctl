@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import typer
 from pydantic import TypeAdapter, ValidationError
@@ -84,6 +85,17 @@ SERIAL_INPUT_HELP = (
 Record = TypeVar("Record")
 
 
+_UNKNOWN_KEY_ERRORS = frozenset({"extra_forbidden", "unexpected_keyword_argument"})
+
+
+def _error_location(item: Mapping[str, Any]) -> str:
+    """Name where validation failed; an unknown key is caller text, so name its type."""
+    parts = [str(part) for part in item["loc"]]
+    if item["type"] in _UNKNOWN_KEY_ERRORS:
+        parts[-1:] = [item["type"]]
+    return ".".join(parts) or item["type"]
+
+
 def _load_inline_records(
     value: str | None, option: str, records: TypeAdapter[tuple[Record, ...]]
 ) -> tuple[Record, ...]:
@@ -104,10 +116,7 @@ def _load_inline_records(
     try:
         return records.validate_python(payload)
     except ValidationError as error:
-        details = ", ".join(
-            ".".join(str(part) for part in item["loc"]) or item["type"]
-            for item in error.errors()
-        )
+        details = ", ".join(_error_location(item) for item in error.errors())
         usage_error(f"Invalid {option}: {details}")
 
 

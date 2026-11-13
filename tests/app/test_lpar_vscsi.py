@@ -162,3 +162,20 @@ async def test_real_mcp_schema_and_round_trip(operation):
                     tool, {**arguments, "virtual_scsi_adapters": [bad]}
                 )
         operation.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "option", ["--virtual-scsi-adapters", "--virtual-serial-adapters"]
+)
+def test_cli_unknown_key_name_is_not_echoed(operation, option):
+    record = (
+        RECORD
+        if option == "--virtual-scsi-adapters"
+        else {"local_slot": 2, "role": "server", "is_required": False}
+    )
+    payload = json.dumps([{**record, "private-key-name": 1}])
+    result = cli("--max-virtual-slots", "8", option, payload, yes=False)
+    assert result.exit_code == 2
+    assert "private-key-name" not in result.output
+    assert "unexpected_keyword_argument" in result.output
+    operation.assert_not_awaited()
