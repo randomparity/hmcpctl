@@ -3,8 +3,8 @@
   "operations": [
     {
       "operation": "inventory.logical",
-      "arm": "round2",
-      "scenario": "st1-logical-inventory"
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
     },
     {
       "operation": "lpar.decommission",
@@ -18,8 +18,8 @@
     },
     {
       "operation": "lpar.plan",
-      "arm": "round2",
-      "scenario": "st1-lpar-plan"
+      "arm": "logical-workflow",
+      "scenario": "st73-logical-workflow"
     },
     {
       "operation": "lpar.power",
