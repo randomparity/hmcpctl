@@ -818,6 +818,23 @@
           "hardware_family": "POWER9",
           "schema_version": "(not set)",
           "closure_fingerprint": "c2f1d9e5a65ced93173c4872e502777bef7361f7fbb780148ab989263bd2b815"
+        },
+        {
+          "id": "st73-hmc-inspect-lpar",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "reports-the-change-inactive",
+            "reports-the-owned-mapping"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "e7cef8ce8d20b9583f69455d04b06200ef0d0e46ad62662c739a0a58748cb7d4"
         }
       ]
     },
@@ -861,6 +878,25 @@
           "hardware_family": "POWER9",
           "schema_version": "(not set)",
           "closure_fingerprint": "52727ad774832a91f1d3390813c7656cbf45cc5f2bf4bba7cbbff0eb480da8e8"
+        },
+        {
+          "id": "st73-hmc-inventory",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "boundary-system-listed",
+            "run-partition-listed",
+            "partitions-belong-to-system",
+            "system-sources-read"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "5474d31d5e186ec1e529adb3fe78ef7558a28004d571a47d1f372f3355a201a3"
         }
       ]
     },
@@ -923,7 +959,25 @@
         ],
         "missing_scope": []
       },
-      "evidence": []
+      "evidence": [
+        {
+          "id": "st73-hmc-plan-lpar",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "plan-outcome-consistent",
+            "plan-targets-boundary-system"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "502f3bb7c0638d7532de0f6941427d080273709278210604bc699388cb36cc6f"
+        }
+      ]
     },
     {
       "operation": "lpar.capture_console",
@@ -1312,7 +1366,7 @@
               },
               {
                 "name": "creation_memory.mem_expansion",
-                "constraint": "optional finite exact JSON number zero or inclusive 1–10 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
+                "constraint": "optional finite exact JSON number zero or inclusive 1\u201310 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
               },
               {
                 "name": "creation_memory.mem_mode",
@@ -1320,7 +1374,7 @@
               },
               {
                 "name": "creation_memory.mem_weight",
-                "constraint": "optional strict integer 0–255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
+                "constraint": "optional strict integer 0\u2013255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
               },
               {
                 "name": "creation_memory.primary_paging_vios_id",
@@ -4915,6 +4969,24 @@
           "hardware_family": "POWER9",
           "schema_version": "(not set)",
           "closure_fingerprint": "cb39ebde524c8c062558982ccbb7d0a5813197c6709d1d0b9e61deeb5b8e1e73"
+        },
+        {
+          "id": "st73-hmc-power-lpar",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "start-completed-activated",
+            "started-with-the-change",
+            "stop-immediate-completed-not-activated"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "8300adbf5d363c260ee39431fba5e8a3d1b52f35fe2ed50c5ae9a3d8b226b75d"
         }
       ]
     },
@@ -5035,6 +5107,29 @@
           "hardware_family": "POWER9",
           "schema_version": "(not set)",
           "closure_fingerprint": "f94b7a5577b76c4ce4a23748de82f3f9204c9cba1c27f4fd5b51620431b70a14"
+        },
+        {
+          "id": "st73-hmc-decommission-lpar",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "dry-run-inventoried",
+            "dry-run-changed-nothing",
+            "resource-deleted",
+            "workflow-completed",
+            "lpar-name-absent",
+            "storage-mapping-absent",
+            "owned-disk-deleted",
+            "shared-storage-retained"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "18aa34537816432bad4c9ff4564bb709620e47596b7bd442ae8eb6e058047490"
         }
       ]
     },
@@ -5194,6 +5289,27 @@
           "hardware_family": "POWER9",
           "schema_version": "(not set)",
           "closure_fingerprint": "f70d04e37b7b761d69aecea9482195a20fd69329bb78419eadd3c80dfe4797fe"
+        },
+        {
+          "id": "st73-hmc-provision-lpar",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "workflow-completed",
+            "ownership-stamped",
+            "left-not-activated",
+            "storage-mapping-listed",
+            "last-activated-is-default",
+            "adapters-after-apply"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "75a78ab0ae0a347d96f1f8d360402347a50f60cc891bc4c3c913d3b9fd38feac"
         }
       ]
     },
@@ -5403,7 +5519,7 @@
               },
               {
                 "name": "creation_memory.mem_expansion",
-                "constraint": "optional finite exact JSON number zero or inclusive 1–10 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
+                "constraint": "optional finite exact JSON number zero or inclusive 1\u201310 without two-place rounding; numeric strings and bool refused; zero needs no AME enablement capability; positive requires selected-system ActiveMemoryExpansionCapable; saved AME accepted for LPAR including IBM i and VIOS without deriving AIX intent; AIX-only runtime compression guidance is separate; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_expansion, p11:mksyscfg:partition-create:mem_expansion"
               },
               {
                 "name": "creation_memory.mem_mode",
@@ -5411,7 +5527,7 @@
               },
               {
                 "name": "creation_memory.mem_weight",
-                "constraint": "optional strict integer 0–255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
+                "constraint": "optional strict integer 0\u2013255; explicit shared mode required; zero retained; omission preserves defaults; native single create, bounded 65536-byte record; independent saved/current configured facts, unavailable => incomplete; no runtime, activation, replay or rollback proof; source bindings p10:mksyscfg:partition-create:mem_weight, p11:mksyscfg:partition-create:mem_weight"
               },
               {
                 "name": "creation_memory.primary_paging_vios_id",
@@ -5557,7 +5673,25 @@
         ],
         "missing_scope": []
       },
-      "evidence": []
+      "evidence": [
+        {
+          "id": "st73-hmc-invoke-tool",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "dispatches-a-read-as-direct",
+            "dispatched-mutation-meets-the-hold"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "fab31ad44cafc23fc57e0b8aea01531daffc72091b7a07fe4ade2da1133de44f"
+        }
+      ]
     },
     {
       "operation": "config.list_hosts",
@@ -6611,7 +6745,24 @@
           }
         ]
       },
-      "evidence": []
+      "evidence": [
+        {
+          "id": "st73-hmc-reconfigure-lpar",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "inactive-change-classified-profile"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "d4ce15496e4562225005c0d84af2e5947f57858af970582910757af12e6c05d5"
+        }
+      ]
     },
     {
       "operation": "lpar.prepare_host_handoff",
@@ -6672,7 +6823,28 @@
         ],
         "missing_scope": []
       },
-      "evidence": []
+      "evidence": [
+        {
+          "id": "st73-hmc-prepare-host-handoff",
+          "channel": "live",
+          "result": "passed",
+          "scenario": "st73-logical-workflow",
+          "observed_at": "2026-11-13T08:21:17Z",
+          "cleanup": "passed",
+          "assertions": [
+            "hold-placed",
+            "document-withholds-hold-id",
+            "repeat-returns-the-hold",
+            "hold-refuses-a-mutation",
+            "release-drops-the-hold"
+          ],
+          "tested_commit": "23d1fc675f3bbf5ed8a25ebc15eae7a32ddf5aef",
+          "hmc_release": "V10R3M1060",
+          "hardware_family": "POWER9",
+          "schema_version": "(not set)",
+          "closure_fingerprint": "5be3e3782247bf876deb27453e40c82e0dfc9aa855e1de12bc9cdd1f45d03229"
+        }
+      ]
     }
   ]
 }
