@@ -40,7 +40,7 @@ UUID or an exact name; a name matching 0 or more than 1 volume raises.
 
 | Operation | Function | Effect | Checks before any write |
 |---|---|---|---|
-| `pmem.list_volumes` | `list_persistent_memory_volumes(hmc, system, lpar=None)` | read | with `lpar`: GET `?target=<PartitionID>`; every returned volume's `partition_id` must equal it |
+| `pmem.list_volumes` | `list_persistent_memory_volumes(hmc, system, lpar=None)` | read | with `lpar`: the system collection filtered to the partition's `PartitionID` (a typed-Accept `?target=` was observed only on an empty collection) |
 | `pmem.get_volume` | `get_persistent_memory_volume(hmc, system, volume)` | read | GET by UUID; a name resolves through the collection |
 | `pmem.create_volume` | `create_persistent_memory_volume(hmc, system, lpar, name, size_mib, affinity=False, ownership_override=False)` | mutate | ADR 0092 guard; system `PersistentMemoryCapable` true and `dram` in `SupportedPersistentMemoryDeviceTypes`; `size_mib` a positive multiple of `DramPersistentMemoryVolumeBlockSize`; partition type `AIX/Linux`, state `not activated`; `CurrentDramPersistentMemoryVolumes` < `MaximumDramPersistentMemoryVolumes`; name valid and unused on the system |
 | `pmem.rename_volume` | `rename_persistent_memory_volume(hmc, system, lpar, volume, new_name, ownership_override=False)` | mutate | ADR 0092 guard; volume assigned to `lpar`; new name valid and unused |
@@ -63,9 +63,8 @@ affinity; rename verifies the UUID carries the new name; delete verifies the
 UUID is absent from the collection. A readback that does not yet show the
 change reports `mismatch` with a warning that an accepted (202) write may still
 be completing, so the caller re-reads before retrying. The transport is five
-`SystemsMixin` client methods over the captured paths: the collection with an
-optional `?target=<partition id>`, the single volume, PUT create, POST rename and
-DELETE.
+`SystemsMixin` client methods over the captured paths: the collection, the single
+volume, PUT create, POST rename and DELETE.
 
 MCP tools in `server_tools/lpar/pmem.py`: `hmc_list_persistent_memory_volumes`
 (`limit`), `hmc_get_persistent_memory_volume`,
@@ -109,7 +108,7 @@ pmem-rename|pmem-delete`; mutations confirm unless `--yes`; delete also requires
   fallible peer.
 - Controls: names validated by `validate_volume_name` and XML-escaped by
   `escapes_string_arguments`; UUIDs through `_request_with_uuid_path_arguments`;
-  `?target=` takes an integer read from the HMC, never caller text; sizes are
+  the partition filter compares an integer read from the HMC; sizes are
   strict integers; parsing fails closed; list output is bounded by `limit`.
 - Out of scope: HMC-side authorization of the REST user (HMC owns it).
 
@@ -127,7 +126,7 @@ Each entry is `focused-test` unless marked.
 5. Rename and delete refuse a volume assigned to another partition, an
    unassigned volume, an ambiguous name; delete refuses without
    `acknowledge_data_loss` and on an active partition.
-6. A `?target=` response carrying a foreign partition id raises.
+6. Listing by partition returns only volumes whose `AssociatedPartitionId` matches.
 7. Tool security: effects, operations and target kinds
    (`tests/app/test_tool_security.py`); CLI mirrors and confirmation
    (`tests/app/test_cli_commands.py`); ADR 0092 inventory

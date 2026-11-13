@@ -393,20 +393,18 @@ class SystemsMixin:
     # version pin is omitted on writes, as for every other create.
 
     async def list_persistent_memory_volumes(
-        self: SystemsClient, system_uuid: str, partition_id: int | None = None
+        self: SystemsClient, system_uuid: str
     ) -> list[dict[str, Any]]:
-        """Every volume on a system, or those ``?target=`` assigns to a partition ID.
+        """Every volume on a system; an empty collection answers HTTP 204.
 
-        An empty collection answers HTTP 204, returned as an empty list.
+        The documented ``?target=<partition id>`` filter is not used: with the
+        typed Accept this client sends, it was observed only on an empty
+        collection, so callers filter on ``AssociatedPartitionId`` instead.
         """
         _reject_non_uuid_path_argument("system_uuid", system_uuid)
         path = (
             f"/rest/api/uom/ManagedSystem/{system_uuid}/VirtualPersistentMemoryVolume"
         )
-        if partition_id is not None:
-            if type(partition_id) is not int or partition_id < 0:
-                raise ValueError("partition_id must be a non-negative integer")
-            path += f"?target={partition_id}"
         xml = await self._get(path, "VirtualPersistentMemoryVolume")
         return _parse_feed(xml, path) if xml else []
 

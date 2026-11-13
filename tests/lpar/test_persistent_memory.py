@@ -105,7 +105,7 @@ class FakeHMC:
             raise self.read_error_after_write
 
     async def list_persistent_memory_volumes(
-        self, system_uuid: str, partition_id: int | None = None
+        self, system_uuid: str
     ) -> list[dict[str, Any]]:
         self._read_guard()
         return list(self.volumes)
@@ -157,23 +157,16 @@ def guard():
 
 
 @pytest.mark.asyncio
-async def test_client_lists_target_query_and_reads_empty_collection(mock_hmc):
+async def test_client_lists_collection_and_reads_empty_collection(mock_hmc):
     feed = (FIXTURES / "volume-feed.xml").read_text()
-    targeted = mock_hmc.get(COLLECTION, params={"target": "1"}).mock(
-        return_value=httpx.Response(200, text=feed)
+    route = mock_hmc.get(COLLECTION).mock(
+        side_effect=[httpx.Response(200, text=feed), httpx.Response(204)]
     )
-    empty = mock_hmc.get(COLLECTION, params={}).mock(return_value=httpx.Response(204))
     async with HMCClient(make_config()) as client:
-        assert len(await client.list_persistent_memory_volumes(SYSTEM, 1)) == 1
+        assert len(await client.list_persistent_memory_volumes(SYSTEM)) == 1
         assert await client.list_persistent_memory_volumes(SYSTEM) == []
-    assert targeted.called and empty.called
-
-
-@pytest.mark.asyncio
-async def test_client_rejects_negative_partition_id(mock_hmc):
-    async with HMCClient(make_config()) as client:
-        with pytest.raises(ValueError, match="partition_id"):
-            await client.list_persistent_memory_volumes(SYSTEM, -1)
+    assert route.call_count == 2
+    assert all(not call.request.url.query for call in route.calls)
 
 
 @pytest.mark.asyncio
@@ -214,21 +207,17 @@ async def test_client_refuses_non_uuid_volume(mock_hmc):
 
 
 @pytest.mark.asyncio
-async def test_list_by_partition_returns_its_volumes():
-    hmc = FakeHMC([_volume_entry()])
+async def test_list_by_partition_keeps_only_its_volumes():
+    other = _volume_entry(
+        Uuid="00000009-ABCD-4EF0-8ABC-000000000009", AssociatedPartitionId="9"
+    )
+    unassigned = _volume_entry(
+        Uuid="00000008-ABCD-4EF0-8ABC-000000000008", AssociatedPartitionId=None
+    )
+    hmc = FakeHMC([_volume_entry(), other, unassigned])
     with patch.object(persistent, "resolve_lpar_uuid", AsyncMock(return_value=LPAR)):
         volumes = await list_persistent_memory_volumes(hmc, SYSTEM, "example-lpar")
-    assert [v.name for v in volumes] == ["example-vol"]
-
-
-@pytest.mark.asyncio
-async def test_list_by_partition_rejects_foreign_volume():
-    hmc = FakeHMC([_volume_entry(AssociatedPartitionId="9")])
-    with (
-        patch.object(persistent, "resolve_lpar_uuid", AsyncMock(return_value=LPAR)),
-        pytest.raises(ValueError, match="assigned elsewhere"),
-    ):
-        await list_persistent_memory_volumes(hmc, SYSTEM, "example-lpar")
+    assert [v.uuid for v in volumes] == [VOLUME]
 
 
 @pytest.mark.asyncio
@@ -584,3 +573,27 @@ async def test_failed_create_and_rename_report_their_readback(guard):
     rename = await rename_persistent_memory_volume(renamed, SYSTEM, "lp", VOLUME, "x")
     assert "0 volume(s)" in create.warnings[-1]
     assert "'example-vol'" in rename.warnings[-1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["create", "rename", "delete"])
+async def test_ownership_refusal_prevents_every_write(action):
+    hmc = FakeHMC([_volume_entry()])
+    refusal = AsyncMock(side_effect=PermissionError("foreign ownership token"))
+    calls = {
+        "create": lambda: create_persistent_memory_volume(
+            hmc, SYSTEM, "lp", "new", 256
+        ),
+        "rename": lambda: rename_persistent_memory_volume(
+            hmc, SYSTEM, "lp", VOLUME, "x"
+        ),
+        "delete": lambda: delete_persistent_memory_volume(
+            hmc, SYSTEM, "lp", VOLUME, acknowledge_data_loss=True
+        ),
+    }
+    with (
+        patch.object(persistent, "resolve_and_authorize_lpar_mutation", refusal),
+        pytest.raises(PermissionError),
+    ):
+        await calls[action]()
+    assert hmc.writes == []

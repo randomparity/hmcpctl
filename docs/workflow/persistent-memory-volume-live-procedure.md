@@ -52,10 +52,9 @@ and compare again. Stop and report if the sets still differ.
 
 ## Gaps
 
-- A `?target=` query that returned a volume was observed only with an untyped
-  `Accept`; `hmcpctl` sends the typed `VirtualPersistentMemoryVolume` Accept, which was
-  observed only on an empty collection. If `pmem-list --lpar` prints `[]` right after a
-  verified `pmem-create`, the typed query is the cause; record it.
+- The documented `?target=` partition filter is not used. With the typed `Accept`
+  `hmcpctl` sends, it was observed only on an empty collection, so `pmem-list --lpar`
+  filters the system collection by `AssociatedPartitionId` instead.
 - Create and delete on an active partition are refused by this package before any
   write. The HMC's own refusal was not captured.
 - Rename on an active partition is not refused here. The reference states no rule,

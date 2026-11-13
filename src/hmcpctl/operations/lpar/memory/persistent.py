@@ -81,10 +81,8 @@ def _count(container: object, field: str, subject: str) -> int:
     return int(value)
 
 
-async def _volumes(
-    hmc: HMCClient, system_uuid: str, partition_id: int | None = None
-) -> list[PersistentMemoryVolume]:
-    entries = await hmc.list_persistent_memory_volumes(system_uuid, partition_id)
+async def _volumes(hmc: HMCClient, system_uuid: str) -> list[PersistentMemoryVolume]:
+    entries = await hmc.list_persistent_memory_volumes(system_uuid)
     return [parse_volume(entry) for entry in entries]
 
 
@@ -269,14 +267,11 @@ async def list_persistent_memory_volumes(
         hmc, lpar_name_or_uuid, system_name_or_uuid=system_uuid
     )
     partition = await _partition(hmc, lpar_uuid)
-    volumes = await _volumes(hmc, system_uuid, partition.partition_id)
-    foreign = [v.uuid for v in volumes if v.partition_id != partition.partition_id]
-    if foreign:
-        raise ValueError(
-            f"The HMC answered the partition ID {partition.partition_id} query with "
-            f"volumes assigned elsewhere: {', '.join(foreign)}"
-        )
-    return volumes
+    return [
+        volume
+        for volume in await _volumes(hmc, system_uuid)
+        if volume.partition_id == partition.partition_id
+    ]
 
 
 async def get_persistent_memory_volume(
