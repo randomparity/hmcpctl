@@ -47,8 +47,8 @@
     {
       "operation": "boot_order.clear",
       "implementation": "partial",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-08T18:52:55Z"
     },
     {
@@ -61,8 +61,8 @@
     {
       "operation": "boot_order.set",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-08T18:52:55Z"
     },
     {
@@ -145,9 +145,9 @@
     {
       "operation": "inventory.logical",
       "implementation": "implemented",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-06T20:36:49Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "io_slot.list",
@@ -159,22 +159,22 @@
     {
       "operation": "job.get",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:44:58Z"
     },
     {
       "operation": "job.wait",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:45:01Z"
     },
     {
       "operation": "lpar.capture_console",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
@@ -208,22 +208,22 @@
     {
       "operation": "lpar.create",
       "implementation": "partial",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
       "operation": "lpar.decommission",
       "implementation": "implemented",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-09T16:12:54Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.delete",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
@@ -250,8 +250,8 @@
     {
       "operation": "lpar.get",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:29:06Z"
     },
     {
@@ -313,8 +313,8 @@
     {
       "operation": "lpar.get_state",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:44:54Z"
     },
     {
@@ -327,9 +327,9 @@
     {
       "operation": "lpar.inspect",
       "implementation": "implemented",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-06T20:36:43Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.list",
@@ -355,8 +355,8 @@
     {
       "operation": "lpar.list_refcodes",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:45:03Z"
     },
     {
@@ -418,9 +418,9 @@
     {
       "operation": "lpar.plan",
       "implementation": "implemented",
-      "verification": "unevidenced",
+      "verification": "current",
       "reason": null,
-      "observed_at": null
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.plan_memopt_scores",
@@ -432,37 +432,37 @@
     {
       "operation": "lpar.power",
       "implementation": "implemented",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-07T02:44:34Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.power_off",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
       "operation": "lpar.power_on",
       "implementation": "partial",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T22:11:29Z"
     },
     {
       "operation": "lpar.prepare_host_handoff",
       "implementation": "implemented",
-      "verification": "unevidenced",
+      "verification": "current",
       "reason": null,
-      "observed_at": null
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.reconfigure",
       "implementation": "partial",
-      "verification": "unevidenced",
+      "verification": "current",
       "reason": null,
-      "observed_at": null
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "lpar.remote_restart",
@@ -523,8 +523,8 @@
     {
       "operation": "lpar.summary",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:31:12Z"
     },
     {
@@ -796,15 +796,15 @@
     {
       "operation": "pcie.assign_dedicated_slot",
       "implementation": "partial",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:40:52Z"
     },
     {
       "operation": "pcie.list_dedicated_slots",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:35:24Z"
     },
     {
@@ -831,8 +831,8 @@
     {
       "operation": "pcie.unassign_dedicated_slot",
       "implementation": "partial",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:39:53Z"
     },
     {
@@ -845,9 +845,9 @@
     {
       "operation": "pcm.set_preferences",
       "implementation": "implemented",
-      "verification": "unevidenced",
-      "reason": null,
-      "observed_at": null
+      "verification": "stale",
+      "reason": "closure-changed",
+      "observed_at": "2026-10-14T14:30:31Z"
     },
     {
       "operation": "permissions.describe",
@@ -866,9 +866,9 @@
     {
       "operation": "provision.lpar",
       "implementation": "partial",
-      "verification": "stale",
-      "reason": "closure-changed",
-      "observed_at": "2026-10-07T02:44:34Z"
+      "verification": "current",
+      "reason": null,
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "remote_access.configure",
@@ -1013,8 +1013,8 @@
     {
       "operation": "system.get",
       "implementation": "implemented",
-      "verification": "current",
-      "reason": null,
+      "verification": "stale",
+      "reason": "closure-changed",
       "observed_at": "2026-10-12T21:28:22Z"
     },
     {
@@ -1139,9 +1139,9 @@
     {
       "operation": "tools.invoke",
       "implementation": "implemented",
-      "verification": "unevidenced",
+      "verification": "current",
       "reason": null,
-      "observed_at": null
+      "observed_at": "2026-11-13T08:21:17Z"
     },
     {
       "operation": "tools.search",
