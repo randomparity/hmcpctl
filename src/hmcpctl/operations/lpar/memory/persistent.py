@@ -129,6 +129,13 @@ def _select(
     return matches[0]
 
 
+def _same_volume(
+    volumes: list[PersistentMemoryVolume], target: PersistentMemoryVolume
+) -> PersistentMemoryVolume | None:
+    wanted = target.uuid.casefold()
+    return next((v for v in volumes if v.uuid.casefold() == wanted), None)
+
+
 def _require_assigned(volume: PersistentMemoryVolume, partition: _Partition) -> None:
     if volume.partition_id is None:
         raise ValueError(
@@ -219,7 +226,9 @@ def _unknown_outcome(
     requested: dict[str, object],
     error: HMCError,
     observed: PersistentMemoryVolume | None,
+    readback: str,
 ) -> PersistentMemoryVolumeResult:
+    """A failed write; *readback* says what the follow-up read showed, or that it failed."""
     return PersistentMemoryVolumeResult(
         "write-outcome-unknown",
         requested,
@@ -229,8 +238,13 @@ def _unknown_outcome(
                 f"Write did not confirm completion: {error}. "
                 "Inspect before retrying; no replay performed."
             ),
+            readback,
         ),
     )
+
+
+def _failed_readback(error: HMCError | ValueError) -> str:
+    return f"The readback after the failed write also failed: {error}"
 
 
 def _unreadable(
@@ -365,9 +379,16 @@ async def create_persistent_memory_volume(
     except HMCError as error:
         try:
             matches = await _readback_by_name(hmc, system_uuid, name)
-        except (HMCError, ValueError):
-            matches = []
-        return _unknown_outcome(requested, error, matches[0] if matches else None)
+        except (HMCError, ValueError) as read_error:
+            return _unknown_outcome(
+                requested, error, None, _failed_readback(read_error)
+            )
+        return _unknown_outcome(
+            requested,
+            error,
+            matches[0] if matches else None,
+            f"Readback lists {len(matches)} volume(s) with the requested name.",
+        )
     try:
         matches = await _readback_by_name(hmc, system_uuid, name)
     except (HMCError, ValueError) as error:
@@ -427,9 +448,13 @@ async def rename_persistent_memory_volume(
     except HMCError as error:
         try:
             observed = await get_persistent_memory_volume(hmc, system_uuid, target.uuid)
-        except (HMCError, ValueError):
-            observed = None
-        return _unknown_outcome(requested, error, observed)
+        except (HMCError, ValueError) as read_error:
+            return _unknown_outcome(
+                requested, error, None, _failed_readback(read_error)
+            )
+        return _unknown_outcome(
+            requested, error, observed, f"Readback shows the name {observed.name!r}."
+        )
     try:
         observed = await get_persistent_memory_volume(hmc, system_uuid, target.uuid)
     except (HMCError, ValueError) as error:
@@ -473,20 +498,29 @@ async def delete_persistent_memory_volume(
     except HMCError as error:
         try:
             remaining = await _volumes(hmc, system_uuid)
-        except (HMCError, ValueError):
-            remaining = []
-        still = [v for v in remaining if v.uuid == target.uuid]
-        return _unknown_outcome(requested, error, still[0] if still else None)
+        except (HMCError, ValueError) as read_error:
+            return _unknown_outcome(
+                requested, error, None, _failed_readback(read_error)
+            )
+        still = _same_volume(remaining, target)
+        return _unknown_outcome(
+            requested,
+            error,
+            still,
+            "Readback still lists the volume."
+            if still
+            else "Readback no longer lists the volume; the delete may have taken effect.",
+        )
     try:
         remaining = await _volumes(hmc, system_uuid)
     except (HMCError, ValueError) as error:
         return _unreadable(requested, error)
-    still = [v for v in remaining if v.uuid.casefold() == target.uuid.casefold()]
+    still = _same_volume(remaining, target)
     if still:
         return PersistentMemoryVolumeResult(
             "mismatch",
             requested,
-            still[0],
+            still,
             ("Readback still lists the volume.", _PENDING),
         )
     return PersistentMemoryVolumeResult("verified", requested, None, ())

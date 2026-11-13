@@ -553,3 +553,34 @@ async def test_failed_write_with_failed_readback_reports_no_observation(guard):
     assert [(r.status, r.observed) for r in results] == [
         ("write-outcome-unknown", None)
     ] * 3
+    assert all("also failed" in r.warnings[-1] for r in results)
+
+
+@pytest.mark.asyncio
+async def test_failed_delete_reports_whether_the_volume_is_gone(guard):
+    gone = FakeHMC([_volume_entry()])
+
+    async def delete_then_fail(_system: str, _volume: str) -> None:
+        gone.volumes = []
+        raise HMCError("DELETE failed", 500, "")
+
+    gone.delete_persistent_memory_volume = delete_then_fail
+    result = await delete_persistent_memory_volume(
+        gone, SYSTEM, "lp", VOLUME.lower(), acknowledge_data_loss=True
+    )
+    assert result.status == "write-outcome-unknown"
+    assert "no longer lists" in result.warnings[-1]
+
+
+@pytest.mark.asyncio
+async def test_failed_create_and_rename_report_their_readback(guard):
+    created = FakeHMC()
+    created.write_error = HMCError("PUT failed", 500, "")
+    renamed = FakeHMC([_volume_entry()])
+    renamed.write_error = HMCError("POST failed", 500, "")
+    create = await create_persistent_memory_volume(
+        created, SYSTEM, "lp", "new-vol", 256
+    )
+    rename = await rename_persistent_memory_volume(renamed, SYSTEM, "lp", VOLUME, "x")
+    assert "0 volume(s)" in create.warnings[-1]
+    assert "'example-vol'" in rename.warnings[-1]
