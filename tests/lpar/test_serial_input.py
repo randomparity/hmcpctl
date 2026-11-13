@@ -340,3 +340,28 @@ async def test_profile_reader_optional_collection_bound(monkeypatch, options):
         "lssyscfg -r prof -m system --filter lpar_names=new,profile_names=default_profile",
         **expected,
     )
+
+
+def test_declared_family_is_not_foreign_configuration():
+    record = profile_record(virtual_scsi_adapters="2/client/7//20/0")
+    assert lpar_serial.parse_serial_profile(
+        record, "new", 7, "default_profile"
+    ).other_virtual_configuration
+    parsed = lpar_serial.parse_serial_profile(
+        record,
+        "new",
+        7,
+        "default_profile",
+        declared=frozenset({"virtual_scsi_adapters"}),
+    )
+    assert parsed.other_virtual_configuration is False
+    mixed = profile_record(
+        virtual_scsi_adapters="2/client/7//20/0", virtual_fc_adapters="opaque"
+    )
+    assert lpar_serial.parse_serial_profile(
+        mixed,
+        "new",
+        7,
+        "default_profile",
+        declared=frozenset({"virtual_scsi_adapters"}),
+    ).other_virtual_configuration

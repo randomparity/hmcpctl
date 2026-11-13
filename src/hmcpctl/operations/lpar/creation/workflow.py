@@ -35,7 +35,9 @@ async def create_lpar(
     validate_lpar_creation(creation)
     start_requested = creation.start_settings.requested()
     memory_requested = bool(creation.creation_memory.pairs())
-    serial_requested = bool(creation.virtual_serial_adapters)
+    serial_requested = bool(
+        creation.virtual_serial_adapters or creation.virtual_scsi_adapters
+    )
     layout_requested = bool(creation.memory_layout.pairs())
     affinity_requested = creation.affinity_group_id is not None
     if creation.creation_memory.mem_mode == "shared" and (

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import TypeVar
 
 import typer
 from pydantic import TypeAdapter, ValidationError
@@ -13,6 +14,7 @@ from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
 from ...documents.lpar_serial import SERIAL_INPUT_BYTES, VirtualSerialAdapter
+from ...documents.lpar_vscsi import VirtualScsiClientAdapter
 from ...operations.lpar.assignments import LparPcieAssignments
 from ..output import terminal_field, usage_error
 
@@ -79,29 +81,63 @@ SERIAL_INPUT_HELP = (
 )
 
 
-def load_virtual_serial_adapters(value: str | None) -> tuple[VirtualSerialAdapter, ...]:
-    """Decode bounded inline serial JSON without reflecting untrusted values."""
+Record = TypeVar("Record")
+
+
+def _load_inline_records(
+    value: str | None, option: str, records: TypeAdapter[tuple[Record, ...]]
+) -> tuple[Record, ...]:
+    """Decode a bounded inline JSON array without reflecting untrusted values."""
     if value is None:
         return ()
     if (
         len(value) > SERIAL_INPUT_BYTES
         or len(value.encode("utf-8")) > SERIAL_INPUT_BYTES
     ):
-        usage_error("Invalid --virtual-serial-adapters: inline JSON exceeds 64 KiB")
+        usage_error(f"Invalid {option}: inline JSON exceeds 64 KiB")
     try:
         payload = json.loads(value)
     except (ValueError, RecursionError):
-        usage_error("Invalid --virtual-serial-adapters: expected an inline JSON array")
+        usage_error(f"Invalid {option}: expected an inline JSON array")
     if not isinstance(payload, list):
-        usage_error("Invalid --virtual-serial-adapters: expected an inline JSON array")
+        usage_error(f"Invalid {option}: expected an inline JSON array")
     try:
-        return TypeAdapter(tuple[VirtualSerialAdapter, ...]).validate_python(payload)
+        return records.validate_python(payload)
     except ValidationError as error:
         details = ", ".join(
             ".".join(str(part) for part in item["loc"]) or item["type"]
             for item in error.errors()
         )
-        usage_error(f"Invalid --virtual-serial-adapters: {details}")
+        usage_error(f"Invalid {option}: {details}")
+
+
+def load_virtual_serial_adapters(value: str | None) -> tuple[VirtualSerialAdapter, ...]:
+    """Decode bounded inline serial JSON without reflecting untrusted values."""
+    return _load_inline_records(
+        value,
+        "--virtual-serial-adapters",
+        TypeAdapter(tuple[VirtualSerialAdapter, ...]),
+    )
+
+
+VSCSI_INPUT_HELP = (
+    "Inline JSON array (64 KiB) of vSCSI client records: local_slot, remote_slot, "
+    "is_required boolean, and exactly one of remote_lpar_id or remote_lpar_name naming "
+    "an owned VIOS on the same system. Explicit --max-virtual-slots must exceed local "
+    "slots >=2, unique across serial and vSCSI records. No VIOS server adapter or "
+    "mapping is created; pairing is reported unproven."
+)
+
+
+def load_virtual_scsi_adapters(
+    value: str | None,
+) -> tuple[VirtualScsiClientAdapter, ...]:
+    """Decode bounded inline vSCSI client JSON without reflecting untrusted values."""
+    return _load_inline_records(
+        value,
+        "--virtual-scsi-adapters",
+        TypeAdapter(tuple[VirtualScsiClientAdapter, ...]),
+    )
 
 
 def load_creation_memory(

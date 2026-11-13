@@ -16,6 +16,14 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 
 ## [Unreleased]
 
+### Added
+
+- `hmc_create_lpar` and `hmcpctl lpars create --virtual-scsi-adapters` accept typed vSCSI
+  client adapter records for AIX/Linux and IBM i partitions (#1980, ADR 0376). Each record
+  names one ownership-authorized VIOS on the same system and is written in the single
+  creation record. The result compares the saved profile record by record and states that no
+  VIOS server adapter or mapping was created and that pairing is unproven.
+
 ## [0.2.0] - 2026-11-13
 
 0.2.0 ships the logical LPAR workflow through the policy-filtered primary MCP catalog

@@ -57,17 +57,33 @@ def _profile_attributes(record: str) -> dict[str, str]:
     return values
 
 
-def parse_serial_profile(
+def bound_profile_attributes(
     record: str, name: str, partition_id: int, profile_name: str
-) -> SerialProfile:
-    """Bind complete native CSV to its requested profile and partition identity."""
+) -> dict[str, str]:
+    """Parse complete native CSV and bind it to the requested profile identity."""
     values = _profile_attributes(record)
     if (
         values.get("name") != profile_name
         or values.get("lpar_name") != name
         or _decimal(values.get("lpar_id", ""), "lpar_id") != partition_id
     ):
-        raise ValueError("serial profile identity does not match contained partition")
+        raise ValueError("profile identity does not match contained partition")
+    return values
+
+
+def parse_serial_profile(
+    record: str,
+    name: str,
+    partition_id: int,
+    profile_name: str,
+    declared: frozenset[str] = frozenset(),
+) -> SerialProfile:
+    """Bind complete native CSV to its requested profile and partition identity.
+
+    ``declared`` names other virtual families this creation requested; their owners
+    verify them, so they do not count as foreign configuration here.
+    """
+    values = bound_profile_attributes(record, name, partition_id, profile_name)
     maximum = _decimal(values.get("max_virtual_slots", ""), "maximum")
     if maximum < 2:
         raise ValueError("serial profile maximum cannot contain reserved slots")
@@ -100,12 +116,18 @@ def parse_serial_profile(
             "virtual_scsi_adapters",
             "vnic_adapters",
         )
+        if key not in declared
     )
     return SerialProfile(name, partition_id, profile_name, maximum, records, other)
 
 
 async def read_serial_profile(
-    config: HMCConfig, system: str, name: str, partition_id: int, profile_name: str
+    config: HMCConfig,
+    system: str,
+    name: str,
+    partition_id: int,
+    profile_name: str,
+    declared: frozenset[str] = frozenset(),
 ) -> SerialProfile:
     """Use the existing profile reader, then reject unbound or malformed evidence."""
     return parse_serial_profile(
@@ -119,4 +141,5 @@ async def read_serial_profile(
         name,
         partition_id,
         profile_name,
+        declared,
     )

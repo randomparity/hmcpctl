@@ -16,6 +16,7 @@ from ..documents.lpar_memory_layout import LparMemoryLayout
 from ..documents.lpar_security_policy import LparSecurityPolicy
 from ..documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ..documents.lpar_start import LparStartSettings
+from ..documents.lpar_vscsi import VirtualScsiClientAdapter, validate_vscsi_input
 from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
@@ -175,6 +176,7 @@ async def create_lpar_via_cli(
     creation_memory: LparCreationMemory | None = None,
     affinity_group_id: AffinityGroupID | None = None,
     start_settings: LparStartSettings | None = None,
+    virtual_scsi_adapters: tuple[VirtualScsiClientAdapter, ...] = (),
 ) -> str:
     """Create an LPAR via ``mksyscfg`` over SSH.
 
@@ -212,6 +214,9 @@ async def create_lpar_via_cli(
         raise TypeError("creation_memory must be LparCreationMemory")
     memory_pairs = creation_memory.pairs() if creation_memory is not None else []
     serial_value = validate_serial_input(virtual_serial_adapters, max_virtual_slots)
+    scsi_value = validate_vscsi_input(
+        virtual_scsi_adapters, max_virtual_slots, virtual_serial_adapters
+    )
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
@@ -270,6 +275,8 @@ async def create_lpar_via_cli(
         config_str += "," + extra
     if serial_value:
         config_str += ',"virtual_serial_adapters=' + serial_value + '"'
+    if scsi_value:
+        config_str += ',"virtual_scsi_adapters=' + scsi_value + '"'
     if start_settings is not None and start_settings.power_ctrl_lpar_ids is not None:
         config_str += "," + build_attribute_record(
             [
