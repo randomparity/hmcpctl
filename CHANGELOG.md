@@ -31,9 +31,10 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
 ### Changed
 
 - Native IBM i (OS400) creation without `physical_io.console_slot` is refused before any write,
-  instead of failing at the HMC (#1981). No console default is inserted. Native IBM i creation
-  on a PowerVM management controller is therefore refused too, because a console is
-  initial-profile I/O there.
+  instead of failing at the HMC (#1981). No console default is inserted. When a request's
+  other inputs (for example serial or vSCSI records) select controller-mode creation on a
+  PowerVM management controller, an IBM i request is therefore refused too, because the
+  console is initial-profile I/O that controller mode refuses.
 
 - `hmcpctl lpars create` and `hmcpctl vios create` no longer echo an unknown key name from
   `--virtual-serial-adapters` inline JSON in their usage error; the error names the validation

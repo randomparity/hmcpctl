@@ -47,8 +47,10 @@ uppercase hex digits; unchanged discriminator).
    REST-only and `admit_creation_io` refuses `physical_io` with keylock, so a universal console
    rule would remove IBM i keylock creation. The REST 406/REST0001 fallback reaches
    `_create_via_cli` and is refused there, after a refused REST write.
-4. Admission: `admit_creation_io` skips virtual forms in its per-device loop (rule 2 owns
-   them); its OS400 and fresh `IBMiCapable` checks still apply because `tagged()` is non-empty.
+4. Admission: `admit_creation_io`, which the provisioning preflight also calls before any
+   effect, runs rule 2 and, when physical I/O is requested, rule 3; it skips virtual forms in
+   its per-device loop; its OS400 and fresh `IBMiCapable` checks still apply because
+   `tagged()` is non-empty.
 
 ## Comparison (criterion 4)
 
