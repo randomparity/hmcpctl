@@ -59,9 +59,8 @@ more facts:
       `ValueError` and send no PUT.
 
    The check does not prove that a server adapter exists at `vios_slot`. That belongs to #680.
-5. **Ledger.** The vSCSI row becomes `supported`. The vFC row becomes `unknown`, and its
-   question cites ADR 0374 and the active-partition capture follow-up (owner pending from the
-   campaign). There is no vFC update surface.
+5. **Ledger.** The vSCSI row becomes `supported`. The vFC row stays a coverage child,
+   re-pointed to #1986 (active-partition capture). There is no vFC update surface.
 
 No ownership transition is needed: each change extends its current owner in the adapter
 modules.

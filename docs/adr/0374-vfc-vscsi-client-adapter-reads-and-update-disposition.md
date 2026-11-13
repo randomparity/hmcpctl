@@ -50,8 +50,8 @@ partition; the evidence is private and redacted here) established the following:
 1. **No vFC update operation.**
    - hmcpctl exposes no tool over the vFC instance POST, because an operation whose documented
      request applies nothing would report success for a change that did not happen.
-   - The vFC row's disposition becomes `unknown`. Its question states the observed no-effect and
-     the uncaptured active-partition (DLPAR) case.
+   - The vFC row stays a coverage child, re-pointed to #1986, which owns the uncaptured
+     active-partition (DLPAR) case.
    - After this change every documented vSCSI method is covered, so the vSCSI row becomes
      `supported`.
 2. **One instance read, `adapter.get`, for both client storage types.** It uses the observed vFC
@@ -86,8 +86,9 @@ partition; the evidence is private and redacted here) established the following:
 - An add to a real VIOS at an unused server slot still succeeds, as it does on the HMC. vSCSI has
   no HMC-side unpaired signal. vFC reports HSCLB023 only inside the raw `NportLoggedInStatus`
   (#698).
-- An active-partition vFC POST may behave differently. Until it is captured, the vFC row stays
-  `unknown` and blocks a complete-coverage claim, which is the honest state.
+- An active-partition vFC POST may behave differently. Until #1986 captures it, the vFC row
+  stays a pending coverage child and blocks a complete-coverage claim, which is the honest
+  state.
 - hmcpctl never accepts WWPNs as input, so it cannot reuse or collide fabric identities.
 
 ## Considered & rejected
@@ -100,6 +101,8 @@ partition; the evidence is private and redacted here) established the following:
 - **Capture the active-partition POST before deciding.** verified: the authorized lab frame has
   no NPIV-capable FC port (private lab inventory, 2026-11-13), so no mapped, logged-in active
   state is reachable there.
+- **Mark the vFC row `unknown`.** judgment: fit; it records an ownerless question when a tracked
+  owner exists.
 - **Mark the vFC row `proposed-exclusion`.** judgment: fit; it declares the method unwanted,
   while the open question is whether the method works at all on an active partition.
 - **Mark the vFC row `supported`.** judgment: fit; a documented method with no implemented or
