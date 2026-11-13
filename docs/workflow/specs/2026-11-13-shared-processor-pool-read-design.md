@@ -36,8 +36,9 @@ the feed with `_parse_feed`, as `list_virtual_switches` does. 204 returns `[]`.
 - `AssignedPartitions` absent is `None` (not reported). `_parse_feed` renders a present,
   childless element as `""`; that, or a mapping with no `link`, is `()`. Each `link` (one
   mapping or a list) must carry an href ending `/LogicalPartition/<uuid>` or
-  `/VirtualIOServer/<uuid>`; a VIOS in shared mode is a partition too, though no capture
-  shows one. The UUID keeps the HMC's case. A present, empty unit element (`""`) is
+  `/VirtualIOServer/<uuid>` (a module-local `_partition_uuid(href)`, since
+  `lpar_uuid_from_href` matches only the first); a VIOS in shared mode is a partition too,
+  though no capture shows one. The UUID keeps the HMC's case. A present, empty unit element (`""`) is
   malformed, not `None`: only absence means not applicable.
 - Any violation raises `HMCError` naming the field and the pool ID (or the entry UUID when
   the ID itself is bad). It never projects a partial pool.
@@ -87,9 +88,8 @@ definitions and `docs/tools/` by their generators.
 **Live vocabulary.** `just live-vocabulary` refuses a REST read path with no captured
 endpoint. A new focused vocabulary, `tests/fixtures/live/vocabulary/v10r3-8375-42a-shared-processor-pool-source.json`,
 records the captured `GET /rest/api/uom/ManagedSystem/{uuid}/SharedProcessorPool` (200) and
-`lshwres -r procpool -m {}` (exit 0), in the shape of the existing `*-source.json` files. A
-read-only live probe with the client's typed Accept header confirms that variant before the
-endpoint's `accept` is recorded; until then it records the captured `application/atom+xml`.
+`lshwres -r procpool -m {}` (exit 0), in the shape of the existing `*-source.json` files,
+with the captured `accept` and `content_type`. The gate reads only the GET path.
 
 **Live scenario.** ST4's read-only profile reads gain `_processor_pool_reads`, beside the
 memory-pool read (`scripts/live_test/arms/profiles.py`). It needs only the system. It
