@@ -39,7 +39,8 @@ baseline and `BASELINED_FINDINGS` edit (#1968).
    must still fail `just secrets`. Promotion commits only allowlisted artifacts.
 3. Accepted failure classes:
    - A secret that is exactly 40 lowercase hex characters under `"tested_commit"`,
-     or exactly 64 under `"closure_fingerprint"`, alone on its line, goes unflagged.
+     or exactly 64 under `"closure_fingerprint"`, alone on the scanner's processed line (trailing whitespace stripped, YAML
+     re-rendered as `key: "value"`), goes unflagged.
      Accepted per ADR 0381: those keys hold Git and SHA-256 digests by contract.
    - The filter applies repository-wide. Accepted: matching is limited to those
      two whole-line shapes.

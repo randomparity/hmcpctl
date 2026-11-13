@@ -42,9 +42,10 @@ Design: [the #1970 specification](../workflow/specs/2026-11-13-promotion-secret-
 
 A promotion commit now passes the `secrets` hook and CI with no baseline or pin
 edits. The filter applies to the whole repository, because detect-secrets has no
-per-file line filter. Any tracked line of exactly one of those two shapes goes
-unscanned. A secret can hide there only if it is a lowercase hex string of that
-exact length under one of those two keys. That is the accepted residual. Widening a
+per-file line filter. The patterns run on the line as the scanner processes it:
+trailing whitespace stripped, and a YAML value re-rendered as `key: "value"`, so a
+quoted YAML key of the same shape is skipped too. A secret can hide only if it is a
+lowercase hex string of that exact length under one of those two literal keys. That is the accepted residual. Widening a
 pattern is a reviewed test change, never a silent rescan.
 
 ## Considered & rejected
