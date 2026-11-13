@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -52,7 +53,6 @@ RUFF_PER_FILE_IGNORE_MODULES = {
     "tests/unit/test_ownership.py",
 }
 BASELINED_FINDINGS = {
-    "docs/capabilities/maturity.json": 70,
     "justfile": 1,
     # Public PDF checksum and extracted code-inventory checksum (#1690).
     "src/hmcpctl/_progress_codes.json": 2,
@@ -74,6 +74,36 @@ BASELINED_FINDINGS = {
     "tests/fixtures/progress-code-inventory.json": 1,
     "tests/unit/test_ssh.py": 1,
 }
+# ADR 0381: promotion evidence digests, skipped only as whole lines of exactly this shape.
+EVIDENCE_HEX_LINES = [
+    r'^\s*"tested_commit": "[0-9a-f]{40}",?$',
+    r'^\s*"closure_fingerprint": "[0-9a-f]{64}",?$',
+]
+SECRET_FILTERS = [
+    {"path": "detect_secrets.filters.allowlist.is_line_allowlisted"},
+    {
+        "path": "detect_secrets.filters.common.is_baseline_file",
+        "filename": ".secrets.baseline",
+    },
+    *(
+        {"path": f"detect_secrets.filters.heuristic.{name}"}
+        for name in (
+            "is_indirect_reference",
+            "is_likely_id_string",
+            "is_lock_file",
+            "is_not_alphanumeric_string",
+            "is_potential_uuid",
+            "is_prefixed_with_dollar_sign",
+            "is_sequential_string",
+            "is_swagger_file",
+            "is_templated_secret",
+        )
+    ),
+    {
+        "path": "detect_secrets.filters.regex.should_exclude_line",
+        "pattern": EVIDENCE_HEX_LINES,
+    },
+]
 ACTION_PINS = {
     "actions/checkout": (
         "3d3c42e5aac5ba805825da76410c181273ba90b1",  # pragma: allowlist secret
@@ -483,10 +513,54 @@ def test_secret_baseline_is_an_exact_reviewed_allowlist() -> None:
     assert {
         path: len(findings) for path, findings in results.items()
     } == BASELINED_FINDINGS
+    assert baseline["filters_used"] == SECRET_FILTERS
     excluded_paths = baseline.get("exclude", {})
     assert not any(
         path == "tests" or path.startswith("tests/") for path in excluded_paths
     )
+
+
+def _hex(seed: str, size: int) -> str:
+    return hashlib.sha256(seed.encode()).hexdigest()[:size]
+
+
+def test_secret_baseline_line_filter_is_narrow(tmp_path: Path) -> None:
+    """Only exact evidence-digest lines escape the scan; every near miss is reported."""
+    aws_shaped = "AKIA" + "Q7" * 8
+    lines = [
+        f'  "tested_commit": "{_hex("a", 40)}",',
+        f'  "closure_fingerprint": "{_hex("b", 64)}"',
+        f'  "tested_commit_hash": "{_hex("c", 40)}",',
+        f'  "tested_commit": "{_hex("d", 41)}",',
+        f'  "closure_fingerprint": "{_hex("e", 64).upper()}"',
+        f'  "closure_fingerprint": "{_hex("f", 64)}", "note": "x"',
+        f'  "tested_commit": "{aws_shaped}",',
+    ]
+    (tmp_path / "probe.json").write_text("\n".join(lines) + "\n")
+    shutil.copyfile(ROOT / ".secrets.baseline", tmp_path / ".secrets.baseline")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "detect_secrets.pre_commit_hook",
+            "--baseline",
+            ".secrets.baseline",
+            "--no-verify",
+            "--json",
+            "--",
+            "probe.json",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    reported = json.loads(result.stdout)["results"]["probe.json"]
+    assert {finding["line_number"] for finding in reported} == {3, 4, 5, 6, 7}
 
 
 def test_secret_scanner_treats_option_shaped_names_as_files(tmp_path: Path) -> None:
