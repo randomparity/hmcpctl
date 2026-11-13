@@ -198,11 +198,17 @@ async def get_shared_processor_pool(
     matches = [candidate for candidate in pools if _selector_matches(candidate, pool)]
     if not matches:
         kind = "name" if isinstance(pool, str) else "ID"
+        # An MCP client may send an ID as a JSON string, which selects by name.
+        hint = (
+            " A string selects by name; pass an integer to select by pool ID."
+            if isinstance(pool, str) and _POOL_ID.fullmatch(pool)
+            else ""
+        )
         raise ResourceNotFoundError(
             "shared processor pool",
             str(pool),
             f"No shared processor pool with {kind} {pool!r} on managed system "
-            f"{system_uuid}. {_NOT_FOUND_ADVICE}",
+            f"{system_uuid}.{hint} {_NOT_FOUND_ADVICE}",
         )
     if len(matches) > 1:
         raise ValueError(

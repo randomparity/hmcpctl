@@ -254,6 +254,23 @@ async def test_get_unknown_id_or_name_is_not_found(selector):
 
 
 @pytest.mark.asyncio
+async def test_a_digit_string_selector_names_the_integer_id_route():
+    with pytest.raises(ResourceNotFoundError) as caught:
+        await _get("0")
+
+    assert "with name '0'" in str(caught.value)
+    assert "pass an integer to select by pool ID" in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_a_plain_unknown_name_carries_no_id_hint():
+    with pytest.raises(ResourceNotFoundError) as caught:
+        await _get("NoSuchPool")
+
+    assert "pass an integer" not in str(caught.value)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("selector", "error"),
     [
