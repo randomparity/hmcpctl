@@ -50,7 +50,11 @@ from ....documents.lpar_memory_layout import LparMemoryLayout
 from ....documents.lpar_security_policy import LparSecurityPolicy
 from ....documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ....documents.lpar_start import LparStartSettings
-from ....documents.lpar_vscsi import VirtualScsiClientAdapter, validate_vscsi_input
+from ....documents.lpar_vscsi import (
+    VirtualScsiClientAdapter,
+    validate_tagged_vscsi,
+    validate_vscsi_input,
+)
 from ....documents.lpar_vtpm import LparVtpmSettings
 from ....errors import HMCError, HMCTLSFingerprintError
 from ....resource_identity import is_uuid, resolve_system_uuid
@@ -329,6 +333,7 @@ def validate_lpar_creation(creation: LparCreation) -> None:
         creation.max_virtual_slots,
         creation.virtual_serial_adapters,
     )
+    validate_tagged_vscsi(creation.physical_io, creation.virtual_scsi_adapters)
     if creation.virtual_scsi_adapters and creation.keylock is not None:
         raise ValueError(
             "vSCSI adapters cannot be combined with keylock in native creation"

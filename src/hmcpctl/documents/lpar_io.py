@@ -9,6 +9,19 @@ from pydantic import ConfigDict, StrictBool, StrictInt
 #: The DRC-index form every captured and documented `io_slots` index takes (ADR 0166).
 DRC_INDEX_PATTERN = re.compile(r"[0-9A-F]{8}")
 
+#: Tagged roles whose virtual-slot form names a declared vSCSI client (ADR 0382).
+VIRTUAL_TAGGED = ("load_source_slot", "alt_restart_device_slot")
+
+
+def virtual_form(value: object) -> bool:
+    """Whether a tagged value is a virtual slot number rather than a DRC or ``hmc``."""
+    return (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isdecimal()
+        and len(value) < 8
+    )
+
 
 @dataclass(frozen=True)
 class ProfileIoSlot:
@@ -71,19 +84,19 @@ class LparPhysicalIO:
     load_source_slot: str | None = field(
         default=None,
         metadata={
-            "description": "IBM i load-source physical or declared direct SR-IOV DRC; virtual-slot forms await #638."
+            "description": "IBM i load source: physical or declared direct SR-IOV DRC, or the decimal local slot of a vSCSI client declared in virtual_scsi_adapters."
         },
     )
     alt_restart_device_slot: str | None = field(
         default=None,
         metadata={
-            "description": "IBM i alternate restart physical or declared direct SR-IOV DRC."
+            "description": "IBM i alternate restart: physical or declared direct SR-IOV DRC, or the decimal local slot of a vSCSI client declared in virtual_scsi_adapters."
         },
     )
     console_slot: str | None = field(
         default=None,
         metadata={
-            "description": "IBM i physical/direct SR-IOV console DRC or explicit hmc; no default is inserted."
+            "description": "IBM i physical/direct SR-IOV console DRC or explicit hmc; required for native IBM i creation, no default is inserted; virtual slots are refused."
         },
     )
     alt_console_slot: str | None = field(
@@ -132,10 +145,18 @@ class LparPhysicalIO:
         for name, value in self.tagged():
             if name == "console_slot" and value == "hmc":
                 continue
-            if isinstance(value, str) and value.isdecimal() and len(value) < 8:
-                raise ValueError(
-                    f"{name}: positive virtual-slot forms require creation-time adapter linkage; see #638"
-                )
+            if virtual_form(value):
+                if name not in VIRTUAL_TAGGED:
+                    raise ValueError(
+                        f"{name}: virtual-slot forms are refused; no cited source "
+                        "establishes an eligible virtual device family for this role "
+                        "(ADR 0382)"
+                    )
+                if str(int(value)) != value:
+                    raise ValueError(
+                        f"{name}: virtual slot must use canonical decimal notation"
+                    )
+                continue
             drc(value)
         if self.virtual_opti_pool_id is not None and (
             type(self.virtual_opti_pool_id) is not int
@@ -149,6 +170,14 @@ class LparPhysicalIO:
             for f in fields(self)
             if f.name.endswith("_slot") and (value := getattr(self, f.name)) is not None
         ]
+
+    def virtual_tagged(self) -> tuple[tuple[str, int], ...]:
+        """Virtual-slot load-source and alternate-restart roles, by slot number."""
+        return tuple(
+            (name, int(value))
+            for name, value in self.tagged()
+            if name in VIRTUAL_TAGGED and virtual_form(value)
+        )
 
     @property
     def requested(self) -> bool:

@@ -13,6 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar import LparResources
+from hmcpctl.documents.lpar_io import LparPhysicalIO
 from hmcpctl.documents.lpar_serial import VirtualSerialAdapter
 from hmcpctl.documents.lpar_vscsi import (
     VirtualScsiClientAdapter as Client,
@@ -315,6 +316,60 @@ def test_keylock_refused_with_vscsi():
                 virtual_scsi_adapters=(CLIENT,),
             )
         )
+
+
+# --- tagged I/O binding (ADR 0382) ------------------------------------------
+
+
+def tagged_creation(io, adapters=(CLIENT,), serial=()):
+    return core.LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=1024),
+        max_virtual_slots=8,
+        physical_io=io,
+        virtual_serial_adapters=serial,
+        virtual_scsi_adapters=adapters,
+    )
+
+
+@pytest.mark.parametrize(
+    "io",
+    [
+        LparPhysicalIO(load_source_slot="2", console_slot="hmc"),
+        LparPhysicalIO(alt_restart_device_slot="2", console_slot="hmc"),
+        LparPhysicalIO(
+            load_source_slot="2", alt_restart_device_slot="2", console_slot="hmc"
+        ),
+    ],
+    ids=["load-source", "alt-restart", "both"],
+)
+def test_tagged_binding_admits_a_declared_client(io):
+    core.validate_lpar_creation(tagged_creation(io))
+
+
+@pytest.mark.parametrize(
+    ("name", "slot", "serial"),
+    [
+        ("load_source_slot", "3", ()),
+        ("load_source_slot", "0", ()),
+        ("alt_restart_device_slot", "1", ()),
+        ("load_source_slot", "3", (VirtualSerialAdapter(3, "server", False, 0),)),
+        ("alt_restart_device_slot", "4", ()),
+    ],
+    ids=["undeclared", "hmc-serial-0", "hmc-serial-1", "declared-serial", "ethernet"],
+)
+def test_tagged_binding_refuses_other_virtual_slots(name, slot, serial):
+    # Creation has no virtual ethernet input, so an ethernet slot is undeclared.
+    io = LparPhysicalIO(console_slot="hmc", **{name: slot})
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        core.validate_lpar_creation(tagged_creation(io, serial=serial))
+
+
+def test_tagged_binding_refuses_without_any_client():
+    io = LparPhysicalIO(load_source_slot="2", console_slot="hmc")
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        core.validate_lpar_creation(tagged_creation(io, adapters=()))
 
 
 # --- readback parser -------------------------------------------------------

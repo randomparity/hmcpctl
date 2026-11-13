@@ -40,8 +40,8 @@ def test_field_grammar():
     "name,value",
     [
         ("console_slot", "3"),
-        ("load_source_slot", "12"),
-        ("alt_restart_device_slot", "99"),
+        ("load_source_slot", "02"),
+        ("alt_restart_device_slot", "0099"),
         ("op_console_slot", "hmc"),
         ("alt_console_slot", "x,console_slot=hmc"),
         ("console_slot", "lowercase"),
@@ -56,6 +56,37 @@ def test_field_grammar():
 )
 def test_malformed_or_unresolvable_values_fail(name, value):
     with pytest.raises((ValueError, TypeError)):
+        LparPhysicalIO(**{name: value})
+
+
+@pytest.mark.parametrize(
+    "kwargs,virtual",
+    [
+        ({"load_source_slot": "2"}, (("load_source_slot", 2),)),
+        ({"alt_restart_device_slot": "17"}, (("alt_restart_device_slot", 17),)),
+        (
+            {"load_source_slot": "2", "alt_restart_device_slot": "2"},
+            (("load_source_slot", 2), ("alt_restart_device_slot", 2)),
+        ),
+        ({"load_source_slot": DRC, "console_slot": "hmc"}, ()),
+    ],
+)
+def test_virtual_tagged_forms_admitted(kwargs, virtual):
+    assert LparPhysicalIO(**kwargs).virtual_tagged() == virtual
+
+
+@pytest.mark.parametrize(
+    "name,value,match",
+    [
+        ("load_source_slot", "02", "canonical"),
+        ("console_slot", "2", "console"),
+        ("console_slot", "0", "console"),
+        ("alt_console_slot", "2", "alt_console_slot"),
+        ("op_console_slot", "2", "op_console_slot"),
+    ],
+)
+def test_virtual_tagged_forms_refused(name, value, match):
+    with pytest.raises(ValueError, match=match):
         LparPhysicalIO(**{name: value})
 
 
