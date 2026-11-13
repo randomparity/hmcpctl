@@ -23,7 +23,8 @@ update-path change. No ownership transition is needed.
 2. `create_lpar_via_cli`: both re-raised `HMCCLIError`s in its generic and
    hardware-memory/affinity branches carry `remote_refusal_code` from the
    provider error (a matched `HSCL[A-Z0-9]{4}` token or `None`). Messages are
-   unchanged.
+   unchanged. The handler reads the code once before branching, so its branch
+   predicates are restated without changing which route raises what.
 3. `_submit_native_creation`, first statement of its `except HMCError` handler
    (before the policy branch rewraps every error as "outcome is unknown"): when
    `_srr_keystore_requested(creation)` and the error is an `HMCCLIError` whose
