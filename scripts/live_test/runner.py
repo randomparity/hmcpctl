@@ -17,14 +17,14 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 73; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71, ST72 and ST73 require named groups and are excluded from default and all selections.
-Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71, 72 and 73 SKIP outside their
+Registered subtasks span 0 through 74; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71, ST72, ST73 and ST74 require named groups and are excluded from default and all selections.
+Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71, 72, 73 and 74 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract`, `partition-profiles`,
 `vmedia-media-change` and `provision-boot` groups (72 also in the
 `native-ubuntu-boot-started` and `native-rocky-boot-started` groups, and 42 also
-in `vg-if-match`, and 73 in `logical-workflow`). A bare
+in `vg-if-match`, 73 in `logical-workflow`, and 74 in `lpar-vscsi-client`). A bare
 number runs that one subtask; `--group NAME` runs one arm. Results go to `test-results-<group>.json`, or `test-results-round2.json`
 for a bare or whole-suite run, unless
 `--results-file` names another path. That path must be git-ignored.
@@ -101,6 +101,7 @@ from live_test.arms.lpar_physical_io import exercise_lpar_physical_io
 from live_test.arms.lpar_power import exercise_lpar_power
 from live_test.arms.lpar_reconfigure import exercise_lpar_reconfigure
 from live_test.arms.lpar_security_policy import exercise_lpar_security_policy
+from live_test.arms.lpar_vscsi_client import exercise_lpar_vscsi_client
 from live_test.arms.lpar_vtpm import exercise_lpar_vtpm
 from live_test.arms.memory_move import exercise_memory_move
 from live_test.arms.memory_quantities import exercise_memory_quantities
@@ -674,6 +675,7 @@ SUBTASKS = {
     71: vmedia_media_change,
     72: exercise_provision_boot,
     73: exercise_logical_workflow,
+    74: exercise_lpar_vscsi_client,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -723,6 +725,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-settings": [47],
     "lpar-reporting": [48],
     "lpar-physical-io": [49],
+    "lpar-vscsi-client": [74],
     "lpar-memory-quantities": [50],
     "processor-sharing-weight": [59],
     "lpar-memory-move": [54],

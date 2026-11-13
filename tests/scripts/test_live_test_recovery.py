@@ -1793,6 +1793,7 @@ async def test_lpar_config_unreadable_listing_is_not_clean():
         (39, "lpar-config"),
         (47, "lpar-settings"),
         (49, "lpar-physical-io"),
+        (74, "lpar-vscsi-client"),
         (50, "lpar-memory-quantities"),
         (56, "lpar-processor-quantities"),
     ],

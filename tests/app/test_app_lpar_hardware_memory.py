@@ -295,6 +295,7 @@ def test_old_positional_adapters_preserve_security_and_yes(
         *expected_tail,
         "affinity_group_id",
         "start_settings",
+        *(["virtual_scsi_adapters"] if adapter.kind == "lpar" else []),
     ]
     assert all(parameters[name].default is None for name in FIELDS)
     if surface == "cli":
