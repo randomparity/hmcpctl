@@ -39,8 +39,10 @@ The accepted path has no live evidence; under ADR 0212 it stays unevidenced.
 A request on a default-key system now reaches the HMC and costs one refused
 submission plus one read, instead of a local refusal. The refusal names the HMC's
 rule rather than a hmcpctl prerequisite. Other codes, and the combination on
-creation-memory or memory-layout routes, keep their existing reconciliation.
-Update paths are unchanged.
+creation-memory, memory-layout, serial or start routes, keep their existing
+reconciliation. On an HMC release that does not enforce the rule, hmcpctl creates
+and verifies whatever that HMC accepts; it no longer second-guesses the HMC's own
+admission. Update paths are unchanged.
 
 ## Considered & rejected
 
@@ -50,8 +52,10 @@ Update paths are unchanged.
   would be a guess, which #1829 excludes.
 - **Refuse only an observed `default_key`, admit everything else.** judgment:
   treats unknown statuses as positive, which #1829 forbids.
-- **Keep the blanket refusal.** judgment: the HMC enforces the rule itself with a
-  stable code, so the refusal blocks every user-key system for no safety gain.
+- **Keep the blanket refusal.** verified: the observed HMC (V10R3 M1060, the
+  2026-11-13 capture) enforced the rule itself with `HSCL0DCE` and created
+  nothing; judgment: refusing locally blocks every user-key system to guard a
+  rule the HMC already applies.
 - **Trust `HSCL0DCE` without a lookup.** judgment: one observation of no effect
   does not prove every release creates nothing on that code; the scoped lookup
   is the same bound the memory-layout route already uses.

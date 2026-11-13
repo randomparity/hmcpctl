@@ -42,9 +42,10 @@ update-path change. No ownership transition is needed.
    - a matching identity: `HMCError` `... outcome partial; partition exists (UUID
      <uuid>). Inspect scoped identity before retrying; no retry, ownership stamp
      or rollback performed.`
-   - `HMCTLSFingerprintError`: re-raised with an added note; any other exception
-     or unidentifiable result: `HMCError` `... outcome unknown; scoped identity
-     readback unavailable ...`.
+   - `HMCTLSFingerprintError`: re-raised with an added note; any other lookup
+     exception: `HMCError` `... outcome unknown; scoped identity readback
+     unavailable ...`; a found entry that is not an identifiable match:
+     `HMCError` `... outcome unknown. ...`.
    The lookup/identity logic is shared with `_raise_layout_create_failure`
    through one helper rather than copied.
 5. ADR 0277 Status gains an amendment line; `docs/capabilities/lpar-allocation.md`
@@ -64,6 +65,9 @@ update-path change. No ownership transition is needed.
     Honest, bounded, and not required by a criterion.
   - a partition created between the refusal and the lookup by another actor is
     reported as partial, never as refused.
+  - an HMC release that accepts the combination on a non-user-key system: the
+    HMC owns that admission; hmcpctl verifies what was created (ADR 0377).
+    Only V10R3 M1060 behaviour is observed.
 - Covered elsewhere: system-key management (excluded by #1829); update-path
   rules (ADR 0277); remote-output redaction (ADR 0369, `run_hmc_command`).
 
@@ -92,10 +96,13 @@ update-path change. No ownership transition is needed.
 - Criteria 1, 5 — focused-test: `test_creation_submits_srr_with_keystore`.
 - Criterion 2 — focused-test: `test_srr_keystore_hscl0dce_is_contained_refusal`.
 - Criterion 3 — focused-test: `test_srr_keystore_hscl0dce_reconciles_outcome`
-  (partial, unknown, TLS).
-- Criterion 4 — focused-test: `test_hscl0dce_without_combination_keeps_unknown`,
-  `test_other_code_keeps_policy_unknown`.
-- Code retention — focused-test in `tests/unit/test_ssh_lpar*.py`:
-  `create_lpar_via_cli` keeps `remote_refusal_code`.
+  (partial, unidentifiable, lookup failure, TLS).
+- Criterion 4 — focused-test:
+  `test_hscl0dce_outside_combination_keeps_policy_unknown` (keystore only;
+  other code with the combination).
+- Code retention — focused-test in `tests/lpar/test_hardware_memory_creation.py`:
+  `test_cli_creation_error_keeps_refusal_code`.
+- Layout reconciler outcome words unchanged — existing
+  `tests/lpar/test_memory_layout.py`.
 - ADR/capability prose — task-test-not-applicable: no executable consumer reads
   this prose beyond `just adr-numbering` (name and H1 only).
