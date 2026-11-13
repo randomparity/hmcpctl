@@ -340,6 +340,21 @@ async def test_create_mismatch_on_differing_readback(guard):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value", "label"),
+    [("AssociatedPartitionId", "9", "partition"), ("Affinity", "true", "affinity")],
+)
+async def test_create_mismatch_on_other_partition_or_affinity(
+    guard, field, value, label
+):
+    hmc = FakeHMC()
+    hmc.created = _volume_entry(Name="new-vol", **{field: value})
+    result = await create_persistent_memory_volume(hmc, SYSTEM, "lp", "new-vol", 256)
+    assert result.status == "mismatch"
+    assert label in result.warnings[0]
+
+
+@pytest.mark.asyncio
 async def test_create_readback_unavailable(guard):
     hmc = FakeHMC()
     hmc.read_error_after_write = HMCError("GET failed", 503, "")

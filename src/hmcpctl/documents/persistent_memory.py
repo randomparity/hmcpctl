@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ..resource_identity import is_uuid
 from ..xmlutil import escapes_string_arguments, leaf_text
 from .common import document_envelope
 
@@ -101,6 +102,11 @@ def validate_volume_name(name: str) -> str:
         raise ValueError(
             "volume name must be 1-64 characters of A-Z a-z 0-9 _ . -; "
             "nothing was changed"
+        )
+    if is_uuid(name):
+        raise ValueError(
+            "volume name must not be shaped like a UUID, because selectors read a "
+            "UUID-shaped value as a volume UUID; nothing was changed"
         )
     return name
 

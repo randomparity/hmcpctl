@@ -88,7 +88,10 @@ def test_validate_volume_name_accepts(name: str) -> None:
     assert validate_volume_name(name) == name
 
 
-@pytest.mark.parametrize("name", ["", "x" * 65, "a b", "a,b", "a<b", "é"])
+@pytest.mark.parametrize(
+    "name",
+    ["", "x" * 65, "a b", "a,b", "a<b", "é", "00000051-abcd-4ef0-8abc-000000000051"],
+)
 def test_validate_volume_name_rejects(name: str) -> None:
     with pytest.raises(ValueError, match="nothing was changed"):
         validate_volume_name(name)
