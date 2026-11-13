@@ -1,10 +1,10 @@
-"""Run opt-in arm 73: the logical create, reconfigure and destroy workflow (#1854).
+"""Run opt-in arm 73: the logical plan, create, reconfigure and destroy workflow (#1854).
 
-This mutates a managed system: it provisions one scratch partition on a new 1 GiB
-volume in the configured volume group, reconfigures its memory and processors,
-inspects it, holds it for a hand-off and releases it, starts it once and stops it
-immediately, then decommissions it and the volume, all through the primary catalog's
-workflow tools. Run
+This mutates a managed system: it plans and provisions one scratch partition on a new
+1 GiB volume in the configured volume group, lists it in the logical inventory,
+reconfigures its memory and processors, inspects it, holds it for a hand-off and
+releases it, starts it once and stops it immediately, then decommissions it and the
+volume, all through the primary catalog's workflow tools. Run
 live_test_preflight.py --group logical-workflow first and live_test_recovery.py
 afterwards, including after apparent success.
 """

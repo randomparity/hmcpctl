@@ -176,7 +176,7 @@ below. The table does not grant hardware or VIOS access.
 | provision-boot | `uv run --no-sync python scripts/live_provision_boot.py` | subtask 72; powers on a partition with installer media |
 | native-ubuntu-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py ubuntu` | subtask 72; boots the Ubuntu launcher and records refcodes for up to 15 minutes |
 | native-rocky-boot-started | `uv run --no-sync python scripts/live_native_boot_started.py rocky` | subtask 72; boots the Rocky launcher and records refcodes for up to 15 minutes |
-| logical-workflow | `uv run --no-sync python scripts/live_logical_workflow.py` | subtask 73; provisions, reconfigures, hands off (holds and releases), powers and decommissions one partition through the workflow tools |
+| logical-workflow | `uv run --no-sync python scripts/live_logical_workflow.py` | subtask 73; plans, provisions, lists, reconfigures, hands off (holds and releases), powers and decommissions one partition through the workflow tools |
 | vg-if-match | `uv run --no-sync python scripts/live_vg_if_match.py` | subtasks 0 and 42; a scratch volume group and one stale-`If-Match` write to it |
 
 Each writes `test-results-<arm>.json`. Run one arm at a time: they share a
@@ -951,9 +951,10 @@ ADR 0328 records these findings.
 
 ### The logical-workflow arm
 
-The `logical-workflow` arm (subtask 73, #1854) runs the create, reconfigure, hand-off and
-destroy workflow on one partition through the primary catalog's tools only (ADR 0189,
-ADR 0330): `hmc_provision_lpar`, `hmc_reconfigure_lpar`, `hmc_inspect_lpar`,
+The `logical-workflow` arm (subtask 73, #1854) runs the plan, create, reconfigure, hand-off
+and destroy workflow on one partition through the primary catalog's tools only (ADR 0189,
+ADR 0330): `hmc_plan_lpar`, `hmc_provision_lpar`, `hmc_inventory`, `hmc_reconfigure_lpar`,
+`hmc_inspect_lpar`,
 `hmc_prepare_host_handoff`, `hmc_invoke_tool`, `hmc_power_lpar`, `hmc_decommission_lpar`
 and `hmc_operation_status`. Every other tool it calls is an
 independent witness read or teardown. It needs its own operator authorization: it powers
@@ -966,18 +967,26 @@ a partition on once.
   partition or `lppwr*` volume exists.
 - **Run.** A failed provision, reconfigure or hold release ends the workflow, and a stop
   that does not complete skips the decommission:
-  1. Provision `hmcpctl-live-pwr-<8 hex>-p` with `power_on` false, on a new 1 GiB volume
+  1. Plan `hmcpctl-live-pwr-<8 hex>-p` with exactly provision's inputs; the plan writes
+     nothing, and its digest is set exactly when a candidate is selected with no request
+     blocker (`plan-outcome-consistent`).
+  2. Provision `hmcpctl-live-pwr-<8 hex>-p` with `power_on` false, on a new 1 GiB volume
      `lppwr<8 hex>` and the VLAN: `workflow-completed`, `ownership-stamped`,
      `left-not-activated`, `storage-mapping-listed`, `last-activated-is-default` (provision
      applied its saved profile, ADR 0331) and `adapters-after-apply` (a client network
      adapter on the VLAN and a vSCSI client adapter are still listed).
-  2. Reconfigure `{memory_mib: 3072, processors: 2}`; every change must read back
+  3. `hmc_inventory` selected to the system lists the system (`boundary-system-listed`), the
+     run's partition by UUID and name (`run-partition-listed`), only partitions of that
+     system (`partitions-belong-to-system`) and its capacity, partitions and ownership
+     sources as `ok` (`system-sources-read`); the plan's candidates must name that system's
+     UUID (`lpar.plan`: `plan-targets-boundary-system`).
+  4. Reconfigure `{memory_mib: 3072, processors: 2}`; every change must read back
      `profile` (`inactive-change-classified-profile`).
-  3. Inspect with `resources` and `rmc`: the partition reads Not Activated with the new
+  5. Inspect with `resources` and `rmc`: the partition reads Not Activated with the new
      desired memory and virtual processors (`reports-the-change-inactive`), and the
      resources section lists a mapping backed by the run volume
      (`reports-the-owned-mapping`).
-  4. Hand off (ADR 0193): `hmc_prepare_host_handoff` prepare with `hold` and the label
+  6. Hand off (ADR 0193): `hmc_prepare_host_handoff` prepare with `hold` and the label
      `hmcpctl-live-<8 hex>` returns a `hold_id`, the label and a document naming the
      partition (`hold-placed`); the document never carries the `hold_id`
      (`document-withholds-hold-id`); a repeat returns the same hold
@@ -988,13 +997,13 @@ a partition on once.
      Activated (`hold-refuses-a-mutation`, and `dispatched-mutation-meets-the-hold` for
      `tools.invoke`). Release with the `hold_id`; a hold-less prepare must then report no
      hold (`release-drops-the-hold`). The HMC is only read in this step.
-  5. `hmc_power_lpar` start (`start-completed-activated`); once in firmware,
+  7. `hmc_power_lpar` start (`start-completed-activated`); once in firmware,
      `hmc_get_lpar` must show 3072 MiB current memory and 2 allocated virtual
      processors (`started-with-the-change`). Then stop, immediate; the stop's own job and an
      independent state read must both say Not Activated
      (`stop-immediate-completed-not-activated`) before the decommission runs. The partition
      has no installer media or operating system, so it stays in firmware.
-  6. The lpar-power arm's decommission cases: a dry run that inventories and changes
+  8. The lpar-power arm's decommission cases: a dry run that inventories and changes
      nothing, then `storage_cleanup=delete_owned` with its eight assertions.
 - **After.** A hold the run placed and did not release is released, an open reconfigure is
   abandoned with its own tool, then the lpar-power arm's teardown and baseline compare run.
