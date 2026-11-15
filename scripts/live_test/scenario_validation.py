@@ -6,7 +6,7 @@ import ast
 import functools
 import inspect
 from collections.abc import Iterable, Mapping, Sequence
-from types import ModuleType
+from types import MappingProxyType, ModuleType
 
 from hmcpctl.server import TOOL_SECURITY
 from live_test.observation import ExpectedOutcome
@@ -57,6 +57,7 @@ def _call_result_names(
 
 # Source text and syntax nodes determine these two results completely, so repeated
 # validation in one process reuses them; the declarations are checked on every call.
+# Every caller receives the same nodes, so nothing here may mutate them.
 @functools.cache
 def _async_functions(source: str) -> tuple[ast.AsyncFunctionDef, ...]:
     return tuple(
@@ -84,7 +85,7 @@ def _function_shape(
         ),
         key=lambda node: (node.lineno, node.col_offset),
     )
-    return parents, tuple(events)
+    return MappingProxyType(parents), tuple(events)
 
 
 def _validate_declared_function(
