@@ -8,7 +8,8 @@ Contributions should be focused, tested, and easy to review.
 4. Run `just verify` and `UV_NO_SYNC=1 uv run --no-sync prek run --all-files`.
 5. Open a pull request that explains the current behavior of the change.
 
-CI runs static gates through the real hooks once, then `just verify-runtime`.
+CI runs static gates through the real hooks once per Python version, the test groups in
+parallel jobs beside them, and then `just verify-collected` on the combined coverage.
 Standalone `just verify` remains the complete local check; `verify-runtime` alone
 omits static checks. Validate hooks separately with the command above.
 

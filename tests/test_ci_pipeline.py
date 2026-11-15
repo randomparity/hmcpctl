@@ -1827,7 +1827,8 @@ def test_distributed_test_groups_keep_complete_native_producers() -> None:
     groups = _job_body(workflow, "test-groups")
     final = _job_body(workflow, "ci")
     assert "UV_NO_SYNC=1 uv run --no-sync prek run --all-files" in static
-    assert "needs: static" in groups
+    # ADR 0383: producers start with the hooks; the aggregator alone joins them.
+    assert "needs:" not in static and "needs:" not in groups
     assert "max-parallel: 16" in groups and "fail-fast: false" in groups
     axes = {
         name: shlex.split(values.replace(",", " "))

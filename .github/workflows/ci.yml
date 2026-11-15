@@ -58,7 +58,6 @@ jobs:
         run: UV_NO_SYNC=1 uv run --no-sync prek run --all-files
 
   test-groups:
-    needs: static
     name: ${{ matrix.architecture }} / Python ${{ matrix.python-version }} / tests / ${{ matrix.group }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
