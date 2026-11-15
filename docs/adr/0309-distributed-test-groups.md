@@ -2,6 +2,8 @@
 
 ## Status
 
+> **Superseded by [0383](0383-test-groups-start-with-static-hooks.md)** (2026-11-15), ordering of hooks before groups only.
+
 Accepted (2026-10-29), operator-approved direction for PR #1823; verification pending.
 
 ## Context

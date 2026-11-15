@@ -40,6 +40,14 @@ overlapping runs reach the account's concurrent-job limit sooner.
 A red static leg and a red test group can now appear in the same run, where the
 earlier ordering showed only the static failure.
 
+The ordering was also a second barrier: a failed static leg skipped the test
+groups, so a mis-wired guard still failed closed. That redundancy is gone, and
+the guard is the only thing between a failed hook and a green `verify`, a
+retained wheel and its smoke jobs. `tests/test_ci_pipeline.py` therefore pins the
+guard's wiring as well as its script: the job-level `if: always()`, both
+`needs.*.result` inputs verbatim, its position as the first step, and the absence
+of a step-level condition.
+
 ## Considered & rejected
 
 - **Keep the edge and shorten the static jobs instead.** judgment: worth doing and
@@ -48,6 +56,6 @@ earlier ordering showed only the static failure.
 - **Cancel test groups when a static leg fails.** judgment: needs either
   `fail-fast` across unrelated jobs, which Actions does not offer, or a
   cancelling step with `actions: write`; the workflow keeps `contents: read`.
-- **One shared static job for all Python versions.** ADR 0209 resolved that
-  relocation as NO-GO pending an enforceable required-check contract; this change
+- **One shared static job for all Python versions.** verified: ADR 0209 resolved
+  that relocation as NO-GO pending an enforceable required-check contract; this change
   does not revisit it.
