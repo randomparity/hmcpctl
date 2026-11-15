@@ -595,11 +595,11 @@ def test_secret_scanner_treats_option_shaped_names_as_files(tmp_path: Path) -> N
     assert "credential.txt:1" in result.stdout
 
 
-@pytest.mark.parametrize("planted", [False, True])
+@pytest.mark.parametrize("planted", [None, "00-credential.txt", "zz-credential.txt"])
 def test_secret_scan_fan_out_fails_when_any_chunk_reports(
-    tmp_path: Path, just_recipes, planted: bool
+    tmp_path: Path, just_recipes, planted: str | None
 ) -> None:
-    """The recipe's own xargs fan-out surfaces a finding from its last, smallest chunk."""
+    """The recipe's own xargs fan-out surfaces a finding from its first or last chunk."""
     (secrets,) = _recipe_commands(just_recipes, "secrets")
     fan_out = secrets[secrets.index("xargs") : secrets.index("uv")]
     chunk = int(fan_out[fan_out.index("-n") + 1])
@@ -607,8 +607,8 @@ def test_secret_scan_fan_out_fails_when_any_chunk_reports(
     for name in names:
         (tmp_path / name).write_text("plain text\n")
     if planted:
-        names.append("zz-credential.txt")
-        (tmp_path / names[-1]).write_text(
+        names = sorted([*names, planted])
+        (tmp_path / planted).write_text(
             'password = "fan-out-probe-48"\n'  # pragma: allowlist secret
         )
 
@@ -629,8 +629,10 @@ def test_secret_scan_fan_out_fails_when_any_chunk_reports(
     )
 
     # GNU xargs reports a failed invocation as 123 and BSD xargs as 1.
-    assert (result.returncode != 0) is planted, result.stdout + result.stderr
-    assert ("zz-credential.txt:1" in result.stdout) is planted
+    assert (result.returncode != 0) is bool(planted), result.stdout + result.stderr
+    assert ("credential.txt:1" in result.stdout) is bool(planted)
+    if planted:
+        assert f"{planted}:1" in result.stdout
 
 
 def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:
