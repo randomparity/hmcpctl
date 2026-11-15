@@ -372,10 +372,11 @@ legs to disagree with your machine and read the CI matrix rather than re-running
 locally. Hosted CI no longer supplies native arm64 evidence (ADR 0210).
 
 **CI distributes tests and combines coverage per Python version (ADR 0309).**
-Each version runs `UV_NO_SYNC=1 uv run --no-sync prek run --all-files` once,
-then four separate test groups: `domain-and-unit`, `application`,
-`procedure-arms` and `tooling`. `just test-group <group>` retains timings,
-JUnit and branch data; its success means combined coverage is still pending.
+Each version runs `UV_NO_SYNC=1 uv run --no-sync prek run --all-files` once
+and, starting at the same time (ADR 0383), four separate test groups:
+`domain-and-unit`, `application`, `procedure-arms` and `tooling`.
+`just test-group <group>` retains timings, JUnit and branch data; its success
+means combined coverage is still pending.
 The existing per-version `ci` verification checks require successful producers
 and exactly four matching artifacts, then run `just verify-collected <python>`
 to enforce the configured coverage floor before smoke/build checks and wheel

@@ -1884,7 +1884,8 @@ def test_distributed_test_groups_keep_complete_native_producers() -> None:
     groups = _job_body(workflow, "test-groups")
     final = _job_body(workflow, "ci")
     assert "UV_NO_SYNC=1 uv run --no-sync prek run --all-files" in static
-    assert "needs: static" in groups
+    # ADR 0383: producers start with the hooks; the aggregator alone joins them.
+    assert "needs:" not in static and "needs:" not in groups
     assert "max-parallel: 20" in groups and "fail-fast: false" in groups
     axes = {
         name: shlex.split(values.replace(",", " "))
@@ -1926,6 +1927,27 @@ def test_distributed_test_groups_keep_complete_native_producers() -> None:
         assert "fetch-depth: 0" in body
 
 
+def test_aggregator_guard_reads_both_producers_unconditionally() -> None:
+    """ADR 0383: this guard is the only thing between a failed hook and a green verify."""
+    body = _job_body((ROOT / ".github/workflows/ci.yml").read_text(), "ci")
+    assert "    needs: [static, test-groups]\n    if: always()\n" in body
+    steps = body[body.index("    steps:\n") :]
+    assert steps.startswith(
+        "    steps:\n      - name: Require successful test producers\n"
+    )
+    guard = re.match(
+        r"    steps:\n(?P<step>      - name: [^\n]*\n.*?)(?=      - name: )",
+        steps,
+        re.DOTALL,
+    )
+    assert guard
+    step = guard["step"]
+    assert "          STATIC_GATE_RESULT: ${{ needs.static.result }}\n" in step
+    assert "          GROUP_TEST_RESULT: ${{ needs.test-groups.result }}\n" in step
+    assert step.count("_RESULT: ") == 2
+    assert not re.search(r"^\s+(?:if|continue-on-error):", step, re.MULTILINE)
+
+
 @pytest.mark.parametrize(
     "static_result,test_result",
     [
@@ -1937,6 +1959,9 @@ def test_distributed_test_groups_keep_complete_native_producers() -> None:
         ("success", "skipped"),
         ("success", "cancelled"),
         ("success", ""),
+        ("", "success"),
+        ("failure", "failure"),
+        ("", ""),
     ],
 )
 def test_distributed_dependency_guard_fails_closed(static_result, test_result):

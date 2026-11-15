@@ -142,7 +142,7 @@ verify-artifacts:
 # full standalone local verification
 verify: static verify-runtime
 
-# runtime checks; CI covers static gates through the real hooks first
+# runtime checks; CI covers static gates through the real hooks in their own jobs
 # The root help goes through the installed console script, so the entry point is
 # covered; the group helps are derived from the Typer app rather than listed here.
 verify-runtime: test verify-runtime-checks
