@@ -20,6 +20,7 @@ SERIAL = False
 GROUP: str | None = None
 COMBINE: tuple[str, str] | None = None
 TEST_GROUPS = ("domain-and-unit", "application", "procedure-arms", "tooling")
+SUPPORTED_PYTHONS = ("3.11", "3.12", "3.13", "3.14", "3.15")
 APPLICATION_UNITS = (
     "tests/unit/test_tool_registry.py",
     "tests/unit/test_tool_schema_templates.py",
@@ -293,7 +294,7 @@ def _coverage_command(arguments: list[str], environment: dict[str, str]) -> None
 
 def _combine_coverage(version: str, directory: Path) -> int:
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
-    if version not in ("3.11", "3.12", "3.13", "3.14") or version != current:
+    if version not in SUPPORTED_PYTHONS or version != current:
         raise ValueError(
             f"coverage version {version} requires its matching Python interpreter"
         )

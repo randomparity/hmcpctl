@@ -35,6 +35,9 @@ jobs:
           - architecture: amd64
             runner: ubuntu-24.04
             python-version: "3.14"
+          - architecture: amd64
+            runner: ubuntu-24.04
+            python-version: "3.15"
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -47,7 +50,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-          version: "0.12.10"
+          version: "0.13.8"
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4
         with:
@@ -66,11 +69,11 @@ jobs:
       TEST_GROUP: ${{ matrix.group }}
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 20
       matrix:
         architecture: [amd64]
         runner: [ubuntu-24.04]
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
         group: [domain-and-unit, application, procedure-arms, tooling]
     steps:
       - name: Check out repository
@@ -84,7 +87,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-          version: "0.12.10"
+          version: "0.13.8"
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4
         with:
@@ -136,6 +139,9 @@ jobs:
           - architecture: amd64
             runner: ubuntu-24.04
             python-version: "3.14"
+          - architecture: amd64
+            runner: ubuntu-24.04
+            python-version: "3.15"
     steps:
       - name: Require successful test producers
         env:
@@ -157,7 +163,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-          version: "0.12.10"
+          version: "0.13.8"
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4
         with:
@@ -195,7 +201,7 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.13"
-          version: "0.12.10"
+          version: "0.13.8"
       - name: Download validated wheel
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -321,7 +327,7 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.13"
-          version: "0.12.10"
+          version: "0.13.8"
       - name: Download validated wheel
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -447,6 +453,9 @@ jobs:
           - architecture: amd64
             runner: ubuntu-24.04
             python-version: "3.14"
+          - architecture: amd64
+            runner: ubuntu-24.04
+            python-version: "3.15"
     steps:
       - name: Check out smoke harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -457,7 +466,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-          version: "0.12.10"
+          version: "0.13.8"
       - name: Download validated wheel
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -513,6 +522,6 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.11"
-          version: "0.12.10"
+          version: "0.13.8"
       - name: Check Python lifecycle policy
-        run: uv run --no-project python scripts/check_python_support.py 3.11 3.12 3.13 3.14
+        run: uv run --no-project python scripts/check_python_support.py 3.11 3.12 3.13 3.14 3.15

@@ -24,6 +24,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   creation record. The result compares the saved profile record by record and states that no
   VIOS server adapter or mapping was created and that pairing is unproven.
 
+- CPython 3.15 joins 3.11–3.14 in the CI verification matrix: static gates, all four test
+  groups, the combined coverage floor, and the wheel smoke run on it (#608).
+
 ### Changed
 
 - `hmcpctl lpars create` and `hmcpctl vios create` no longer echo an unknown key name from
