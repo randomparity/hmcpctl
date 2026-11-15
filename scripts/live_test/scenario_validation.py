@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import ast
+import functools
 import inspect
 from collections.abc import Iterable, Mapping, Sequence
-from types import ModuleType
+from types import MappingProxyType, ModuleType
 
 from hmcpctl.server import TOOL_SECURITY
 from live_test.observation import ExpectedOutcome
@@ -54,10 +55,22 @@ def _call_result_names(
     return _result_names(assignment.targets[0].elts)
 
 
-def _validate_declared_function(
+# Source text and syntax nodes determine these two results completely, so repeated
+# validation in one process reuses them; the declarations are checked on every call.
+# Every caller receives the same nodes, so nothing here may mutate them.
+@functools.cache
+def _async_functions(source: str) -> tuple[ast.AsyncFunctionDef, ...]:
+    return tuple(
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.AsyncFunctionDef)
+    )
+
+
+@functools.cache
+def _function_shape(
     function: ast.AsyncFunctionDef,
-    declarations: Mapping[str, ExpectedOutcome],
-) -> None:
+) -> tuple[Mapping[ast.AST, ast.AST], tuple[ast.Call | ast.Name, ...]]:
     parents = {
         child: node
         for node in ast.walk(function)
@@ -72,6 +85,14 @@ def _validate_declared_function(
         ),
         key=lambda node: (node.lineno, node.col_offset),
     )
+    return MappingProxyType(parents), tuple(events)
+
+
+def _validate_declared_function(
+    function: ast.AsyncFunctionDef,
+    declarations: Mapping[str, ExpectedOutcome],
+) -> None:
+    parents, events = _function_shape(function)
     pending: dict[tuple[str, str], list[str]] = {}
     for node in events:
         if isinstance(node, ast.Name):
@@ -128,6 +149,5 @@ def validate_declared_outcomes(modules: Iterable[ModuleType | None]) -> None:
             raise ValueError(
                 f"unregistered expected outcome operation in {module.__name__}"
             )
-        for function in ast.walk(ast.parse(inspect.getsource(module))):
-            if isinstance(function, ast.AsyncFunctionDef):
-                _validate_declared_function(function, declarations)
+        for function in _async_functions(inspect.getsource(module)):
+            _validate_declared_function(function, declarations)

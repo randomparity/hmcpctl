@@ -3682,6 +3682,22 @@ def test_declared_calls_require_assigned_status_and_data():
         )
 
 
+def test_repeated_validation_judges_the_declarations_it_is_given():
+    """Parsed structure is reused between calls; the declarations never are."""
+    source = (
+        "async def scenario(client, state):\n"
+        '    st, data = await state.call(client, "hmc_get_pcm_preferences", expected=[A])\n'
+        '    state.record_with_expected(5, "pcm", st, data, [A])\n'
+    )
+    function = ast.parse(source).body[0]
+    valid = metrics._PREFERENCES_AUTHORITY
+    scenario_validation._validate_declared_function(function, {"A": valid})
+    changed = dataclasses.replace(valid, operation="pcm.other")
+    with pytest.raises(ValueError, match="does not match tool"):
+        scenario_validation._validate_declared_function(function, {"A": changed})
+    scenario_validation._validate_declared_function(function, {"A": valid})
+
+
 @pytest.mark.asyncio
 async def test_current_gap_skips_call_without_refreshing_confirmation():
     expected = metrics._PREFERENCES_AUTHORITY
