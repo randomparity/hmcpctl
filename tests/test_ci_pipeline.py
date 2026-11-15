@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -150,7 +151,7 @@ STATIC_GATES = {
     "live-vocabulary",
     "scenario-gap",
 }
-SUPPORTED_PYTHONS = ["3.11", "3.12", "3.13", "3.14"]
+SUPPORTED_PYTHONS = ["3.11", "3.12", "3.13", "3.14", "3.15"]
 NATIVE_MATRIX = [("amd64", "ubuntu-24.04", version) for version in SUPPORTED_PYTHONS]
 QEMU_IMAGE = (
     "docker.io/tonistiigi/binfmt@"
@@ -161,8 +162,8 @@ PPC64LE_BASE = (
     "sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
 )
 UV_PPC64LE_SHA256 = (
-    "2e6beb653888d2d2721b46d3d8aa"  # pragma: allowlist secret
-    "328a2339a6cc20d4df98bbf206e728a92174"  # pragma: allowlist secret
+    "4b7857be36535a31dc1e670b79d6"  # pragma: allowlist secret
+    "63bc278f1177e53d3e499e1ed300b72cbd14"  # pragma: allowlist secret
 )
 
 
@@ -350,20 +351,24 @@ def test_justfile_exposes_one_composed_verification_graph(just_recipes) -> None:
     )
     assert build[build.index("--out-dir") + 1] == "dist"
     (secrets,) = _recipe_commands(just_recipes, "secrets")
-    assert secrets[:10] == [
+    assert secrets[:14] == [
         "git",
         "ls-files",
         "-z",
         "|",
         "xargs",
         "-0",
+        "-P",
+        "4",
+        "-n",
+        "100",
         "uv",
         "run",
         "--no-sync",
         "detect-secrets-hook",
     ]
     assert secrets[-1] == "--"
-    assert sorted(secrets[10:-1]) == sorted(
+    assert sorted(secrets[14:-1]) == sorted(
         ["--baseline", ".secrets.baseline", "--no-verify"]
     )
     assert secrets[secrets.index("--baseline") + 1] == ".secrets.baseline"
@@ -591,6 +596,46 @@ def test_secret_scanner_treats_option_shaped_names_as_files(tmp_path: Path) -> N
     assert "credential.txt:1" in result.stdout
 
 
+@pytest.mark.parametrize("planted", [None, "00-credential.txt", "zz-credential.txt"])
+def test_secret_scan_fan_out_fails_when_any_chunk_reports(
+    tmp_path: Path, just_recipes, planted: str | None
+) -> None:
+    """The recipe's own xargs fan-out surfaces a finding from its first or last chunk."""
+    (secrets,) = _recipe_commands(just_recipes, "secrets")
+    fan_out = secrets[secrets.index("xargs") : secrets.index("uv")]
+    chunk = int(fan_out[fan_out.index("-n") + 1])
+    names = [f"clean-{number:04}.txt" for number in range(chunk * 2)]
+    for name in names:
+        (tmp_path / name).write_text("plain text\n")
+    if planted:
+        names = sorted([*names, planted])
+        (tmp_path / planted).write_text(
+            'password = "fan-out-probe-48"\n'  # pragma: allowlist secret
+        )
+
+    result = subprocess.run(
+        [
+            *fan_out,
+            sys.executable,
+            "-m",
+            "detect_secrets.pre_commit_hook",
+            "--no-verify",
+            "--",
+        ],
+        input="".join(f"{name}\0" for name in names),
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    # GNU xargs reports a failed invocation as 123 and BSD xargs as 1.
+    assert (result.returncode != 0) is bool(planted), result.stdout + result.stderr
+    assert ("credential.txt:1" in result.stdout) is bool(planted)
+    if planted:
+        assert f"{planted}:1" in result.stdout
+
+
 def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
 
@@ -616,7 +661,7 @@ def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:
     for action, (sha, version) in ACTION_PINS.items():
         assert f"uses: {action}@{sha}  # {version}" in workflow
     assert "persist-credentials: false" in workflow
-    assert workflow.count('version: "0.12.10"') == 7
+    assert workflow.count('version: "0.13.8"') == 7
     assert 'just-version: "1.58.0"' in workflow
     for command in (
         "just setup",
@@ -995,7 +1040,7 @@ def test_github_ci_retains_an_inactive_bounded_ppc64le_job() -> None:
     assert "/var/run/docker.sock" not in body
 
     assert dockerfile.startswith(f"FROM {PPC64LE_BASE}\n")
-    assert "uv_version=0.12.10" in dockerfile
+    assert "uv_version=0.13.8" in dockerfile
     assert "uv-powerpc64le-unknown-linux-gnu.tar.gz" in dockerfile
     assert UV_PPC64LE_SHA256 in dockerfile
     assert "ubuntu_snapshot=20260813T000000Z" in dockerfile
@@ -1053,6 +1098,18 @@ def test_github_ci_retains_an_inactive_bounded_ppc64le_job() -> None:
     assert dockerfile.count("just verify") == 1
     assert "COPY" not in dockerfile
     assert "rm -rf" not in dockerfile
+
+
+def test_coverage_combiner_accepts_exactly_the_ci_matrix_versions() -> None:
+    """A matrix leg the combiner rejects fails only in its hosted verify job."""
+    spec = importlib.util.spec_from_file_location(
+        "run_tests", ROOT / "scripts" / "run_tests.py"
+    )
+    assert spec and spec.loader
+    run_tests = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_tests)
+
+    assert list(run_tests.SUPPORTED_PYTHONS) == SUPPORTED_PYTHONS
 
 
 def test_scheduled_job_checks_the_same_explicit_versions() -> None:
@@ -1828,7 +1885,7 @@ def test_distributed_test_groups_keep_complete_native_producers() -> None:
     final = _job_body(workflow, "ci")
     assert "UV_NO_SYNC=1 uv run --no-sync prek run --all-files" in static
     assert "needs: static" in groups
-    assert "max-parallel: 16" in groups and "fail-fast: false" in groups
+    assert "max-parallel: 20" in groups and "fail-fast: false" in groups
     axes = {
         name: shlex.split(values.replace(",", " "))
         for name, values in re.findall(
