@@ -350,20 +350,24 @@ def test_justfile_exposes_one_composed_verification_graph(just_recipes) -> None:
     )
     assert build[build.index("--out-dir") + 1] == "dist"
     (secrets,) = _recipe_commands(just_recipes, "secrets")
-    assert secrets[:10] == [
+    assert secrets[:14] == [
         "git",
         "ls-files",
         "-z",
         "|",
         "xargs",
         "-0",
+        "-P",
+        "4",
+        "-n",
+        "100",
         "uv",
         "run",
         "--no-sync",
         "detect-secrets-hook",
     ]
     assert secrets[-1] == "--"
-    assert sorted(secrets[10:-1]) == sorted(
+    assert sorted(secrets[14:-1]) == sorted(
         ["--baseline", ".secrets.baseline", "--no-verify"]
     )
     assert secrets[secrets.index("--baseline") + 1] == ".secrets.baseline"
@@ -589,6 +593,44 @@ def test_secret_scanner_treats_option_shaped_names_as_files(tmp_path: Path) -> N
 
     assert result.returncode == 1
     assert "credential.txt:1" in result.stdout
+
+
+@pytest.mark.parametrize("planted", [False, True])
+def test_secret_scan_fan_out_fails_when_any_chunk_reports(
+    tmp_path: Path, just_recipes, planted: bool
+) -> None:
+    """The recipe's own xargs fan-out surfaces a finding from its last, smallest chunk."""
+    (secrets,) = _recipe_commands(just_recipes, "secrets")
+    fan_out = secrets[secrets.index("xargs") : secrets.index("uv")]
+    chunk = int(fan_out[fan_out.index("-n") + 1])
+    names = [f"clean-{number:04}.txt" for number in range(chunk * 2)]
+    for name in names:
+        (tmp_path / name).write_text("plain text\n")
+    if planted:
+        names.append("zz-credential.txt")
+        (tmp_path / names[-1]).write_text(
+            'password = "fan-out-probe-48"\n'  # pragma: allowlist secret
+        )
+
+    result = subprocess.run(
+        [
+            *fan_out,
+            sys.executable,
+            "-m",
+            "detect_secrets.pre_commit_hook",
+            "--no-verify",
+            "--",
+        ],
+        input="".join(f"{name}\0" for name in names),
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    # GNU xargs reports a failed invocation as 123 and BSD xargs as 1.
+    assert (result.returncode != 0) is planted, result.stdout + result.stderr
+    assert ("zz-credential.txt:1" in result.stdout) is planted
 
 
 def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:

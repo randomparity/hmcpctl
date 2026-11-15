@@ -29,8 +29,9 @@ typecheck:
     uv run --no-sync ty check
 
 # scan every tracked file against the reviewed fixture baseline
+# The hook scans its arguments one at a time, so xargs supplies the parallelism.
 secrets:
-    git ls-files -z | xargs -0 uv run --no-sync detect-secrets-hook \
+    git ls-files -z | xargs -0 -P 4 -n 100 uv run --no-sync detect-secrets-hook \
         --baseline .secrets.baseline --no-verify --
 
 # audit GitHub Actions without depending on mutable remote state
