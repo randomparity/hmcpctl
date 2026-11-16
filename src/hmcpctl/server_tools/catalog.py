@@ -29,6 +29,7 @@ from hmcpctl.server_tools.lpar import (
     lifecycle_boot,
     lifecycle_create,
     migration,
+    pmem,
     profiles,
 )
 from hmcpctl.server_tools.lpar.decommission import (
@@ -52,6 +53,7 @@ from hmcpctl.server_tools.permissions import EFFECTIVE_PERMISSIONS_SECURITY
 from hmcpctl.server_tools.storage import resources as storage
 from hmcpctl.server_tools.systems import core as systems
 from hmcpctl.server_tools.systems import health
+from hmcpctl.server_tools.systems import processor_pools as system_processor_pools
 from hmcpctl.server_tools.systems import profiles as system_profiles
 from hmcpctl.server_tools.systems import resources as system_resources
 from hmcpctl.server_tools.templates import core as templates
@@ -64,6 +66,7 @@ from hmcpctl.tool_registry import ToolSecurity, build_tool_security
 TOOL_MODULES = (
     systems,
     system_profiles,
+    system_processor_pools,
     capacity,
     jobs,
     health,
@@ -85,6 +88,7 @@ TOOL_MODULES = (
     profiles,
     snapshot,
     configuration,
+    pmem,
     system_resources,
     composite,
     console,

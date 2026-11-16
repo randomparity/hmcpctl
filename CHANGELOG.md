@@ -27,8 +27,30 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   UUID. It refuses an adapter the partition does not own (ADR 0374).
 - vSCSI and vFC client adapter results from add, get and list carry `paired_identity`: the
   remote partition ID and slot, the VIOS UUID, and for vFC the WWPN pair.
+- Virtual persistent-memory volumes: `hmc_list_persistent_memory_volumes`,
+  `hmc_get_persistent_memory_volume`, `hmc_create_persistent_memory_volume`,
+  `hmc_rename_persistent_memory_volume` and `hmc_delete_persistent_memory_volume`
+  (`hmcpctl lpars pmem-list`, `pmem-show`, `pmem-create`, `pmem-rename` and `pmem-delete`)
+  manage DRAM-backed volumes through the HMC REST API. Create, rename and delete name the
+  partition the volume is assigned to and are guarded by its ownership token. Create requires
+  an inactive AIX/Linux partition with a spare volume slot and a size that is a multiple of the
+  system's advertised block size. Delete destroys the volume's data: it needs
+  `acknowledge_data_loss` (`--acknowledge-data-loss`) and an inactive partition (ADR 0373).
+- IBM i creation accepts a virtual `load_source_slot` and `alt_restart_device_slot` when the
+  slot is the local slot of a vSCSI client declared in the same request (#1981, ADR 0382).
+  The saved profile is checked for each bound role before the profile is applied. Any other
+  virtual slot, and every virtual console slot, is refused before effects.
+
+- CPython 3.15 joins 3.11–3.14 in the CI verification matrix: static gates, all four test
+  groups, the combined coverage floor, and the wheel smoke run on it (#608).
 
 ### Changed
+
+- Native IBM i (OS400) creation without `physical_io.console_slot` is refused before any write,
+  instead of failing at the HMC (#1981). No console default is inserted. When a request's
+  other inputs (for example serial or vSCSI records) select controller-mode creation on a
+  PowerVM management controller, an IBM i request is therefore refused too, because the
+  console is initial-profile I/O that controller mode refuses.
 
 - `hmcpctl lpars create` and `hmcpctl vios create` no longer echo an unknown key name from
   `--virtual-serial-adapters` inline JSON in their usage error; the error names the validation

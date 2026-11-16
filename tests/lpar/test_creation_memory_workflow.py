@@ -626,7 +626,7 @@ async def test_omitted_secondary_requires_evidence_and_authorized_identity(
 @pytest.mark.parametrize("environment", ["AIX/Linux", "OS400"])
 @pytest.mark.parametrize("factor", [0, Decimal("1.10")])
 async def test_ame_saved_contract_in_both_lpar_environments(
-    memory_target, environment, factor
+    memory_target, environment, factor, ibmi_console
 ):
     b = memory_target
     b.local["Resource"]["PartitionType"] = environment
@@ -642,6 +642,7 @@ async def test_ame_saved_contract_in_both_lpar_environments(
             "new",
             environment,
             LparResources(desired_memory=1024),
+            physical_io=ibmi_console(environment),
             creation_memory=Memory(mem_mode="ded", mem_expansion=factor),
         ),
     )

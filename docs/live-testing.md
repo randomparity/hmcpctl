@@ -273,7 +273,9 @@ and expects the profile to read `none`.
 ### The profiles arm
 
 The profiles arm verifies the partition-property, profile, memory-pool and
-affinity operations (#627). Subtask 10 changes each property it tests and
+affinity operations (#627). Subtask 4 also reads the shared processor pools and
+compares the configured ones with `lshwres -r procpool`, read-only (#1975, ADR 0375).
+Subtask 10 changes each property it tests and
 restores the value it read just before:
 
 - the test partition's description;
@@ -2080,9 +2082,11 @@ of the arm adds no packaged maturity credit.
 The opt-in `lpar-vscsi-client` arm (`st74-lpar-vscsi-client`, ADR 0376) lists the selected
 system's VIOS partitions and creates one inactive OS400 scratch partition with an explicit
 HMC console, `max_virtual_slots=10` and one vSCSI client record: local slot 2, naming the
-first listed VIOS by partition ID, remote slot one below that VIOS's maximum. With no VIOS it
-records a failure before any create. It requires confirmed ownership, a `virtual_scsi_adapters`
-step of `ok`, and the result's statements that no VIOS server adapter or mapping was created
+first listed VIOS by partition ID, remote slot one below that VIOS's maximum. Slot 2 is also
+the load source and alternate restart device (ADR 0382). With no VIOS it records a failure
+before any create. It requires confirmed ownership, a `virtual_scsi_adapters` step of `ok`
+whose record for slot 2 is verified with both roles bound, a `physical_io` step of `ok`, and
+the result's statements that no VIOS server adapter or mapping was created
 and that pairing is unproven. It applies the created profile and records the apply step's
 status as observed, because applying a client whose server slot is absent is uncaptured.
 
@@ -2791,7 +2795,7 @@ old receipts and a recovered marker cannot supply that operational authority.
 Root must review the exact packet and raw-byte digest, deployed clean Git
 commit/tree, selected twenty source hashes, effective profile endpoint/agent,
 and bound Python 3.11.15 runtime. This is a deployment gate; the project's
-Python floor and Linux amd64 Python 3.11–3.14 verification targets are unchanged.
+Python floor and Linux amd64 CI verification targets are unchanged.
 Use a fresh canonical external 0700 window; packet files and evidence are 0600.
 Retain at least 168 MiB for bounded artifacts. The absolute window is 3200–7200
 seconds; root supplies an outer deadline watchdog. A watchdog kill leaves unknown

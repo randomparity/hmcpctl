@@ -65,6 +65,7 @@ OVERRIDES: dict[str, dict[str, Any]] = {
     "hmc_configure_lpar_security_policy": {"settings": {"secure_boot": 0}},
     "hmc_configure_lpar_vtpm": {"settings": {"vtpm_enabled": True}},
     "hmc_delete_partition_profile": _WINDOW,
+    "hmc_delete_persistent_memory_volume": {"acknowledge_data_loss": True},
     "hmc_dlpar_mem": {"resources": {"desired_memory": 1024}},
     "hmc_dlpar_proc": {"change": {"operation": "add", "processors": 1}},
     "hmc_dump_restart_lpar": {"allow_dump_restart": True},
@@ -232,9 +233,15 @@ def _value(name: str, schema: dict[str, Any]) -> Any:
     return {"object": {}, "array": []}.get(kind, defaults.get(kind))
 
 
+# Every application in this module is composed from one policy and catalog, so one
+# listing describes them all; listing per call was most of this module's runtime.
+_SCHEMAS: dict[str, dict[str, Any]] = {}
+
+
 async def _arguments(client: Client, tool: str, lpar: str) -> dict[str, Any]:
-    listed = {t.name: t for t in await client.list_tools()}[tool]
-    schema = listed.input_schema
+    if not _SCHEMAS:
+        _SCHEMAS.update({t.name: t.input_schema for t in await client.list_tools()})
+    schema = _SCHEMAS[tool]
     arguments = {
         name: _value(name, schema["properties"][name])
         for name in schema.get("required", [])

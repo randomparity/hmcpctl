@@ -27,7 +27,7 @@ from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
 )
-from hmcpctl.operations.lpar.creation import core
+from hmcpctl.operations.lpar.creation import core, physical_io
 from hmcpctl.operations.lpar.creation import workflow as workflows
 from hmcpctl.operations.vios.core import create_vios
 from hmcpctl.ssh import lpar as native
@@ -79,7 +79,7 @@ def profile(name, native_id, serial, profile_name="default_profile", **extra):
 
 
 @pytest.fixture(params=("AIX/Linux", "OS400", "Virtual IO Server"))
-def target(request, monkeypatch):
+def target(request, monkeypatch, ibmi_console):
     environment = request.param
     kind = (
         "VirtualIOServer" if environment == "Virtual IO Server" else "LogicalPartition"
@@ -194,6 +194,7 @@ def target(request, monkeypatch):
     ):
         monkeypatch.setattr(module + ".run_hmc_command", b.command)
     monkeypatch.setattr("hmcpctl.ssh.lpar_serial.read_lpar_profile_record", b.reader)
+    b.console = ibmi_console(environment)
     b.hmc = hmc
     return b
 
@@ -211,6 +212,7 @@ async def invoke(b, *, direct=False, adapters=(ADAPTER,), **options):
             virtual_serial_adapters=adapters,
             **options,
         )
+    options.setdefault("physical_io", b.console)
     creation = core.LparCreation(
         "new",
         b.environment,
@@ -372,6 +374,12 @@ async def test_controller_current_unknown_blocks_followups_without_profile_reads
 ):
     b = target
     b.controller = True
+    if b.environment == "OS400":
+        # The required console is initial-profile I/O, which controller mode refuses.
+        with pytest.raises(ValueError, match="initial-profile I/O"):
+            await invoke(b, apply_profile=False)
+        assert "create" not in b.events
+        return
     if b.kind == "VirtualIOServer":
         with pytest.raises(HMCError, match="exists or may exist"):
             await invoke(b)
@@ -519,7 +527,7 @@ async def test_verified_serial_does_not_bypass_other_prerequisite(target, prereq
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prerequisite", ["vtpm", "io", "layout"])
 async def test_other_admission_guards_remain_before_serial_submission(
-    target, prerequisite
+    target, prerequisite, monkeypatch
 ):
     options = {
         "vtpm": {"vtpm_settings": LparVtpmSettings(vtpm_enabled=True)},
@@ -528,6 +536,18 @@ async def test_other_admission_guards_remain_before_serial_submission(
     }[prerequisite]
     if prerequisite == "io" and target.kind == "VirtualIOServer":
         pytest.skip("VIOS has no C12 creation input")
+    if prerequisite == "io":
+        monkeypatch.setattr(
+            physical_io,
+            "read_system_entry",
+            AsyncMock(
+                return_value={
+                    "Resource": {
+                        "AssociatedSystemCapabilities": {"IBMiCapable": "false"}
+                    }
+                }
+            ),
+        )
     with pytest.raises(ValueError):
         await invoke(target, **options)
     assert "create" not in target.events
@@ -546,7 +566,9 @@ async def test_lpar_required_stamp_policy_still_fails_without_uncertain_stamp(ta
 
 @pytest.mark.asyncio
 async def test_omission_preserves_rest_and_result_contract(target):
-    result = await invoke(target, direct=True, adapters=())
+    # Without serial records an IBM i create needs no console and stays on REST.
+    io = {} if target.kind == "VirtualIOServer" else {"physical_io": LparPhysicalIO()}
+    result = await invoke(target, direct=True, adapters=(), **io)
     assert "controller" not in target.events and "create" not in target.events
     target.reader.assert_not_awaited()
     if target.kind == "VirtualIOServer":
@@ -651,6 +673,7 @@ async def test_serial_combined_submission_discards_provider_chain(target, option
         target.environment,
         LparResources(desired_memory=1024),
         max_virtual_slots=8,
+        physical_io=target.console,
         virtual_serial_adapters=(ADAPTER,),
         **options,
     )

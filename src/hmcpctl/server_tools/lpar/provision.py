@@ -363,9 +363,10 @@ def provision_handler(
                 successful activation.
             physical_io: Optional typed initial physical/pool and IBM i tagged-I/O
                 configuration. No implicit console is chosen. Physical/direct SR-IOV
-                DRCs and explicit hmc console are supported; unresolved virtual-slot
-                selectors fail before effects (remaining linkage gap #638). C12 profile
-                readback must succeed before application and later workflow steps.
+                DRCs and explicit hmc console are supported; virtual-slot selectors
+                fail before effects, because provisioning declares no vSCSI client to
+                bind them to (ADR 0382). C12 profile readback must succeed before
+                application and later workflow steps.
             install: Optional operating-system installation: ``media.mode=prepared``
                 with an iso-chain-media-v1 producer result plus an allowlisted URL, or
                 ``media.mode=built`` with ``ssh_authorized_keys`` and ``login_user``
