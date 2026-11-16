@@ -128,8 +128,8 @@ def test_create_mcp_returns_independent_complete_applications():
     # #1226 adds the hmc_reconfigure_lpar logical operation.
     # #1285 adds the optical media load and unload tools (ADR 0317).
     # #643 adds five persistent-memory volume tools (ADR 0373).
-    assert len(asyncio.run(first.list_tools(run_middleware=False))) == 211
-    assert len(asyncio.run(second.list_tools(run_middleware=False))) == 211
+    assert len(asyncio.run(first.list_tools(run_middleware=False))) == 213
+    assert len(asyncio.run(second.list_tools(run_middleware=False))) == 213
 
 
 def test_operations_do_not_import_application_modules():

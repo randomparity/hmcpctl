@@ -313,6 +313,19 @@ class SystemsMixin:
             power_off_vios_job(immediate),
         )
 
+    async def list_shared_processor_pools(
+        self: SystemsClient, system_uuid: str
+    ) -> list[dict[str, Any]]:
+        """List every SharedProcessorPool slot of a managed system, configured or not.
+
+        Raises:
+            ValueError: If system_uuid is invalid.
+        """
+        _reject_non_uuid_path_argument("system_uuid", system_uuid)
+        path = f"/rest/api/uom/ManagedSystem/{system_uuid}/SharedProcessorPool"
+        xml = await self._get(path, "SharedProcessorPool")
+        return _parse_feed(xml, path) if xml else []
+
     async def list_vios(self: SystemsClient, system_uuid: str) -> list[dict[str, Any]]:
         _reject_non_uuid_path_argument("system_uuid", system_uuid)
         path = f"/rest/api/uom/ManagedSystem/{system_uuid}/VirtualIOServer"

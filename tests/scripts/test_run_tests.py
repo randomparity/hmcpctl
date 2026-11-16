@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, BinaryIO, cast
 
 import pytest
@@ -1555,6 +1556,31 @@ def test_group_coverage_invalid_inputs_refuse(tmp_path, fault):
     assert result.returncode != 0
     assert "combined coverage gate passed" not in result.stdout
     assert "coverage" in result.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    ("minor", "accepted"),
+    [
+        (10, False),
+        *(
+            (int(version.split(".")[1]), True)
+            for version in run_tests.SUPPORTED_PYTHONS
+        ),
+        (16, False),
+    ],
+)
+def test_combiner_admits_each_supported_interpreter_and_no_other(
+    monkeypatch, tmp_path, minor, accepted
+):
+    """Whatever interpreter runs this test, every matrix version reaches the artifact checks."""
+    monkeypatch.setattr(
+        run_tests,
+        "sys",
+        SimpleNamespace(version_info=SimpleNamespace(major=3, minor=minor)),
+    )
+    expected = "real directory" if accepted else "matching Python interpreter"
+    with pytest.raises(ValueError, match=expected):
+        run_tests._combine_coverage(f"3.{minor}", tmp_path / "absent")
 
 
 def test_group_coverage_foreign_shards_are_untouched(tmp_path):

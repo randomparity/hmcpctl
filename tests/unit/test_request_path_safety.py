@@ -211,6 +211,13 @@ _NEW_UUID_PATH_CALLS = (
         f"ManagedSystem/{UUID_B}/VirtualIOServer",
     ),
     (
+        "list_shared_processor_pools",
+        (UUID_B,),
+        "system_uuid",
+        0,
+        f"ManagedSystem/{UUID_B}/SharedProcessorPool",
+    ),
+    (
         "get_vios_storage_detail",
         (UUID_B,),
         "vios_uuid",
@@ -1217,6 +1224,7 @@ _UUID_UOM_REQUEST_SITES = {
     ),
     "client_systems.SystemsMixin.get_vios_storage_detail": "vios_uuid",
     "client_systems.SystemsMixin.list_persistent_memory_volumes": "system_uuid",
+    "client_systems.SystemsMixin.list_shared_processor_pools": "system_uuid",
     "client_systems.SystemsMixin.list_vios": "system_uuid",
     "client_systems.SystemsMixin.modify_managed_system": "system_uuid",
     "client_systems.SystemsMixin.power_off_system": "system_uuid",

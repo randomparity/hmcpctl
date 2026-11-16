@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import secrets
+import shlex
 from collections.abc import Callable, Mapping
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 from fastmcp import Client
 
+from hmcpctl.errors import HMCCLIError
 from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES
+from hmcpctl.ssh.commands import _parse_lshwres_output
 
 from ..observation import Assertion
 from ..results import field
@@ -178,6 +182,138 @@ async def _pool_and_vnic_reads(client: Client, state: RunState) -> None:
         lpar_name_or_uuid=config.lp3_name,
     )
     state.record(4, "hmc_list_vnics", st, data)
+
+
+_POOL_READS = "st4-processor-pool-reads"
+#: ``lshwres -r procpool`` unit attributes and the REST projection fields they mirror.
+_CLI_POOL_UNITS = {
+    "max_pool_proc_units": "maximum_processing_units",
+    "curr_reserved_pool_proc_units": "reserved_processing_units",
+    "pend_reserved_pool_proc_units": "pending_reserved_processing_units",
+}
+
+
+def _same_units(cli: str, rest: object) -> bool:
+    try:
+        return rest is not None and Decimal(cli) == Decimal(str(rest))
+    except InvalidOperation:
+        return False
+
+
+def _member_count(lpar_ids: str) -> int:
+    return 0 if lpar_ids == "none" else len(lpar_ids.split(","))
+
+
+def pool_assertions(
+    pools: object, rows: list[dict[str, str]] | None
+) -> list[Assertion]:
+    """Compare configured REST pools with ``lshwres -r procpool`` name=value rows.
+
+    ``rows`` is None when either read failed; that records the failed read.
+    """
+    if rows is None:
+        return [_READ_FAILED]
+    rest = {
+        pool.get("pool_id"): pool
+        for pool in (pools if isinstance(pools, list) else ())
+        if isinstance(pool, Mapping)
+    }
+    cli = {row.get("shared_proc_pool_id", ""): row for row in rows}
+    cli_ids = {int(key) for key in cli if key.isdigit()}
+    ids = bool(rest) and len(cli_ids) == len(cli) and cli_ids == set(rest)
+    pairs = [(row, rest[int(key)]) for key, row in cli.items()] if ids else []
+    return [
+        Assertion("pool-ids-match", ids),
+        Assertion(
+            "pool-names-match",
+            ids and all(pool.get("name") == row.get("name") for row, pool in pairs),
+        ),
+        Assertion(
+            "pool-units-match",
+            ids
+            and all(
+                _same_units(row[cli_key], pool.get(rest_key))
+                for row, pool in pairs
+                for cli_key, rest_key in _CLI_POOL_UNITS.items()
+                if cli_key in row
+            ),
+        ),
+        Assertion(
+            "pool-membership-match",
+            ids
+            and all(
+                _member_count(row.get("lpar_ids", "none"))
+                == len(pool.get("assigned_partition_uuids") or ())
+                for row, pool in pairs
+            ),
+        ),
+    ]
+
+
+async def _cli_pool_rows(
+    client: Client, state: RunState, system: str
+) -> list[dict[str, str]] | None:
+    status, raw = await state.call(
+        client, "hmc_run_command", cmd=f"lshwres -r procpool -m {shlex.quote(system)}"
+    )
+    if status != "PASS" or not isinstance(raw, str):
+        return None
+    try:
+        return _parse_lshwres_output(raw)
+    except HMCCLIError:
+        return None
+
+
+async def _processor_pool_reads(client: Client, state: RunState) -> None:
+    """Compare the pool read with ``lshwres -r procpool``; read-only (#1975)."""
+    system = state.config.system_name
+    status, listing = await state.call(
+        client, "hmc_list_shared_processor_pools", system_name_or_uuid=system
+    )
+    rows = await _cli_pool_rows(client, state, system) if status == "PASS" else None
+    state.record_verified(
+        4,
+        "hmc_list_shared_processor_pools",
+        operation="processor_pool.list",
+        scenario=_POOL_READS,
+        assertions=pool_assertions(field(listing, "pools"), rows),
+        cleanup="not-required",
+        data=listing,
+    )
+    # One observation for both gets: its id derives from (subtask, tool), and the
+    # evidence emitter refuses a run whose observation ids repeat.
+    by_id_ok, by_id = await _default_pool_get(client, state, 0)
+    by_name_ok, by_name = await _default_pool_get(client, state, "DefaultPool")
+    # Literal ids in the keyword keep them visible to the static scenario-id guard.
+    state.record_verified(
+        4,
+        "hmc_get_shared_processor_pool",
+        operation="processor_pool.get",
+        scenario=_POOL_READS,
+        assertions=[
+            Assertion("default-pool-by-id", by_id_ok),
+            Assertion("default-pool-by-name", by_name_ok),
+            *([_READ_FAILED] if None in (by_id, by_name) else []),
+        ],
+        cleanup="not-required",
+        data={"by_id": by_id, "by_name": by_name},
+    )
+
+
+async def _default_pool_get(
+    client: Client, state: RunState, selector: int | str
+) -> tuple[bool, object]:
+    """Get the default pool by *selector*; the data is None when the call failed."""
+    status, data = await state.call(
+        client,
+        "hmc_get_shared_processor_pool",
+        system_name_or_uuid=state.config.system_name,
+        pool=selector,
+    )
+    if status != "PASS":
+        return False, None
+    pool = field(data, "pool")
+    return field(pool, "pool_id") == 0 and field(pool, "configured") is True, data
 
 
 async def _score_reads(client: Client, state: RunState) -> None:
@@ -384,6 +520,7 @@ async def inventory_lpar_profiles(client: Client, state: RunState) -> None:
     print("\n=== ST4: LPAR Properties & Profile Inventory ===")
     await _profile_reads(client, state)
     await _pool_and_vnic_reads(client, state)
+    await _processor_pool_reads(client, state)
     await _score_reads(client, state)
     await _plan_reads(client, state)
     await _capability_reads(client, state)
