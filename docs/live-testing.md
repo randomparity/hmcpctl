@@ -2793,7 +2793,7 @@ old receipts and a recovered marker cannot supply that operational authority.
 Root must review the exact packet and raw-byte digest, deployed clean Git
 commit/tree, selected twenty source hashes, effective profile endpoint/agent,
 and bound Python 3.11.15 runtime. This is a deployment gate; the project's
-Python floor and Linux amd64 Python 3.11–3.14 verification targets are unchanged.
+Python floor and Linux amd64 CI verification targets are unchanged.
 Use a fresh canonical external 0700 window; packet files and evidence are 0600.
 Retain at least 168 MiB for bounded artifacts. The absolute window is 3200–7200
 seconds; root supplies an outer deadline watchdog. A watchdog kill leaves unknown
