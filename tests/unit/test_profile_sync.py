@@ -311,6 +311,10 @@ async def test_each_operation_reads_the_location_before_its_write(
             authorize,
         )
     monkeypatch.setattr(
+        "hmcpctl.operations.virtualization.adapters._require_remote_vios",
+        AsyncMock(return_value=VIOS_UUID),
+    )
+    monkeypatch.setattr(
         "hmcpctl.operations.storage.resources.resolve_vios_uuid",
         AsyncMock(return_value=VIOS_UUID),
     )

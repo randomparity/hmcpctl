@@ -403,3 +403,59 @@ async def test_network_listing_reads_an_empty_collection_when_allowed(mock_hmc):
             )
             == []
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "adapter_type", ["VirtualSCSIClientAdapter", "VirtualFibreChannelClientAdapter"]
+)
+async def test_storage_adapter_read_gets_the_typed_instance_path(
+    mock_hmc, adapter_type
+):
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    partition = "11111111-1111-4111-8111-111111111111"
+    adapter = "22222222-2222-4222-8222-222222222222"
+    entry = (
+        '<entry xmlns="http://www.w3.org/2005/Atom">'
+        f"<id>{adapter}</id><content><{adapter_type} "
+        'xmlns="http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/">'
+        f"<LocalPartitionID>7</LocalPartitionID></{adapter_type}></content></entry>"
+    )
+    route = mock_hmc.get(
+        f"/rest/api/uom/LogicalPartition/{partition}/{adapter_type}/{adapter}"
+    ).mock(return_value=httpx.Response(200, text=entry))
+    async with HMCClient(make_config()) as hmc:
+        result = await hmc.get_storage_adapter(partition, adapter_type, adapter)
+    assert route.called
+    assert result is not None and result["UUID"] == adapter
+    assert route.calls.last.request.headers["Accept"].endswith(f"type={adapter_type}")
+
+
+@pytest.mark.asyncio
+async def test_storage_adapter_read_refuses_a_non_uuid_path_argument(mock_hmc):
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+
+    async with HMCClient(make_config()) as hmc:
+        with pytest.raises(ValueError, match="adapter_uuid"):
+            await hmc.get_storage_adapter(
+                "11111111-1111-4111-8111-111111111111",
+                "VirtualSCSIClientAdapter",
+                "../ManagedSystem",
+            )
+
+
+@pytest.mark.asyncio
+async def test_storage_adapter_read_refuses_other_types():
+    client = SimpleNamespace(_get=AsyncMock())
+
+    with pytest.raises(ValueError, match="Invalid adapter_type"):
+        await AdaptersMixin.get_storage_adapter(
+            client, "lpar-1", "ClientNetworkAdapter", "adapter-1"
+        )
+    client._get.assert_not_awaited()

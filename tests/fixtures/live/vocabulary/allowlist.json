@@ -22,6 +22,20 @@
  },
  {
   "kind": "rest-path",
+  "file": "src/hmcpctl/client/client_adapters.py",
+  "subject": "/rest/api/uom/LogicalPartition/{}/VirtualFibreChannelClientAdapter/{}",
+  "value": "",
+  "reason": "captured live 2026-11-13 on V10R3 M1060 for #663 (200 with ETag; 404 REST000B for an unknown UUID; ADR 0374) but not yet in an exported vocabulary; add it to the read-only sweep (#1202)"
+ },
+ {
+  "kind": "rest-path",
+  "file": "src/hmcpctl/client/client_adapters.py",
+  "subject": "/rest/api/uom/LogicalPartition/{}/VirtualSCSIClientAdapter/{}",
+  "value": "",
+  "reason": "captured live 2026-11-13 on V10R3 M1060 for #663 (200 with ETag; 404 REST000B for an unknown UUID; ADR 0374) but not yet in an exported vocabulary; add it to the read-only sweep (#1202)"
+ },
+ {
+  "kind": "rest-path",
   "file": "src/hmcpctl/client/client_cluster.py",
   "subject": "/rest/api/uom/Cluster/{}",
   "value": "",

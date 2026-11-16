@@ -2,7 +2,7 @@
 
 # `adapter` tools
 
-6 tools in the `adapter` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+7 tools in the `adapter` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -12,5 +12,6 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `hmc_add_vfc_adapter` | `mutate` | `adapter.add_vfc` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Add an NPIV virtual Fibre Channel client adapter to an LPAR. |
 | `hmc_add_vscsi_adapter` | `mutate` | `adapter.add_vscsi` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Add a virtual SCSI client adapter paired to a VIOS server slot. |
 | `hmc_delete_adapter` | `destructive` | `adapter.delete` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | Remove an adapter by UUID, detaching its network or storage path. |
+| `hmc_get_adapter` | `read` | `adapter.get` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Read one vSCSI or vFC client adapter of an LPAR, with its paired identity. |
 | `hmc_list_adapters` | `read` | `adapter.list` | `lpar` | `implemented` | `stale (closure-changed)` | `existing-runtime-guards` | List one LPAR's virtual adapters of the selected adapter type. |
 | `hmc_update_network_adapter` | `mutate` | `adapter.update_network` | `lpar` | `implemented` | `unevidenced` | `existing-runtime-guards` | Update one contained running client Ethernet adapter with one native attempt. |

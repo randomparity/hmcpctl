@@ -72,9 +72,9 @@ def build_vfc_adapter_document(
     """
     return _adapter_document(
         "VirtualFibreChannelClientAdapter",
-        # No live V10R3 kb value is recorded for these two fields (#961).
-        ("ConnectingPartitionID", "CUD"),
-        ("ConnectingVirtualSlotNumber", "CUD"),
+        # V10R3 M1060 refuses CUD on these two fields with REST0001 (ADR 0374).
+        ("ConnectingPartitionID", "CUR"),
+        ("ConnectingVirtualSlotNumber", "CUR"),
         vios_partition_id,
         vios_slot,
         slot_number,

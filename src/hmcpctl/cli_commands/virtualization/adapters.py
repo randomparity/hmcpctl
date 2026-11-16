@@ -9,7 +9,12 @@ from typing import Any, Literal
 import typer
 from rich.text import Text
 
-from ...client.client_contracts import ADAPTER_TYPES, AdapterType
+from ...client.client_contracts import (
+    ADAPTER_TYPES,
+    STORAGE_ADAPTER_TYPES,
+    AdapterType,
+    StorageAdapterType,
+)
 from ...documents.adapters import (
     validate_network_adapter_creation_fields,
     validate_network_adapter_update_fields,
@@ -21,6 +26,7 @@ from ...operations.virtualization.adapters import (
     add_vfc_adapter,
     add_vscsi_adapter,
     delete_adapter,
+    get_adapter,
     list_adapters,
     update_network_adapter,
 )
@@ -28,6 +34,7 @@ from ..output import console, output, print_json, terminal_field
 from ..runtime import with_client
 
 _ADAPTER_TYPES = " | ".join(sorted(ADAPTER_TYPES))
+_STORAGE_ADAPTER_TYPES = " | ".join(sorted(STORAGE_ADAPTER_TYPES))
 
 
 def adapters_list(
@@ -47,6 +54,27 @@ def adapters_list(
     )
 
     output(adapters, as_json, None, f"No {adapter_type} adapters on {lpar}")
+
+
+def adapters_get(
+    lpar: str = typer.Argument(..., help="LPAR name or UUID"),
+    adapter_uuid: str = typer.Argument(..., help="Adapter UUID"),
+    adapter_type: StorageAdapterType = typer.Option(
+        ..., "--type", "-t", help=_STORAGE_ADAPTER_TYPES
+    ),
+    system: str | None = typer.Option(
+        None, "--system", "-s", help="Managed system name or UUID"
+    ),
+) -> None:
+    """Show one vSCSI or vFC client adapter with its paired identity (JSON)."""
+
+    print_json(
+        with_client(
+            lambda hmc: get_adapter(
+                hmc, lpar, adapter_type, adapter_uuid, system_name_or_uuid=system
+            )
+        )
+    )
 
 
 def adapters_add_network(
@@ -397,6 +425,7 @@ def _adapter_mutation(result: AdapterResult, lpar: str, kind: str) -> None:
 def register_commands(group: typer.Typer) -> None:
     """Register this module’s commands on *group*."""
     group.command("list")(adapters_list)
+    group.command("get")(adapters_get)
     group.command("add-network")(adapters_add_network)
     group.command("update-network")(adapters_update_network)
     group.command("add-vscsi")(adapters_add_vscsi)

@@ -17,7 +17,13 @@ from ..documents.adapters import (
 )
 from ..errors import HMCError
 from ..xmlutil import ATOM_NS, localname
-from .client_contracts import AdaptersClient, AdapterType, validate_adapter_type
+from .client_contracts import (
+    AdaptersClient,
+    AdapterType,
+    StorageAdapterType,
+    validate_adapter_type,
+    validate_storage_adapter_type,
+)
 from .client_parse import _parse_feed
 
 
@@ -66,6 +72,36 @@ class AdaptersMixin:
         await self.delete_child(
             "LogicalPartition", lpar_uuid, adapter_type, adapter_uuid
         )
+
+    async def get_storage_adapter(
+        self: AdaptersClient,
+        lpar_uuid: str,
+        adapter_type: StorageAdapterType,
+        adapter_uuid: str,
+    ) -> dict[str, Any] | None:
+        """GET one client storage adapter instance; None on an empty response.
+
+        Raises:
+            ValueError: If adapter_type is not a client storage type, or a UUID is
+                invalid.
+            HMCError: If the HMC answers outside 200/204 (404 included).
+        """
+        validate_storage_adapter_type(adapter_type)
+        # One literal path per type, so the live-vocabulary gate checks each endpoint.
+        if adapter_type == "VirtualSCSIClientAdapter":
+            template = "/rest/api/uom/LogicalPartition/{}/VirtualSCSIClientAdapter/{}"
+        else:
+            template = (
+                "/rest/api/uom/LogicalPartition/{}/VirtualFibreChannelClientAdapter/{}"
+            )
+        path = template.format(lpar_uuid, adapter_uuid)
+        xml = await self._get(
+            path,
+            adapter_type,
+            uuid_path_arguments={"lpar_uuid": lpar_uuid, "adapter_uuid": adapter_uuid},
+        )
+        entries = _parse_feed(xml, path) if xml else []
+        return entries[0] if entries else None
 
     async def add_vscsi_adapter(
         self: AdaptersClient,

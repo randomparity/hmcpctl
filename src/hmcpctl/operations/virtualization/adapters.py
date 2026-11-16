@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
+from urllib.parse import urlsplit
 
 from hmcpctl.client.core import HMCClient
 from hmcpctl.documents.adapters import (
@@ -24,8 +26,19 @@ from hmcpctl.operations.lpar.profiles.sync import (
     read_change_location,
 )
 
-from ...client.client_contracts import AdapterType, validate_adapter_type
-from ...resource_identity import is_uuid, resolve_lpar_uuid, resolve_system_uuid
+from ...client.client_contracts import (
+    STORAGE_ADAPTER_TYPES,
+    AdapterType,
+    StorageAdapterType,
+    validate_adapter_type,
+    validate_storage_adapter_type,
+)
+from ...resource_identity import (
+    ResourceNotFoundError,
+    is_uuid,
+    resolve_lpar_uuid,
+    resolve_system_uuid,
+)
 from ...ssh.ethernet import _set_ethernet_adapter
 from ...ssh.transport import HMCCLIError
 from ...xmlutil import leaf_text
@@ -153,7 +166,170 @@ async def list_adapters(
     lpar_uuid = await resolve_lpar_uuid(
         hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
     )
-    return await hmc.list_adapters(lpar_uuid, adapter_type)
+    entries = await hmc.list_adapters(lpar_uuid, adapter_type)
+    if adapter_type not in STORAGE_ADAPTER_TYPES:
+        return entries
+    storage_type = validate_storage_adapter_type(adapter_type)
+    return [_with_paired_identity(entry, storage_type) for entry in entries]
+
+
+# Remote-end fields per client storage type, as served on V10R3 (ADR 0374).
+_REMOTE_FIELDS: dict[str, tuple[str, str]] = {
+    "VirtualSCSIClientAdapter": ("RemoteLogicalPartitionID", "RemoteSlotNumber"),
+    "VirtualFibreChannelClientAdapter": (
+        "ConnectingPartitionID",
+        "ConnectingVirtualSlotNumber",
+    ),
+}
+_WWPN = re.compile(r"[0-9A-Fa-f]{16}")
+
+
+def _small_integer(value: object) -> int | None:
+    text = leaf_text(value)
+    if not isinstance(text, str) or not re.fullmatch(r"[0-9]{1,5}", text.strip()):
+        return None
+    return int(text.strip())
+
+
+def _link_uuid(value: object, resource_type: str) -> str | None:
+    """The UUID ending an href whose preceding path segment is *resource_type*."""
+    href = value.get("href") if isinstance(value, Mapping) else None
+    if not isinstance(href, str):
+        return None
+    parts = urlsplit(href).path.rstrip("/").split("/")
+    if len(parts) < 2 or parts[-2] != resource_type or not is_uuid(parts[-1]):
+        return None
+    return parts[-1]
+
+
+def paired_identity(
+    resource: Mapping[str, Any], adapter_type: StorageAdapterType
+) -> dict[str, Any]:
+    """Project a client storage adapter's remote end; unparseable values are None.
+
+    ``remote_vios_uuid`` comes only from a ``ConnectingPartition`` link to a
+    ``VirtualIOServer``. vFC adds ``wwpns``: the lowercased pair, or None unless
+    ``WWPNs`` holds exactly two 16-hex tokens (ADR 0374).
+    """
+    id_field, slot_field = _REMOTE_FIELDS[adapter_type]
+    identity: dict[str, Any] = {
+        "remote_partition_id": _small_integer(resource.get(id_field)),
+        "remote_slot": _small_integer(resource.get(slot_field)),
+        "remote_vios_uuid": _link_uuid(
+            resource.get("ConnectingPartition"), "VirtualIOServer"
+        ),
+    }
+    if adapter_type == "VirtualFibreChannelClientAdapter":
+        text = leaf_text(resource.get("WWPNs"))
+        tokens = text.split() if isinstance(text, str) else []
+        valid = len(tokens) == 2 and all(_WWPN.fullmatch(token) for token in tokens)
+        identity["wwpns"] = [token.lower() for token in tokens] if valid else None
+    return identity
+
+
+def _with_paired_identity(
+    entry: Mapping[str, Any], adapter_type: StorageAdapterType
+) -> dict[str, Any]:
+    resource = entry.get("Resource")
+    resource = resource if isinstance(resource, Mapping) else {}
+    return {**entry, "paired_identity": paired_identity(resource, adapter_type)}
+
+
+async def get_adapter(
+    hmc: HMCClient,
+    lpar_name_or_uuid: str,
+    adapter_type: StorageAdapterType,
+    adapter_uuid: str,
+    *,
+    system_name_or_uuid: str | None = None,
+) -> dict[str, Any]:
+    """Read one client storage adapter the partition owns, with its paired identity.
+
+    Raises:
+        ValueError: If ``adapter_type`` is not a client storage type or a UUID is
+            invalid.
+        ResourceNotFoundError: If the partition or the adapter does not exist.
+        HMCError: If a read fails, or the HMC answers with a different, foreign or
+            no adapter.
+    """
+    validate_storage_adapter_type(adapter_type)
+    if not is_uuid(adapter_uuid):
+        raise ValueError("adapter_uuid must be a UUID")
+    lpar_uuid = await resolve_lpar_uuid(
+        hmc, lpar_name_or_uuid, system_name_or_uuid=system_name_or_uuid
+    )
+    partition_id = await _partition_id(hmc, lpar_uuid)
+    try:
+        entry = await hmc.get_storage_adapter(lpar_uuid, adapter_type, adapter_uuid)
+    except HMCError as error:
+        if error.status_code == 404:
+            raise ResourceNotFoundError(
+                "adapter",
+                adapter_uuid,
+                f"No {adapter_type} {adapter_uuid} on partition {lpar_uuid}",
+            ) from None
+        raise
+    resource = entry.get("Resource") if isinstance(entry, dict) else None
+    if (
+        not isinstance(entry, dict)
+        or str(entry.get("UUID") or "").casefold() != adapter_uuid.casefold()
+        or not isinstance(resource, Mapping)
+        or _small_integer(resource.get("LocalPartitionID")) != partition_id
+    ):
+        raise HMCError("adapter read returned a different, foreign or no resource")
+    return _with_paired_identity(entry, adapter_type)
+
+
+async def _partition_id(hmc: HMCClient, lpar_uuid: str) -> int:
+    """The partition's native ID; a missing partition is ResourceNotFoundError."""
+    try:
+        entry = await hmc.get_logical_partition(lpar_uuid)
+    except HMCError as error:
+        if error.status_code != 404:
+            raise
+        entry = None
+    resource = entry.get("Resource") if isinstance(entry, dict) else None
+    if not isinstance(resource, Mapping):
+        raise ResourceNotFoundError("partition", lpar_uuid, f"No partition {lpar_uuid}")
+    partition_id = _small_integer(resource.get("PartitionID"))
+    if partition_id is None:
+        raise HMCError(f"partition {lpar_uuid} has no usable PartitionID")
+    return partition_id
+
+
+async def _require_remote_vios(
+    hmc: HMCClient, lpar_uuid: str, vios_partition_id: int
+) -> str:
+    """Return the UUID of the one VIOS with this partition ID on the client's frame.
+
+    Proves the remote is one local VIOS at check time, not that a server adapter
+    exists at the paired slot (ADR 0374).
+
+    Raises:
+        ValueError: If the client's managed system is unavailable, or the ID
+            matches no VIOS, or more than one, on it.
+    """
+    entry = await hmc.get_logical_partition(lpar_uuid)
+    resource = entry.get("Resource") if isinstance(entry, dict) else None
+    system_uuid = (
+        _link_uuid(resource.get("AssociatedManagedSystem"), "ManagedSystem")
+        if isinstance(resource, Mapping)
+        else None
+    )
+    if system_uuid is None:
+        raise ValueError("client partition's managed system is unavailable")
+    matches = [
+        vios
+        for vios in await hmc.list_vios(system_uuid)
+        if isinstance(vios.get("Resource"), Mapping)
+        and _small_integer(vios["Resource"].get("PartitionID")) == vios_partition_id
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"partition ID {vios_partition_id} is not exactly one VIOS on the client "
+            "partition's managed system; list VIOSes with hmc_list_vios"
+        )
+    return str(matches[0].get("UUID"))
 
 
 async def add_network_adapter(
@@ -910,10 +1086,13 @@ async def add_vscsi_adapter(
         ownership_override=ownership_override,
         system_name_or_uuid=system_name_or_uuid,
     )
+    await _require_remote_vios(hmc, lpar_uuid, vios_partition_id)
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.add_vscsi_adapter(
         lpar_uuid, vios_partition_id, vios_slot, slot_number
     )
+    if isinstance(resource, dict):
+        resource = _with_paired_identity(resource, "VirtualSCSIClientAdapter")
     return AdapterResult(lpar_uuid, resource, location)
 
 
@@ -942,10 +1121,13 @@ async def add_vfc_adapter(
         ownership_override=ownership_override,
         system_name_or_uuid=system_name_or_uuid,
     )
+    await _require_remote_vios(hmc, lpar_uuid, vios_partition_id)
     location = await read_change_location(hmc, lpar_uuid)
     resource = await hmc.add_vfc_adapter(
         lpar_uuid, vios_partition_id, vios_slot, slot_number
     )
+    if isinstance(resource, dict):
+        resource = _with_paired_identity(resource, "VirtualFibreChannelClientAdapter")
     return AdapterResult(lpar_uuid, resource, location)
 
 

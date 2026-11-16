@@ -10,7 +10,7 @@ from pydantic import StrictBool, StrictInt, StrictStr
 from hmcpctl.operations.lpar.profiles.sync import resource_with_change_location
 
 from ..._app import run_limited_collection, with_client
-from ...client.client_contracts import AdapterType
+from ...client.client_contracts import AdapterType, StorageAdapterType
 from ...client.core import HMCClient
 from ...documents.adapters import (
     validate_network_adapter_creation_fields,
@@ -22,6 +22,7 @@ from ...operations.virtualization.adapters import (
     add_vfc_adapter,
     add_vscsi_adapter,
     delete_adapter,
+    get_adapter,
     list_adapters,
     update_network_adapter,
 )
@@ -60,6 +61,44 @@ def hmc_list_adapters(
             system_name_or_uuid=system_name_or_uuid,
         ),
         limit,
+        profile=profile,
+    )
+
+
+@tool(effect="read", operation="adapter.get", target_kind="lpar")
+def hmc_get_adapter(
+    lpar_name_or_uuid: str,
+    adapter_uuid: str,
+    adapter_type: StorageAdapterType,
+    *,
+    profile: str | None = None,
+    system_name_or_uuid: str | None = None,
+) -> dict[str, Any]:
+    """Read one vSCSI or vFC client adapter of an LPAR, with its paired identity.
+
+    Returns the adapter entry plus ``paired_identity``: ``remote_partition_id``,
+    ``remote_slot``, ``remote_vios_uuid`` and, for vFC, the ``wwpns`` pair. A
+    field whose HMC value does not parse is ``None``. Pairing is what the client
+    adapter names; it does not prove a VIOS server adapter or mapping exists.
+
+    Args:
+        lpar_name_or_uuid: Partition name or UUID; discover partitions with
+            ``hmc_list_lpars``.
+        adapter_uuid: Adapter UUID from ``hmc_list_adapters``.
+        adapter_type: ``VirtualSCSIClientAdapter`` or
+            ``VirtualFibreChannelClientAdapter``.
+        profile: TOML profile name, or the environment-default HMC when omitted.
+        system_name_or_uuid: Optional SystemName or UUID that disambiguates the
+            partition name; when omitted the name is searched fleet-wide.
+    """
+    return with_client(
+        lambda hmc: get_adapter(
+            hmc,
+            lpar_name_or_uuid,
+            adapter_type,
+            adapter_uuid,
+            system_name_or_uuid=system_name_or_uuid,
+        ),
         profile=profile,
     )
 
