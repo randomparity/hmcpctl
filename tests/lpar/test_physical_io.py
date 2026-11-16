@@ -40,8 +40,8 @@ def test_field_grammar():
     "name,value",
     [
         ("console_slot", "3"),
-        ("load_source_slot", "12"),
-        ("alt_restart_device_slot", "99"),
+        ("load_source_slot", "02"),
+        ("alt_restart_device_slot", "0099"),
         ("op_console_slot", "hmc"),
         ("alt_console_slot", "x,console_slot=hmc"),
         ("console_slot", "lowercase"),
@@ -57,6 +57,68 @@ def test_field_grammar():
 def test_malformed_or_unresolvable_values_fail(name, value):
     with pytest.raises((ValueError, TypeError)):
         LparPhysicalIO(**{name: value})
+
+
+@pytest.mark.parametrize(
+    "kwargs,virtual",
+    [
+        ({"load_source_slot": "2"}, (("load_source_slot", 2),)),
+        ({"alt_restart_device_slot": "17"}, (("alt_restart_device_slot", 17),)),
+        (
+            {"load_source_slot": "2", "alt_restart_device_slot": "2"},
+            (("load_source_slot", 2), ("alt_restart_device_slot", 2)),
+        ),
+        ({"load_source_slot": DRC, "console_slot": "hmc"}, ()),
+    ],
+)
+def test_virtual_tagged_forms_admitted(kwargs, virtual):
+    assert LparPhysicalIO(**kwargs).virtual_tagged() == virtual
+
+
+@pytest.mark.parametrize(
+    "name,value,match",
+    [
+        ("load_source_slot", "02", "canonical"),
+        ("console_slot", "2", "console"),
+        ("console_slot", "0", "console"),
+        ("alt_console_slot", "2", "alt_console_slot"),
+        ("op_console_slot", "2", "op_console_slot"),
+    ],
+)
+def test_virtual_tagged_forms_refused(name, value, match):
+    with pytest.raises(ValueError, match=match):
+        LparPhysicalIO(**{name: value})
+
+
+@pytest.mark.parametrize(
+    "io,match",
+    [
+        (LparPhysicalIO(load_source_slot="2", console_slot="hmc"), "vSCSI client"),
+        (None, "console_slot"),
+        (LparPhysicalIO(load_source_slot=DRC), "console_slot"),
+    ],
+    ids=["unbound-virtual", "no-physical-io", "no-console"],
+)
+def test_native_render_refuses_before_any_command(monkeypatch, io, match):
+    from hmcpctl.config import HMCConfig
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.ssh.lpar import create_lpar_via_cli
+
+    command = AsyncMock()
+    monkeypatch.setattr("hmcpctl.ssh.lpar.run_hmc_command", command)
+    config = HMCConfig.from_mapping({"host": "hmc.test", "user": "test"})
+    with pytest.raises(ValueError, match=match):
+        asyncio.run(
+            create_lpar_via_cli(
+                config,
+                "sys-R1",
+                "example-lpar",
+                "OS400",
+                LparResources(desired_memory=1024),
+                physical_io=io,
+            )
+        )
+    command.assert_not_awaited()
 
 
 def test_record_roundtrip():
@@ -128,6 +190,16 @@ def test_native_schema_normalization_and_postcondition():
     assert not compare_creation_io(io, (), {})
 
 
+def test_rest_comparison_leaves_virtual_roles_to_the_vscsi_step():
+    io = LparPhysicalIO(
+        load_source_slot="2", alt_restart_device_slot="2", console_slot="hmc"
+    )
+    profile = {"IOConfigurationInstance": {"TaggedIO": {"Console": "HMC"}}}
+    assert compare_creation_io(io, (), profile)
+    profile["IOConfigurationInstance"]["TaggedIO"]["Console"] = "none"
+    assert not compare_creation_io(io, (), profile)
+
+
 def test_unknown_pool_or_required_slot_does_not_compare_equal():
     io = LparPhysicalIO(io_slots=(ProfileIoSlot(DRC, None, False),))
     assert not compare_creation_io(io, (), _profile())
@@ -194,6 +266,69 @@ def admission(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_unbound_virtual_tag_refused_at_admission_before_reads(admission):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.creation.core import LparCreation
+
+    creation = LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=256, desired_procs=0.1),
+        physical_io=LparPhysicalIO(load_source_slot="2", console_slot="hmc"),
+    )
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        await admission.module.admit_creation_io(admission.hmc, "sys", creation)
+    admission.module.read_system_entry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_console_less_ibmi_io_refused_at_admission_before_reads(admission):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.creation.core import LparCreation
+
+    creation = LparCreation(
+        "new",
+        "OS400",
+        LparResources(desired_memory=256, desired_procs=0.1),
+        physical_io=LparPhysicalIO(load_source_slot=DRC),
+    )
+    with pytest.raises(ValueError, match="console_slot"):
+        await admission.module.admit_creation_io(admission.hmc, "sys", creation)
+    admission.module.read_system_entry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provision_preflight_refuses_unbound_virtual_tag(monkeypatch):
+    from hmcpctl.documents.lpar import LparResources
+    from hmcpctl.operations.lpar.provisioning import core as provisioning
+    from hmcpctl.operations.lpar.provisioning.core import (
+        ProvisionAdapters,
+        ProvisionRequest,
+        ProvisionStorage,
+    )
+
+    monkeypatch.setattr(provisioning, "_check_profile_jobs", AsyncMock())
+    monkeypatch.setattr(
+        provisioning, "resolve_system_uuid", AsyncMock(return_value="sys")
+    )
+    name_check = AsyncMock()
+    monkeypatch.setattr(provisioning, "_check_name_unique", name_check)
+    request = ProvisionRequest(
+        name="example-lpar",
+        adapters=ProvisionAdapters(100),
+        storage=ProvisionStorage("vios", "lv-a", vg_uuid="vg", capacity_mib=1024),
+        resources=LparResources(min_memory=256, desired_memory=512, max_memory=1024),
+        partition_type="OS400",
+        physical_io=LparPhysicalIO(load_source_slot="2", console_slot="hmc"),
+    )
+    with pytest.raises(ValueError, match="vSCSI client adapter declared"):
+        await provisioning._preflight_provision_request(
+            SimpleNamespace(config=object()), "sys-R1", request
+        )
+    name_check.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "problem",
     [
@@ -237,6 +372,7 @@ async def test_reject_relationship_before_create(admission, problem):
             io_slots=(ProfileIoSlot(DRC, "3", problem != "required"),),
             lpar_io_pool_ids=("3",),
             load_source_slot=DRC,
+            console_slot="hmc",
         ),
     )
     messages = {
@@ -450,6 +586,7 @@ async def test_physical_tag_requires_fresh_device_role_capability(admission):
             io_slots=(ProfileIoSlot(DRC, "3", True),),
             lpar_io_pool_ids=("3",),
             load_source_slot=DRC,
+            console_slot="hmc",
         ),
     )
     admission.module.read_system_entry.return_value["Resource"][

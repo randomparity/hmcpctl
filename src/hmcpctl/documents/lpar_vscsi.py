@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from pydantic import ConfigDict, StrictBool, StrictInt, StrictStr
 
+from .lpar_io import LparPhysicalIO
 from .lpar_serial import (
     SERIAL_INPUT_BYTES,
     VirtualSerialAdapter,
@@ -113,3 +114,22 @@ def validate_vscsi_input(
             raise ValueError("vSCSI collection exceeds 64 KiB")
         records.append(text)
     return ",".join(records)
+
+
+def validate_tagged_vscsi(
+    io: LparPhysicalIO, adapters: tuple[VirtualScsiClientAdapter, ...]
+) -> None:
+    """Bind each virtual load-source/alternate-restart slot to a declared client.
+
+    The HMC accepts any of the partition's own virtual slots for these roles and refuses
+    only an absent one (HSCL0DC6), so hmcpctl owns the role rule (ADR 0382).
+    """
+    declared = {adapter.local_slot for adapter in adapters}
+    for name, slot in io.virtual_tagged():
+        if slot not in declared:
+            raise ValueError(
+                f"{name}={slot}: a virtual {name} must be the local slot of a vSCSI "
+                "client adapter declared in virtual_scsi_adapters of this request; "
+                "undeclared, serial (including HMC-default slots 0 and 1) and ethernet "
+                "slots are refused (ADR 0382). Nothing created."
+            )

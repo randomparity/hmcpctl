@@ -4,6 +4,9 @@
 
 Accepted (2026-10-22), subject to implementation verification.
 
+> **Amended by [0382](0382-ibmi-virtual-tagged-io-bound-to-declared-vscsi.md)** (2026-11-13):
+> virtual load-source and alternate-restart slots bound to declared vSCSI clients.
+
 ## Context
 
 #1773 binds eight native creation attributes. Existing dedicated/SR-IOV workflows
