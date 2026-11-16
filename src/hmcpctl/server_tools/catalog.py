@@ -29,6 +29,7 @@ from hmcpctl.server_tools.lpar import (
     lifecycle_boot,
     lifecycle_create,
     migration,
+    pmem,
     profiles,
 )
 from hmcpctl.server_tools.lpar.decommission import (
@@ -87,6 +88,7 @@ TOOL_MODULES = (
     profiles,
     snapshot,
     configuration,
+    pmem,
     system_resources,
     composite,
     console,
