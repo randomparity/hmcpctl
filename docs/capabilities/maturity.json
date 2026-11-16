@@ -6858,6 +6858,34 @@
           "closure_fingerprint": "5be3e3782247bf876deb27453e40c82e0dfc9aa855e1de12bc9cdd1f45d03229"
         }
       ]
+    },
+    {
+      "operation": "processor_pool.get",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "system-scoped",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
+      "operation": "processor_pool.list",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "system-scoped",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
     }
   ]
 }
