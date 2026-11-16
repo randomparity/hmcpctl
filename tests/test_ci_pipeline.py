@@ -110,8 +110,8 @@ ACTION_PINS = {
         "v7.0.1",
     ),
     "astral-sh/setup-uv": (
-        "1c37ad07a6a961277cf70c0d37d6f313000f5884",  # pragma: allowlist secret
-        "v10.3.0",
+        "68559e99cc807c1eb7e9238fd43a15bba460eec2",  # pragma: allowlist secret
+        "v10.3.3",
     ),
     "extractions/setup-just": (
         "53165ef7e734c5c07cb06b3c8e7b647c5aa16db3",  # pragma: allowlist secret
@@ -223,8 +223,8 @@ SCORECARD_ACTION_PINS = {
         "v7.0.2",
     ),
     "github/codeql-action/upload-sarif": (
-        "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",  # pragma: allowlist secret
-        "v4.39.0",
+        "33d7b85da1a04171e211befe2c739303b9a4c066",  # pragma: allowlist secret
+        "v4.39.3",
     ),
     "ossf/scorecard-action": (
         "fa7117db83c52d787ae5a89f350999701505d78e",  # pragma: allowlist secret
