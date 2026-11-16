@@ -12,10 +12,15 @@ from hmcpctl.operations.lpar.assignments import (
 )
 from hmcpctl.operations.lpar.profiles.core import read_partition_profile
 
-from ....documents.lpar_io import LparPhysicalIO
+from ....documents.lpar_io import LparPhysicalIO, virtual_tagged_value
+from ....documents.lpar_vscsi import validate_tagged_vscsi
 from ....errors import HMCError, HMCTLSFingerprintError
 from ....ssh.io_inventory import list_io_slots
-from ....ssh.lpar import complete_create_resources, resolve_system_cli_name
+from ....ssh.lpar import (
+    complete_create_resources,
+    require_ibmi_console,
+    resolve_system_cli_name,
+)
 from ....ssh.lpar_io import creation_io_record
 from ....ssh.profiles import parse_profile_io_slots, read_profile_io_slot_rows
 from ....ssh.sriov import list_sriov_unconfigured_logical_port_rows
@@ -46,10 +51,16 @@ async def admit_creation_io(
     ):
         raise TypeError("creation_sriov must be a tuple of SriovLogicalPortAssignment")
     creation_io_record(io, creation.creation_sriov)
+    # The provisioning preflight admits creation I/O through this function before
+    # any effect, so the binding rule refuses there too, not only inside the create
+    # (ADR 0382).
+    validate_tagged_vscsi(io, creation.virtual_scsi_adapters)
     if not io.requested:
         if creation.creation_sriov:
             raise ValueError("creation_sriov requires explicit physical_io fields")
         return
+    # Requested physical I/O always selects native creation.
+    require_ibmi_console(creation.partition_type, io)
     if (
         creation.keylock is not None
         or complete_create_resources(creation.resources) is None
@@ -83,6 +94,8 @@ async def admit_creation_io(
     for name, value in io.tagged():
         if name == "console_slot" and value == "hmc":
             continue
+        if virtual_tagged_value(name, value):
+            continue  # bound to a declared vSCSI client above
         if value in physical:
             _require_tagged_role(resource, name, value)
             if not physical[value].is_required:
@@ -269,6 +282,10 @@ def compare_creation_io(
     if not isinstance(tagged, dict):
         return False
     for name, value in io.tagged():
+        if virtual_tagged_value(name, value):
+            # Its REST rendering is uncaptured; the vSCSI step compares the saved
+            # profile's native value with the declared client record (ADR 0382).
+            continue
         actual = leaf_text(tagged.get(_TAGS[name]))
         if actual is None:
             return False

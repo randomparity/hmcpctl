@@ -1,8 +1,9 @@
 """ST74: one IBM i create declaring a vSCSI client record, comparison and cleanup.
 
-The client names the first VIOS of the selected system. Creation writes no VIOS
-server adapter or mapping (ADR 0376), so the arm asserts the saved-profile record
-comparison and that the result reports pairing as unproven.
+The client names the first VIOS of the selected system and is tagged as the load
+source and alternate restart device (ADR 0382). Creation writes no VIOS server
+adapter or mapping (ADR 0376), so the arm asserts the saved-profile record and
+tagged-role comparison and that the result reports pairing as unproven.
 """
 
 from __future__ import annotations
@@ -56,13 +57,16 @@ def _first_vios(data: object) -> tuple[int, int]:
     raise ValueError("no VIOS with a readable partition ID and slot maximum")
 
 
-def _vscsi_step(steps: object) -> dict[str, object]:
+ROLES = ["load_source_slot", "alt_restart_device_slot"]
+
+
+def _step(steps: object, name: str) -> dict[str, object]:
     if not isinstance(steps, list):
         raise TypeError("vSCSI creation returned malformed workflow steps")
     for step in steps:
-        if isinstance(step, dict) and step.get("step") == "virtual_scsi_adapters":
+        if isinstance(step, dict) and step.get("step") == name:
             return step
-    raise ValueError("vSCSI creation returned no virtual_scsi_adapters step")
+    raise ValueError(f"vSCSI creation returned no {name} step")
 
 
 async def exercise_lpar_vscsi_client(client: Client, state: RunState) -> None:
@@ -99,7 +103,11 @@ async def exercise_lpar_vscsi_client(client: Client, state: RunState) -> None:
             partition_type="OS400",
             resources=RESOURCES,
             caller_token=run.token,
-            physical_io={"console_slot": "hmc"},
+            physical_io={
+                "console_slot": "hmc",
+                "load_source_slot": str(LOCAL_SLOT),
+                "alt_restart_device_slot": str(LOCAL_SLOT),
+            },
             max_virtual_slots=MAX_VIRTUAL_SLOTS,
             virtual_scsi_adapters=[
                 {
@@ -116,7 +124,8 @@ async def exercise_lpar_vscsi_client(client: Client, state: RunState) -> None:
         lpar = data.get("lpar")
         run.uuid = lpar.get("UUID") if isinstance(lpar, dict) else None
         run.created = bool(run.uuid)
-        step = _vscsi_step(data.get("steps"))
+        step = _step(data.get("steps"), "virtual_scsi_adapters")
+        io_step = _step(data.get("steps"), "physical_io")
         apply = next(
             (
                 s
@@ -136,6 +145,9 @@ async def exercise_lpar_vscsi_client(client: Client, state: RunState) -> None:
             and result.get("pairing") == "unproven"
             and result.get("vios_server_adapters") == "not-created"
             and result.get("vios_mappings") == "not-created"
+            and result.get("records")
+            == [{"slot": LOCAL_SLOT, "status": "verified", "roles": ROLES}]
+            and io_step.get("status") == "ok"
         )
         if not verified:
             raise ValueError(f"vSCSI client record comparison not confirmed: {data!r}")

@@ -16,7 +16,11 @@ from ..documents.lpar_memory_layout import LparMemoryLayout
 from ..documents.lpar_security_policy import LparSecurityPolicy
 from ..documents.lpar_serial import VirtualSerialAdapter, validate_serial_input
 from ..documents.lpar_start import LparStartSettings
-from ..documents.lpar_vscsi import VirtualScsiClientAdapter, validate_vscsi_input
+from ..documents.lpar_vscsi import (
+    VirtualScsiClientAdapter,
+    validate_tagged_vscsi,
+    validate_vscsi_input,
+)
 from ..documents.lpar_vtpm import LparVtpmSettings
 from .lpar_io import creation_io_record
 
@@ -217,6 +221,8 @@ async def create_lpar_via_cli(
     scsi_value = validate_vscsi_input(
         virtual_scsi_adapters, max_virtual_slots, virtual_serial_adapters
     )
+    require_ibmi_console(partition_type, physical_io)
+    validate_tagged_vscsi(physical_io or LparPhysicalIO(), virtual_scsi_adapters)
     if memory_layout is not None:
         if not isinstance(memory_layout, LparMemoryLayout):
             raise TypeError("memory_layout must be LparMemoryLayout")
@@ -342,6 +348,24 @@ async def apply_lpar_profile_via_cli(
         f"-p {shlex.quote(lpar_name)} -n {shlex.quote(profile_name)}"
     )
     return await run_hmc_command(config, cmd)
+
+
+def require_ibmi_console(
+    partition_type: str, physical_io: LparPhysicalIO | None
+) -> None:
+    """Refuse native IBM i creation without an explicit console (ADR 0274, ADR 0382).
+
+    ``mksyscfg`` rejects an ``os400`` record without ``console_slot`` only after the
+    request reaches the HMC; hmcpctl never inserts a default console.
+    """
+    if _lpar_environment(partition_type) == "os400" and (
+        physical_io is None or physical_io.console_slot is None
+    ):
+        raise ValueError(
+            "IBM i (OS400) native creation requires physical_io.console_slot: 'hmc' or "
+            "a declared physical/SR-IOV DRC; no console default is inserted "
+            "(ADR 0274, ADR 0382). Nothing created."
+        )
 
 
 def _lpar_environment(partition_type: str) -> str:

@@ -43,6 +43,8 @@ class VscsiAdmission:
     adapters: tuple[VirtualScsiClientAdapter, ...]
     servers: tuple[SerialTarget, ...]
     preexisting: frozenset[str]
+    # Virtual tagged roles bound to declared local slots (ADR 0382).
+    roles: tuple[tuple[str, int], ...] = ()
 
 
 def _selected(
@@ -70,6 +72,7 @@ async def admit_vscsi_creation(
     maximum: int | None,
     adapters: tuple[VirtualScsiClientAdapter, ...],
     serial: tuple[VirtualSerialAdapter, ...] = (),
+    roles: tuple[tuple[str, int], ...] = (),
 ) -> VscsiAdmission:
     """Resolve and authorize every remote VIOS before the creation owner writes once."""
     validate_vscsi_input(adapters, maximum, serial)
@@ -106,6 +109,7 @@ async def admit_vscsi_creation(
         adapters,
         tuple(servers),
         frozenset(t.uuid.casefold() for t in inventory),
+        roles,
     )
 
 
@@ -126,6 +130,14 @@ def _matches(
     )
 
 
+def _record(slot: int, roles: tuple[tuple[str, int], ...]) -> dict[str, Any]:
+    record: dict[str, Any] = {"slot": slot, "status": "unverified"}
+    names = [name for name, bound in roles if bound == slot]
+    if names:
+        record["roles"] = names
+    return record
+
+
 async def vscsi_creation_step(
     hmc: HMCClient,
     admission: VscsiAdmission,
@@ -140,9 +152,7 @@ async def vscsi_creation_step(
         "vios_server_adapters": "not-created",
         "vios_mappings": "not-created",
         "pairing": "unproven",
-        "records": [
-            {"slot": a.local_slot, "status": "unverified"} for a in admission.adapters
-        ],
+        "records": [_record(a.local_slot, admission.roles) for a in admission.adapters],
     }
     if controller_mode:
         return WorkflowStep(VSCSI_FAMILY, "error", result)
@@ -166,14 +176,18 @@ async def vscsi_creation_step(
     for record, request, server in zip(
         result["records"], admission.adapters, admission.servers, strict=True
     ):
-        fields = observed.get(request.local_slot)
+        fields = observed.records.get(request.local_slot)
+        bound = all(
+            observed.attributes.get(role) == str(request.local_slot)
+            for role in record.get("roles", ())
+        )
         record["status"] = (
             "verified"
-            if fields is not None and _matches(request, fields, server)
+            if fields is not None and _matches(request, fields, server) and bound
             else "mismatch"
         )
     requested = {a.local_slot for a in admission.adapters}
-    verified = set(observed) == requested and all(
+    verified = set(observed.records) == requested and all(
         r["status"] == "verified" for r in result["records"]
     )
     result["configuration"] = "verified" if verified else "unverified"

@@ -108,12 +108,13 @@ profile lifecycle. Pool lifecycle remains separate from partition resource chang
 
 The operator-approved C12 boundary retains all eight fields/sixteen source
 bindings. Physical/HMC and declared direct-SR-IOV creation selectors are implemented
-in #1773. Positive virtual-slot forms for `load_source_slot`,
-`alt_restart_device_slot` and `console_slot` without creation-time adapter linkage
-remain rejected before effects. [#1830](https://github.com/randomparity/hmcpctl/issues/1830)
-tracks the missing device-role and creation-time adapter-linkage prerequisites under
-#638. Existing adapter implementation owners are unchanged. Closure of #1773 does
-not complete these positive virtual-slot modes or establish passing live evidence.
+in #1773. Virtual `load_source_slot` and `alt_restart_device_slot` slots are admitted
+when they name a vSCSI client declared in the same creation request (#1981,
+[ADR 0382](../adr/0382-ibmi-virtual-tagged-io-bound-to-declared-vscsi.md)); provisioning
+declares no vSCSI client, so it still rejects them. Virtual `console_slot` forms remain
+rejected before effects, and other virtual device families (vFC, SR-IOV logical ports)
+stay with [#1830](https://github.com/randomparity/hmcpctl/issues/1830) under #638.
+Existing adapter implementation owners are unchanged.
 
 Creation combining `simplified_remote_restart_capable=True` with
 `keystore_kbytes>0` is submitted to the HMC, which admits it only when the trusted
