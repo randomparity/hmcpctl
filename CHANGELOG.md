@@ -28,6 +28,9 @@ release categories. Domain-module APIs remain pre-release and are not facade mov
   The saved profile is checked for each bound role before the profile is applied. Any other
   virtual slot, and every virtual console slot, is refused before effects.
 
+- CPython 3.15 joins 3.11–3.14 in the CI verification matrix: static gates, all four test
+  groups, the combined coverage floor, and the wheel smoke run on it (#608).
+
 ### Changed
 
 - Native IBM i (OS400) creation without `physical_io.console_slot` is refused before any write,

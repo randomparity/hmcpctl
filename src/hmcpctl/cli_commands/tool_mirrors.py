@@ -175,6 +175,8 @@ CLI_TOOL_MIRRORS: Mapping[str, str | None] = MappingProxyType(
         "snapshot assess-affinity": "hmc_snapshot_assess_affinity",
         "memory-pools list": "hmc_list_memory_pools",
         "memory-pools remove": "hmc_remove_memory_pool",
+        "processor-pools list": "hmc_list_shared_processor_pools",
+        "processor-pools get": "hmc_get_shared_processor_pool",
         "report utilization": None,
         "config init": None,
         "config list": "hmc_list_configured_hosts",

@@ -542,6 +542,17 @@
       "expected": "success"
     },
     {
+      "scenario": "st100-processor-pool-list",
+      "operation": "processor_pool.list",
+      "class": "read-only",
+      "arguments": {
+        "system_name_or_uuid": {
+          "target": "managed_system"
+        }
+      },
+      "expected": "success"
+    },
+    {
       "scenario": "st100-remote-access-get",
       "operation": "remote_access.get",
       "class": "read-only",

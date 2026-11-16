@@ -28,9 +28,10 @@ format-check:
 typecheck:
     uv run --no-sync ty check
 
+# The hook scans its arguments one at a time, so xargs supplies the parallelism.
 # scan every tracked file against the reviewed fixture baseline
 secrets:
-    git ls-files -z | xargs -0 uv run --no-sync detect-secrets-hook \
+    git ls-files -z | xargs -0 -P 4 -n 100 uv run --no-sync detect-secrets-hook \
         --baseline .secrets.baseline --no-verify --
 
 # audit GitHub Actions without depending on mutable remote state
@@ -141,7 +142,7 @@ verify-artifacts:
 # full standalone local verification
 verify: static verify-runtime
 
-# runtime checks; CI covers static gates through the real hooks first
+# runtime checks; CI covers static gates through the real hooks in their own jobs
 # The root help goes through the installed console script, so the entry point is
 # covered; the group helps are derived from the Typer app rather than listed here.
 verify-runtime: test verify-runtime-checks

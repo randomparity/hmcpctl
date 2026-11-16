@@ -44,6 +44,7 @@ from .cli_commands.app import (
     metrics_app,
     network_app,
     operations_app,
+    processor_pools_app,
     raw_app,
     report_app,
     snapshot_app,
@@ -97,7 +98,7 @@ from .cli_commands.lpar import (
 from .cli_commands.storage import cluster
 from .cli_commands.storage import resources as storage
 from .cli_commands.systems import core as systems
-from .cli_commands.systems import memory_pools
+from .cli_commands.systems import memory_pools, processor_pools
 from .cli_commands.systems import profiles as system_profiles
 from .cli_commands.vios import core as vios
 from .cli_commands.vios import labels as vios_labels
@@ -127,6 +128,7 @@ def _register_commands() -> None:
         (lpar_profiles, lpars_app),
         (lpar_provision, lpars_app),
         (memory_pools, memory_pools_app),
+        (processor_pools, processor_pools_app),
         (metrics, metrics_app),
         (network, network_app),
         (pcie, network_app),

@@ -6,8 +6,8 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **207** tools are registered.
-- **206** are callable in a default deployment.
+- **209** tools are registered.
+- **208** are callable in a default deployment.
 - **11** are listed by `tools/list` in a default deployment (ADR 0330); `hmc_search_tools` finds the rest, which are called by name or through `hmc_invoke_tool`.
 
 | Effect class | Tools |
@@ -15,7 +15,7 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | `arbitrary-command` | 1 |
 | `destructive` | 49 |
 | `mutate` | 66 |
-| `read` | 91 |
+| `read` | 93 |
 
 ## Maturity vocabulary
 
@@ -51,6 +51,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `pcm` | 2 | [pcm.md](pcm.md) |
 | `permissions` | 1 | [permissions.md](permissions.md) |
 | `placement` | 1 | [placement.md](placement.md) |
+| `processor_pool` | 2 | [processor_pool.md](processor_pool.md) |
 | `provision` | 1 | [provision.md](provision.md) |
 | `remote_access` | 2 | [remote_access.md](remote_access.md) |
 | `resource_group` | 2 | [resource_group.md](resource_group.md) |
@@ -156,6 +157,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_get_pcm_preferences` | `read` | [pcm.md](pcm.md) |
 | `hmc_get_proc_compat_modes` | `read` | [system.md](system.md) |
 | `hmc_get_remote_access` | `read` | [remote_access.md](remote_access.md) |
+| `hmc_get_shared_processor_pool` | `read` | [processor_pool.md](processor_pool.md) |
 | `hmc_get_shared_storage_pool` | `read` | [cluster.md](cluster.md) |
 | `hmc_get_system` | `read` | [system.md](system.md) |
 | `hmc_get_system_memopt_score` | `read` | [system.md](system.md) |
@@ -187,6 +189,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_list_resource_roles` | `read` | [resource_role.md](resource_role.md) |
 | `hmc_list_resources` | `read` | [console.md](console.md) |
 | `hmc_list_sea_adapters` | `read` | [network.md](network.md) |
+| `hmc_list_shared_processor_pools` | `read` | [processor_pool.md](processor_pool.md) |
 | `hmc_list_shared_storage_pools` | `read` | [cluster.md](cluster.md) |
 | `hmc_list_sriov_adapters` | `read` | [pcie.md](pcie.md) |
 | `hmc_list_sriov_logical_ports` | `read` | [pcie.md](pcie.md) |
