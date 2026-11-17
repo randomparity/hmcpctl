@@ -21,8 +21,9 @@ and requires each named tool exactly once with a plain `name==version` pin.
 The version token follows the existing exact-requirement grammar in
 `tests/test_supply_chain.py`; no particular version is authoritative here.
 The action helper preserves the previous broad discovery of literal `uses:`
-occurrences in active YAML and the commented ppc64le template. Unsupported
-line forms, including inline flow mappings, fail closed. Names must equal the workflow-specific required set;
+occurrences in active YAML and the commented ppc64le template. Each discovered
+value must match the complete same-line pin/comment grammar; values outside it
+fail closed. Names must equal the workflow-specific required set;
 each occurrence must use a lowercase 40-hex ref and end with two spaces plus
 `# vN` or `# vN.N.N`. Major-only comments preserve the existing setup-just pin.
 Repeated uses of one action remain valid, with each occurrence checked.
@@ -42,9 +43,9 @@ The full local gates and pinned prek pass; CI supplies its declared Python legs.
   offline local and hosted tests, including inline flow mappings of that spelling.
 - Invariants and assets: exact required-name membership, unique tool requirements,
   exact tool pins, full action SHA pins, and human-readable version-comment syntax.
-- Accepted failure classes: none for unsupported line forms containing literal
-  `uses:`; the pin guard rejects them. Other YAML key spellings are outside the
-  preserved source scanner's grammar; no general YAML parser is introduced.
+- Accepted failure classes: none for discovered literal `uses:` values outside
+  the required name/ref/comment grammar; those fail closed. Other YAML key
+  spellings remain outside the scanner grammar; no general YAML parser is introduced.
 - Covered elsewhere: upstream SHA/version correspondence belongs to the maintainer's
   separate network-backed verification proposal, as approved by the operator.
 
@@ -55,7 +56,7 @@ The full local gates and pinned prek pass; CI supplies its declared Python legs.
 - Actor model: contributors/Dependabot can change these files; reviewed policy name
   sets remain the explicit trust anchor.
 - Controls: check names independently from versions, validate each pin/comment,
-  reject malformed input and unsupported discovered line forms with assertion
+  reject discovered values outside the pin/comment grammar with assertion
   evidence; report source text only locally.
 - Out of scope: upstream action contents and SHA/comment correspondence, owned by
   the separate maintainer verification proposal; workflow execution security remains
