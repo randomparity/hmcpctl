@@ -6,7 +6,8 @@ Accepted. Partially supersedes [ADR 0115](0115-configure-live-test-environment.m
 
 ## Context
 
-A live-test runner serves installation media over HTTP during an HMC upload.
+The runner’s MCP application downloads installation media from the local HTTP
+fixture, then uploads the staged file to the HMC.
 Native launcher media can contain guest network settings. A wildcard bind makes
 the file available on interfaces the operator did not select.
 
@@ -20,12 +21,13 @@ Validate at selection time and again when starting the server.
 ## Consequences
 
 Operators with wildcard settings must select an interface before running these
-arms. The address in the HMC-visible URL remains independently configurable.
+arms. The downloader uses the separately configured advertised URL. The
+in-process runner can use loopback for both settings.
 Saved configurations retain their original bind value for recovery and comparison.
 
 ## Considered & rejected
 
 - **Use the advertised hostname for binding.** judgment: the local interface and
-  the endpoint the HMC reaches can require distinct operator choices.
+  the name used in the download URL can require distinct operator choices.
 - **Allow an explicit wildcard override.** judgment: a wildcard grants access
   through interfaces outside the selection the operator approved for media serving.

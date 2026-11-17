@@ -132,12 +132,12 @@ class LiveTestConfig:
 
     @property
     def iso_host(self) -> str:
-        """Return the host and port visible to the HMC."""
+        """Return the advertised host and port used by the ISO downloader."""
         return f"{self.iso_advertised_host}:{self.iso_http_port}"
 
     @property
     def iso_url(self) -> str:
-        """Return the HMC-visible URL for the configured ISO."""
+        """Return the source URL the MCP application downloads."""
         return f"http://{self.iso_host}/{self.iso_filename}"
 
     _CONFIG_FIELDS: ClassVar[dict[str, str]] = {
