@@ -139,6 +139,46 @@ A client that remembers approvals by tool name applies an approval of `hmc_invok
 every tool invoke can reach, so a deployment that relies on per-tool client approval as its
 human check should leave `hmc_invoke_tool` out of the policy.
 
+### Arbitrary HMC commands
+
+`hmc_run_command` is deliberately callable only by a direct MCP `tools/call` of its
+name ([ADR 0391](adr/0391-arbitrary-command-direct-name-access.md)). It stays outside
+the eleven-tool `tools/list` catalog, even when enabled, and `hmc_invoke_tool` refuses
+it. A client restricted to listed tools and gateway invocation cannot use this escape
+hatch; it needs to support calling a known tool name directly. Prefer a dedicated tool
+when one exists.
+
+Start the server with `--enable-arbitrary-command`. The selected policy must explicitly
+name `hmc_run_command` in a grant's `tools`; an `effects` grant does not enable it.
+That same grant must cover the selected connection and use `targets = "all-targets"`.
+The flag and these policy requirements are conjunctive; a direct call retains the
+existing authorization checks and audit record.
+
+For example, send this request through an initialized MCP session:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "hmc_run_command",
+    "arguments": {"cmd": "lshmc -V"}
+  }
+}
+```
+
+`cmd` is the complete HMC CLI command. Optional `profile` selects a configured HMC
+profile; omitting it uses `<default>`, following the deployment's environment/profile
+settings described [above](#mcp-server). The example therefore needs a grant for
+`connections = ["<default>"]`. With `HMC_HOST` set, `profile` is ignored and the
+connection is `<default>` even if the request supplies it.
+
+When `hmc_search_tools` is also granted, it can find this enabled, permitted tool and
+return its input schema for `name: "hmc_run_command"`. Finding it does not permit
+gateway invocation: call `hmc_run_command` directly. The
+[command reference](tools/command.md) records its effect and registration requirements.
+
 ### Logical inventory
 
 `hmc_inventory` (`read`) lists one connection's managed systems and partitions on one page,
@@ -239,8 +279,9 @@ named, not run.
 `hmc_inventory`, `hmc_plan_lpar`, `hmc_provision_lpar`, `hmc_reconfigure_lpar`,
 `hmc_decommission_lpar`, `hmc_power_lpar`, `hmc_inspect_lpar`, `hmc_prepare_host_handoff`,
 `hmc_operation_status`, `hmc_search_tools` and `hmc_invoke_tool`. Every other permitted tool is
-a specialist: `hmc_search_tools` finds it, and a client calls it by name or through
-`hmc_invoke_tool`, under the same validation and authorization as before. Each listed tool
+a specialist: `hmc_search_tools` finds it, and a client calls it by name or, except for
+`hmc_run_command`, through `hmc_invoke_tool`, under the same validation and authorization
+as before. Each listed tool
 carries `primary` under the `io.github.randomparity.hmcpctl/catalog-tier` metadata key. There is
 no option to list every tool.
 
@@ -252,7 +293,8 @@ Three consequences follow from what a policy grants:
 - A grant that names specialists but neither gateway tool leaves them callable only by a client
   that already knows their names; with no primary tool granted, `tools/list` is empty.
 - `hmc_run_command` is never listed and `hmc_invoke_tool` refuses it, so with
-  `--enable-arbitrary-command` and a grant it is reachable only by a direct call of its name.
+  `--enable-arbitrary-command` and a grant it is reachable only by a
+  [direct call of its name](#arbitrary-hmc-commands).
 
 A client receives no output schema for an unlisted tool, so it cannot validate a direct call's
 structured result against one.
@@ -357,6 +399,12 @@ platform-native directory. A minimal read-only policy:
 effects = ["read"]           # "read", "mutate", "destructive"
 connections = ["<default>"]  # profile names, or "<default>" for the env HMC
 targets = "all-targets"      # or a table; see "Narrowing targets" below
+```
+
+Starting with this policy prints one startup warning line to stderr:
+
+```text
+warning: access policy 'lab' withholds hmc_invoke_tool, so permitted specialists require direct calls by name; use hmc_search_tools to find them.
 ```
 
 A grant must name at least one tool through `effects`, `tools`, or both, and
@@ -477,8 +525,9 @@ JSON-RPC channel, and nothing inside the process can detect that.
 
 | Condition | What it means |
 |-----------|---------------|
-| The served surface has no tools | The policy withholds everything reachable; nothing the server is asked to do will succeed. Suppresses the next line. |
+| The served surface has no tools | The policy withholds everything reachable; nothing the server is asked to do will succeed. Suppresses the permissions and gateway warning lines below. |
 | The policy withholds `hmc_effective_permissions` | The server cannot report its own permissions to a client. Any policy that neither grants the `read` effect class nor names the tool in a grant's `tools` causes this. |
+| The policy withholds `hmc_invoke_tool` | Permitted specialists require direct calls by name. If `hmc_search_tools` is also withheld, the same warning names both gateways and explains that clients must already know permitted specialist names. |
 | `--enable-arbitrary-command` was passed but the policy does not grant `hmc_run_command` | The flag and the ceiling compose conjunctively, so the escape hatch is not exposed. Name it in a grant's `tools` to allow it. |
 | A grant's `targets` table cannot bind some of the tools it reaches | One line per such grant, naming them. Those tools are registered and advertised, and every call to them is denied — a table cannot bound them, so only an `"all-targets"` grant reaches them. Watch for `hmc_effective_permissions` in the list: when it is there, the server cannot report its own permissions even though the policy grants the tool. |
 

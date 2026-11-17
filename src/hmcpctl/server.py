@@ -80,7 +80,11 @@ from .server_tools.catalog import PRIMARY_TOOLS, TOOL_MODULES, TOOL_SECURITY
 from .server_tools.command import (
     configure_arbitrary_command_tool,
 )
-from .server_tools.gateway import register_gateway_tools
+from .server_tools.gateway import (
+    INVOKE_TOOL_NAME,
+    SEARCH_TOOL_NAME,
+    register_gateway_tools,
+)
 from .server_tools.inventory.logical import register_inventory_tool
 from .server_tools.lpar.decommission import (
     decommission_authorization_targets,
@@ -208,8 +212,8 @@ def _startup_warnings(
 
     Every input exists only here — the served registry, the policy, and the
     escape-hatch flag — which is why these warnings share one function. An
-    empty surface already implies the inspection tool is absent, so it replaces
-    that line rather than printing beside it.
+    empty surface already implies the inspection and gateway tools are absent,
+    so it replaces those lines rather than printing beside them.
 
     ADR 0041 retired a fourth: a policy file that existed but had not been
     selected. No server starts without a policy now, so the condition it
@@ -234,6 +238,20 @@ def _startup_warnings(
             f"warning: access policy {access_policy.name!r} withholds "
             f"{PERMISSIONS_TOOL_NAME}, so this server cannot report its own "
             "effective permissions to a client."
+        )
+    if tool_count and not access_policy.permits_tool(INVOKE_TOOL_NAME):
+        if access_policy.permits_tool(SEARCH_TOOL_NAME):
+            reachability = (
+                f"{INVOKE_TOOL_NAME}, so permitted specialists require direct calls "
+                f"by name; use {SEARCH_TOOL_NAME} to find them."
+            )
+        else:
+            reachability = (
+                f"{SEARCH_TOOL_NAME} and {INVOKE_TOOL_NAME}, so clients must "
+                "already know permitted specialist names to call them."
+            )
+        lines.append(
+            f"warning: access policy {access_policy.name!r} withholds {reachability}"
         )
     if enable_arbitrary_command and not access_policy.permits_tool("hmc_run_command"):
         lines.append(
