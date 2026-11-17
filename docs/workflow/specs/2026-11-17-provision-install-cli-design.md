@@ -53,7 +53,9 @@ data. Bound and type it before admission. The shared request validator checks me
 and adapter binding; the shared preflight applies deployment policy. The journal
 compares explicitly supplied request values and binds the connection. Preserve normal
 terminal-field encoding and the shared JSON result. The CLI uses operator credentials
-under its existing policy. Changes to the MCP authorizer, producer, or live boot are
+under its existing policy. Guide and help tell operators to serialize writes to the
+chosen VolumeGroup for the whole operation. Disk creation rewrites that group, beyond
+the scope of the profile writer-window assertion. Changes to the MCP authorizer, producer, or live boot are
 outside this change.
 
 Exercise both media modes, malformed and oversized input, public-key and producer size
