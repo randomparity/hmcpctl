@@ -1,0 +1,66 @@
+name: Coverage worker cost
+on:
+  push:
+    branches: [feat/coverage-worker-cost-2000]
+  workflow_dispatch:
+    inputs:
+      measure:
+        description: Run the approved fixed 24-sample experiment
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: coverage-worker-cost-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  observe:
+    name: Python ${{ matrix.python }} / coverage worker cost
+    runs-on: ubuntu-24.04
+    timeout-minutes: >-
+      ${{ (inputs.measure || contains(github.event.head_commit.message, '[measure-2000]'))
+      && 60 || 5 }}
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out immutable diagnostic candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install pinned uv without shared cache
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          enable-cache: false
+          python-version: ${{ matrix.python }}
+          version: "0.13.8"
+      - name: Install existing pinned just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4
+        with:
+          just-version: "1.58.0"
+      - name: Bootstrap locked environment
+        timeout-minutes: 3
+        run: just setup
+      - name: Prove hosted prerequisites without running a shard
+        timeout-minutes: 1
+        run: uv run --no-sync python scripts/measure_test_cost.py --preflight
+      - name: Run the fixed bounded experiment
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.measure) ||
+          (github.event_name == 'push' &&
+          contains(github.event.head_commit.message, '[measure-2000]'))
+        run: uv run --no-sync python scripts/measure_test_cost.py --measure
+      - name: Retain observation JSON on every outcome
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: coverage-worker-cost-py${{ matrix.python }}
+          path: |
+            dist/test-cost/metadata.json
+            dist/test-cost/samples.json
+            dist/test-cost/*/resources.json
+          if-no-files-found: error
+          retention-days: 7
