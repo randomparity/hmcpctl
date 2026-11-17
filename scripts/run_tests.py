@@ -25,6 +25,10 @@ APPLICATION_UNITS = (
     "tests/unit/test_tool_registry.py",
     "tests/unit/test_tool_schema_templates.py",
 )
+CLI_INTEGRATION_TESTS = (
+    "tests/app/test_cli_commands.py",
+    "tests/app/test_cli_e2e.py",
+)
 CHUNK_SIZE = 64 * 1024
 INTERRUPT_GRACE_SECONDS = 300
 TERMINATE_GRACE_SECONDS = 3
@@ -253,13 +257,32 @@ def _exit_status(returncode: int) -> int:
     return 128 + abs(returncode) if returncode < 0 else returncode
 
 
+def _domain_group_arguments(root: Path, arms: list[str]) -> list[str]:
+    application = {
+        path.relative_to(root).as_posix() for path in root.glob("tests/app/*")
+    }
+    excluded = [
+        *sorted(application.difference(CLI_INTEGRATION_TESTS)),
+        "tests/scripts",
+        *APPLICATION_UNITS,
+        *arms,
+    ]
+    return ["tests", *(f"--ignore={path}" for path in excluded)]
+
+
 def _group_arguments(group: str, root: Path = Path(".")) -> list[str]:
     if group not in TEST_GROUPS:
         raise ValueError(f"unknown test group: {group}")
-    if group == "application":
-        return ["tests/app", *APPLICATION_UNITS]
-    if group == "tooling":
-        return ["tests/scripts"]
+    fixed_groups = {
+        "application": [
+            "tests/app",
+            *APPLICATION_UNITS,
+            *(f"--ignore={path}" for path in CLI_INTEGRATION_TESTS),
+        ],
+        "tooling": ["tests/scripts"],
+    }
+    if group in fixed_groups:
+        return fixed_groups[group]
     arms = sorted(
         path.relative_to(root).as_posix()
         for path in root.glob("tests/test_live*.py")
@@ -271,8 +294,7 @@ def _group_arguments(group: str, root: Path = Path(".")) -> list[str]:
                 "procedure-arms has no test files; check the working directory"
             )
         return arms
-    excluded = ["tests/app", "tests/scripts", *APPLICATION_UNITS, *arms]
-    return ["tests", *(f"--ignore={path}" for path in excluded)]
+    return _domain_group_arguments(root, arms)
 
 
 def _coverage_command(arguments: list[str], environment: dict[str, str]) -> None:

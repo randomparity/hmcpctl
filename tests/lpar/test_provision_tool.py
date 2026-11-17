@@ -1016,6 +1016,125 @@ def test_an_unproven_apply_pauses_the_provision(
     assert result.operation.outcome == "needs_attention"
 
 
+@pytest.mark.parametrize("detail", ["", "x" * 2000], ids=["short", "long"])
+def test_a_refused_saved_apply_explains_deliberate_resume_retry(
+    monkeypatch, mock_hmc, saved_apply, detail
+):
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
+
+    _hmc_env(monkeypatch)
+    _mock_preconditions(mock_hmc)
+    create_route = _mock_execution_steps(mock_hmc)
+    apply = AsyncMock(
+        side_effect=[
+            HMCCLIError(
+                "HSCL0000 refused " + detail,
+                remote_refusal_code="HSCL0000",
+                remote_nonzero_completed=True,
+            )
+            for _ in range(2)
+        ]
+    )
+    monkeypatch.setattr(provision_operation, "apply_lpar_profile_via_cli", apply)
+
+    first = hmc_provision_lpar(
+        **_provision_args(power_on=False, request_id="refused-apply")
+    )
+    again = hmc_provision_lpar(request_id="refused-apply", continuation="resume")
+
+    for result in (first, again):
+        assert result.workflow_completed is False
+        assert result.operation.outcome == "needs_attention"
+        step = next(s for s in result.steps if s.step == "apply_saved_profile")
+        assert step.status == "error"
+        assert "HMC refused the saved-profile apply" in step.result
+        assert "resuming deliberately retries the same apply" in step.result
+        assert "Inspect the refusal before resuming" in step.result
+        assert "HSCL0000" in step.result
+        assert len(step.result) <= 512
+    assert first.operation.operation_id == again.operation.operation_id
+    assert create_route.call_count == 1
+    assert apply.await_count == 2
+    assert apply.call_args_list[0] == apply.call_args_list[1]
+    assert apply.call_args.kwargs["profile_name"].startswith("hmcpctl_")
+
+
+class _SpecializedApplyError(HMCCLIError):
+    """A CLI subtype whose identity and metadata survive diagnostic enrichment."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type,completed,code",
+    [
+        (HMCCLIError, True, "HSCL0000"),
+        (HMCCLIError, True, None),
+        (_SpecializedApplyError, True, "HSCL0000"),
+        (HMCCLIError, False, None),
+        (HMCCLIError, False, "HSCL0000"),
+        (_SpecializedApplyError, False, None),
+        (ValueError, False, None),
+    ],
+    ids=[
+        "refused",
+        "uncoded",
+        "specialized",
+        "transport",
+        "unknown",
+        "subtype",
+        "other",
+    ],
+)
+async def test_saved_apply_preserves_error_semantics(
+    monkeypatch, saved_apply, error_type, completed, code
+):
+    from hmcpctl.operations.lpar.provisioning import operation as provision_operation
+
+    if issubclass(error_type, HMCCLIError):
+        error = error_type(
+            "original apply failure",
+            status_code=409,
+            body="<HttpErrorResponse><Message>refused</Message></HttpErrorResponse>",
+            remote_refusal_code=code,
+            remote_nonzero_completed=completed,
+        )
+    else:
+        error = error_type("original apply failure")
+    cause = RuntimeError("original cause")
+    error.__cause__ = cause
+    original = str(error)
+    saved_apply.refusal = error
+    monkeypatch.setattr(
+        provision_operation, "resolve_ssh_names", AsyncMock(return_value=("sys1", None))
+    )
+    run = provision_operation._Run(
+        SimpleNamespace(operation_id="a" * 32),
+        SimpleNamespace(config=None),
+        "sys1",
+        None,
+    )
+
+    with pytest.raises(error_type) as raised:
+        await run._write_apply(SYSTEM_UUID, LPAR_UUID)
+
+    assert raised.value is error
+    assert error.__cause__ is cause
+    if completed:
+        assert str(error).startswith("HMC refused the saved-profile apply")
+        assert str(error).endswith(original)
+        assert "resuming deliberately retries the same apply" in str(error)
+    else:
+        assert str(error) == original
+    if isinstance(error, HMCCLIError):
+        assert error.status_code == 409
+        assert (
+            error.body
+            == "<HttpErrorResponse><Message>refused</Message></HttpErrorResponse>"
+        )
+        assert error.remote_refusal_code == code
+        assert error.remote_nonzero_completed is completed
+
+
 def test_a_partition_without_a_name_is_never_applied(
     monkeypatch, mock_hmc, saved_apply
 ):
