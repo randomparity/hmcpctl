@@ -12,8 +12,11 @@ take several minutes to produce the reference code described in ADR 0328.
 
 ## Decision
 
-1. The CLI accepts a JSON file containing the shared install object, an optional MAC
-   for prepared media, the boot mode, and the boot continuation. A fresh writer-window
+1. The CLI reads the shared install object from `--install PATH`. It rejects undeclared
+   fields in the typed objects before preview or submission. The prepared media
+   `producer_result` dictionary passes through to the existing binder. Operators select
+   the MAC, boot mode and continuation separately with `--mac`, `--boot` and
+   `--continuation`. MCP retains its existing validation. A fresh writer-window
    assertion accompanies a write. The journal owns the effective continuation request.
 2. Use the operation engine's existing maximum wait for the worker's reference-code
    budget. The CLI waits for the worker's final record before exiting.
