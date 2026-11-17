@@ -249,7 +249,9 @@ The default `--boot immediate` starts the installer in the same operation. A del
 deferred pause exits zero with `ready_to_boot`; attach your console before continuing.
 Boot and resume require a fresh profile writer-window assertion. A continuation can
 use the recorded request without the original file. Explicit request values must match
-the journal. Dry-run applies only to a new invocation. The CLI waits for the worker,
+the journal. If the initial request omitted `--boot`, omit it on continuation too.
+Restating `--boot immediate` conflicts with an absent recorded field, even though
+its effective value was immediate. Dry-run applies only to a new invocation. The CLI waits for the worker,
 which spends up to 600 seconds from its start looking for boot evidence, including
 time spent staging. `boot_started` exits zero when firmware hands control to the boot
 image. Guest installation and readiness remain unverified. A failed or

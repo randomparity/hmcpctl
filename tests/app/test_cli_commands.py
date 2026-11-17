@@ -1855,6 +1855,27 @@ def test_provision_installer_interactive_json(monkeypatch, fake_hmc, tmp_path):
     assert "Provision LPAR" in confirmed.stderr
 
 
+def test_provision_installer_replays_omitted_boot(monkeypatch, fake_hmc, tmp_path):
+    _fake_provision(monkeypatch, _PROVISIONED, "needs_attention")
+    paused = RUNNER.invoke(cli.app, _installer_args(tmp_path, BUILT_INSTALL))
+    assert paused.exit_code == 1 and "needs_attention" in paused.stdout
+    cont = [
+        "lpars",
+        "provision",
+        "--request-id",
+        "installer",
+        "--continuation",
+        "resume",
+        "--exclusive-writer-window",
+    ]
+
+    conflict = RUNNER.invoke(cli.app, [*cont, "--boot", "immediate"])
+    assert conflict.exit_code == 1 and "different boot" in conflict.output
+    _fake_provision(monkeypatch, _PROVISIONED, "boot_started")
+    resumed = RUNNER.invoke(cli.app, cont)
+    assert resumed.exit_code == 0 and "boot_started" in resumed.stdout, resumed.output
+
+
 def test_provision_installer_schema_and_journal_size_limits(
     monkeypatch, fake_hmc, tmp_path
 ):
