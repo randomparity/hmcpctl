@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
@@ -112,6 +113,13 @@ def _validated_request(arguments: Mapping[str, Any]) -> tuple[str, ProvisionRequ
         if arguments.get("install") is not None:
             raise ValueError(
                 "Invalid --install provision request; check the typed options"
+            ) from None
+        raise
+    except ValueError as exc:
+        field = str(exc).partition(":")[0]
+        if re.fullmatch(r"install\.network\.routes\[\d+\]\.gateway", field):
+            raise ValueError(
+                f"{field}: supply an IPv4 gateway in the network of install.network.address"
             ) from None
         raise
 

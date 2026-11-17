@@ -1887,6 +1887,27 @@ def test_provision_installer_preserves_open_producer_members(
     assert preview.await_args.args[2].install == INSTALL
 
 
+def test_provision_installer_gateway_diagnostic_omits_address(
+    monkeypatch, fake_hmc, tmp_path
+):
+    factory, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, BUILT_INSTALL)
+    path = tmp_path / "install.json"
+    payload = json.loads(path.read_bytes())
+    network = payload["network"]
+    network["routes"][0]["gateway"] = "198.51.100.1"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    refused = RUNNER.invoke(cli.app, args)
+
+    assert refused.exit_code == 2
+    assert network["address"] not in refused.stderr
+    assert "install.network.routes[0].gateway" in refused.stderr
+    assert "install.network.address" in refused.stderr
+    preview.assert_not_awaited()
+    factory.assert_not_called()
+
+
 def test_provision_installer_interactive_json(monkeypatch, fake_hmc, tmp_path):
     _fake_provision(monkeypatch, _PROVISIONED, "ready_to_boot")
     args = _installer_args(tmp_path, BUILT_INSTALL, "--boot", "deferred", "--json")
