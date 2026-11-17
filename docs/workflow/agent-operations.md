@@ -205,10 +205,16 @@ and shipping over it is not acceptable.
 Common causes worth checking first:
 
 - **Ambient `HMC_*` variables supplying credentials** — `HMCConfig` is a
-  pydantic-settings `BaseSettings` with `env_prefix="HMC_"`, so **every field a
-  test leaves unset resolves from the developer's own environment**. A test that
-  passes `host=` and asserts on `agent_id` or `ssh_key_file` passes in CI and
-  fails on a workstation with those exported.
+  pydantic-settings `BaseSettings` with `env_prefix="HMC_"`: its normal
+  constructor reads environment values for fields the caller leaves unset.
+  The suite protects test bodies from workstation exports with autouse fixtures
+  in `tests/conftest.py`. `enable_tls_verification_for_tests` derives the field
+  names from `HMCConfig.model_fields`, clears their environment variables and
+  `HMC_PROFILE` in every casing, then sets `HMC_VERIFY_SSL=true`.
+  `default_power_ownership_guard_off` also clears power authorization;
+  `no_ambient_hmc_settings` additionally clears `HMC_AGENT_ID`,
+  `HMC_SCHEMA_VERSION`, `HMC_ISO_URL_ALLOWLIST`, `HMC_ISO_BUILD_ENTRY`, and
+  `HMC_ISO_BUILD_ARGUMENTS`. Tests can set their own environment after setup.
 
   Tests that need a credential-free `HMCConfig` should construct it with
   `HMCConfig.from_mapping({...})`, which reads no environment variable and no
@@ -230,13 +236,14 @@ Common causes worth checking first:
   `monkeypatch.setenv`/`delenv`; `from_mapping` is the wrong tool there,
   because the environment is the behaviour under test.
 
-  The earlier version of this note produced real breakage. Verify a fix with
-  the environment a workstation actually has, not an empty one. Every
-  `HMCConfig` field has an `HMC_*` name that can leak in; `just env-vars` lists
-  them, so this note states no count that could drift. The probe below sets
-  every field except the two that autouse fixtures in `tests/conftest.py`
-  already pin (`HMC_VERIFY_SSL`, `HMC_AUTHORIZE_POWER_OPERATIONS`). When a
-  field is added, add it here with a non-default value:
+  Use `HMCConfig.model_fields` as the current field inventory; `just env-vars`
+  checks that the environment reference documents it. No fixed count is needed.
+  The bounded probe below starts the config tests in a populated process. It
+  sets non-default values for the fields other than `HMC_VERIFY_SSL` and
+  `HMC_AUTHORIZE_POWER_OPERATIONS`, whose test baseline is true and unset,
+  respectively. The other exports are cleared by the fixtures too: this does
+  **not** inject workstation values into each test body. When adding a field,
+  extend the probe with a valid non-default value.
 
   ```sh
   HMC_AGENT_ID=a HMC_AUDIT_MEMENTO=m HMC_CA_BUNDLE=/ca.pem \
@@ -246,46 +253,31 @@ Common causes worth checking first:
   HMC_PASSWORD=p HMC_PORT=12443 HMC_SCHEMA_VERSION=V1_0 HMC_SSH_KEY_FILE=/k \
   HMC_SSH_TIMEOUT=111 HMC_SSH_VERIFY_HOST_KEY=false HMC_TIMEOUT=17 \
   HMC_TRUST_SYSTEM_STORE=false HMC_UPLOAD_TIMEOUT=222 HMC_USER=u \
-    uv run --no-sync pytest tests/ -q
+    uv run --no-sync pytest tests/unit/test_config.py --no-cov -q
   ```
 
-  Every value differs from the field's declared default, deliberately.
-  `HMC_PORT`, `HMC_TIMEOUT`, `HMC_SSH_TIMEOUT` and `HMC_UPLOAD_TIMEOUT` default
-  to 443, 180, 300 and 600, and `HMC_SSH_VERIFY_HOST_KEY` and
-  `HMC_TRUST_SYSTEM_STORE` default to true; a probe set to the default is
-  invisible to a test that asserts the default, so it would prove nothing. A
-  leak has to surface as a wrong-value assertion.
+  Each listed value differs from its field default. Keep the ISO build pair
+  together: supplying only one setting fails config construction, and the
+  arguments must be a JSON string array containing exactly one `{target}`.
 
-  **The failures this probe produces are its output, not pre-existing failures
-  to fix under the rule at the top of this section.** It is a diagnostic, and it
-  reddens tests on purpose — `tests/conftest.py`'s `make_config()` pins only
-  host, user, password and `verify_ssl`, so `HMC_PORT=12443` alone re-points
-  every config it builds away from the `https://hmc.test:443` the respx routes
-  expect. Read the failures as a list of tests that are not isolated, fix the
-  isolation, and re-run. A green `just verify` — with no `HMC_*` exported — is
-  what says the branch is shippable.
+  A green run is expected: it shows this bounded config-test group survives
+  these ambient exports. The config tests also set their own values after
+  fixture setup: `test_from_mapping_leaves_no_field_to_the_environment` checks
+  mapping isolation over `model_fields`, while
+  `test_plain_constructor_still_reads_the_environment` preserves intentional
+  environment loading. A green probe does not certify unselected tests or
+  code outside fixture setup, including import/collection-time reads. It is
+  separate from the normal `just verify` shipping gate.
 
-  `HMC_VERIFY_SSL` and `HMC_AUTHORIZE_POWER_OPERATIONS` are deliberately absent:
-  exporting them here would prove nothing, because the autouse fixtures pin both.
+  If the probe fails, report the failing cases and actual cause; a construction
+  error is not a wrong-value assertion, and neither automatically proves a
+  per-test leak. Preserve the fixtures rather than removing them to force red.
 
-  Two names in play here leak in a second way, and neither shows up as a
-  wrong-value assertion:
-
-  - **`HMC_PROFILE` is not an `HMCConfig` field at all.** `load_profile` reads
-    it from `os.environ` directly to choose which profile in `config.toml` to
-    load, so an exported value selects a profile a test's fixture config may not
-    define, and the test fails with a `ConfigError`.
-  - **`HMC_HOST` reroutes the authorization path**, on top of being a field.
-    `connection_scope.selected_connection` returns `None` — collapsing every
-    `connection=` token to the environment connection — whenever `HMC_HOST` is
-    set; `connection_denial` adds a clause to the ADR 0038 denial text on the
-    same condition; and `build_config` skips its whole TOML/profile branch. So
-    an authorization or profile test failing under the probe above is reporting
-    a *rerouted decision*, not a leaked value. Do not "fix" an access-policy
-    assertion to match it — unset `HMC_HOST` and re-run that test first.
-
-  #461 tracks the tests outside `tests/unit/test_config.py` that still fail
-  this way, and the suite-wide fixture that should stop it recurring.
+  Outside fixture protection, `HMC_PROFILE` selects a TOML profile independently
+  of `HMCConfig` fields, and `HMC_HOST` also reroutes profile and authorization
+  decisions. When testing those paths, control the variables explicitly with
+  `monkeypatch.setenv`/`delenv`. Do not change an access-policy assertion to
+  match ambient credentials; unset `HMC_HOST` and diagnose that decision first.
 - **Import name drift** — a tool or function renamed in source but still
   referenced by the old name in a test or fixture.
 
@@ -307,7 +299,7 @@ Use verbose recipes only when live progress or expanded diagnostics are needed:
 
 ```sh
 just test-verbose   # live pytest output + missing-lines coverage
-just smoke-verbose  # list every exposed MCP tool
+just smoke-verbose  # list the tools a client's tools/list carries (the primary catalog)
 just test-timings   # retain pytest output, including the 30 slowest test phases
 just verify-timings # canonical verify with per-recipe wall time and pytest timings
 ```
@@ -380,6 +372,14 @@ locally. Hosted CI no longer supplies native arm64 evidence (ADR 0210).
 Each version runs `UV_NO_SYNC=1 uv run --no-sync prek run --all-files` once
 and, starting at the same time (ADR 0383), four separate test groups:
 `domain-and-unit`, `application`, `procedure-arms` and `tooling`.
+[ADR 0387](../adr/0387-rebalance-four-test-groups.md) assigns the broad CLI integration
+suites `tests/app/test_cli_commands.py` and `tests/app/test_cli_e2e.py` to
+`domain-and-unit`. Other application children and the two application-unit files
+remain in `application`; live-test files and script tests retain their existing groups.
+The selector keeps a catch-all for other tests and complementary application exclusions.
+A paired-runner regression compares actual full-suite node IDs with the disjoint
+four-group union on each normal CI interpreter. The
+[timing evidence](test-group-rebalance-1998.md) records the measured basis and limits.
 `just test-group <group>` retains timings, JUnit and branch data; its success
 means combined coverage is still pending.
 The existing per-version `ci` verification checks require successful producers
