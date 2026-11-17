@@ -107,7 +107,8 @@ def test_fixed_inside_modes_reuse_application_selector(observer, monkeypatch, sl
     assert observer.SAMPLES == expected
     workers, covered = expected[slot - 1]
     args = calls[0]
-    assert args[:3] == observer._group_arguments("application")
+    selected = observer._group_arguments("application")
+    assert args[: len(selected)] == selected
     assert args[args.index("-n") + 1] == str(workers)
     assert "--dist=loadfile" in args and "--max-worker-restart=0" in args
     assert "--cov-fail-under=0" in args
@@ -204,17 +205,17 @@ def test_workflow_is_isolated_fixed_and_read_only():
     assert data["permissions"] == {"contents": "read"}
     assert set(data["on"]) == {"push", "workflow_dispatch"}
     job = data["jobs"]["observe"]
-    condition = "inputs.measure || contains(github.event.head_commit.message, '[diagnose-2000]')"
-    assert job["timeout-minutes"] == "${{ (" + condition + ") && 60 || 5 }}"
-    assert job["strategy"]["matrix"] == {"python": ["3.12"]}
-    assert job["strategy"]["max-parallel"] == "1"
-    steps = job["steps"]
-    long = next(step for step in steps if step.get("run", "").endswith("--measure"))
-    assert long["if"] == (
+    assert job["if"] == (
         "(github.event_name == 'workflow_dispatch' && inputs.measure) || "
         "(github.event_name == 'push' && "
         "contains(github.event.head_commit.message, '[diagnose-2000]'))"
     )
+    assert job["timeout-minutes"] == "60"
+    assert job["strategy"]["matrix"] == {"python": ["3.12"]}
+    assert job["strategy"]["max-parallel"] == "1"
+    steps = job["steps"]
+    long = next(step for step in steps if step.get("run", "").endswith("--measure"))
+    assert "if" not in long
     assert data["on"]["push"]["branches"] == ["feat/coverage-worker-cost-2000"]
     upload = steps[-1]["with"]
     assert upload["path"].splitlines() == [

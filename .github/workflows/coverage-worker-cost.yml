@@ -16,10 +16,12 @@ concurrency:
 jobs:
   observe:
     name: Python ${{ matrix.python }} / coverage worker cost
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.measure) ||
+      (github.event_name == 'push' &&
+      contains(github.event.head_commit.message, '[diagnose-2000]'))
     runs-on: ubuntu-24.04
-    timeout-minutes: >-
-      ${{ (inputs.measure || contains(github.event.head_commit.message, '[diagnose-2000]'))
-      && 60 || 5 }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -48,10 +50,6 @@ jobs:
         timeout-minutes: 1
         run: uv run --no-sync python scripts/measure_test_cost.py --preflight
       - name: Run the fixed bounded experiment
-        if: >-
-          (github.event_name == 'workflow_dispatch' && inputs.measure) ||
-          (github.event_name == 'push' &&
-          contains(github.event.head_commit.message, '[diagnose-2000]'))
         run: uv run --no-sync python scripts/measure_test_cost.py --measure
       - name: Retain owned diagnostic evidence on every outcome
         if: always()
