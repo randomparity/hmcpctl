@@ -115,9 +115,11 @@ include = ["src/hmcpctl", "scripts"]
 
 [tool.pytest.ini_options]
 pythonpath = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
 # Package-wide coverage gate lives in [tool.coverage.report]. Run a focused
 # subset with `--no-cov` when package-wide coverage is not meaningful.
-addopts = "--cov=hmcpctl --cov-report="
+# Async tests use pytest-asyncio; the transitive AnyIO pytest plugin is unused.
+addopts = "--cov=hmcpctl --cov-report= -p no:anyio"
 
 [tool.coverage.run]
 branch = true
