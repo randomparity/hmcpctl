@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import selectors
 import shutil
 import subprocess  # nosec B404 # Fixed local git/systemd/pytest commands only.
 import sys
@@ -20,10 +21,98 @@ MODES = ((2, True), (2, False), (3, True), (4, True))
 SAMPLES = (*MODES, *reversed(MODES))
 SAMPLE_SECONDS = 720
 SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+LOG_HALF_BYTES = 1024 * 1024
+# This digest fingerprints public runtime metadata, not a credential.
+ORIGINAL_RUNTIME_SHA256 = "9057b049cc5454471cb2b440c08e2a53f6f0cefd6f3e35a6e6c873f59fe7e2f5"  # pragma: allowlist secret
 
 
 def digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def input_fingerprints() -> dict[str, object]:
+    """Fingerprint source, fixtures and selectors without generated/ignored files."""
+    names = (
+        subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                "src",
+                "tests",
+                "scripts/run_tests.py",
+                "pyproject.toml",
+                "uv.lock",
+            ],
+            timeout=10,
+        )
+        .decode()
+        .split("\0")
+    )  # nosec B603 B607 # Fixed local input inventory.
+    files = {
+        name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+        for name in names
+        if name and name != "tests/scripts/test_measure_test_cost.py"
+    }
+    if not files:
+        raise ValueError("measurement requires a nonempty source/input inventory")
+    return {
+        "files": files,
+        "workload_sha256": digest(files),
+        "selector": _group_arguments("application"),
+        "observer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "workflow_sha256": hashlib.sha256(
+            Path(".github/workflows/coverage-worker-cost.yml").read_bytes()
+        ).hexdigest(),
+    }
+
+
+def capture_log(command: list[str], directory: Path, timeout: float) -> None:
+    """Drain output continuously, retaining at most its first/last MiB and a marker."""
+    prefix, tail = bytearray(), bytearray()
+    total = 0
+    deadline = time.monotonic() + timeout
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )  # nosec B603 # Fixed owned service or controlled regression child.
+    assert process.stdout is not None
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    chunk = os.read(key.fd, 64 * 1024)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    total += len(chunk)
+                    keep = min(len(chunk), LOG_HALF_BYTES - len(prefix))
+                    prefix.extend(chunk[:keep])
+                    tail.extend(chunk[keep:])
+                    del tail[:-LOG_HALF_BYTES]
+        result = process.wait(timeout=max(0, deadline - time.monotonic()))
+        if result:
+            raise subprocess.CalledProcessError(result, command)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        process.stdout.close()
+        omitted = total - len(prefix) - len(tail)
+        marker = f"\n[{omitted} output bytes omitted]\n".encode() if omitted else b""
+        (directory / "pytest.log").write_bytes(prefix + marker + tail)
+        (directory / "log.json").write_text(
+            json.dumps({"output_bytes": total, "omitted_bytes": omitted}) + "\n"
+        )
 
 
 def host_memory() -> int:
@@ -128,7 +217,7 @@ def inside(slot: int) -> None:
 def service(slot: int, timeout: int) -> float:
     """Give each sample a fresh memory-accounted service with a bounded lifetime."""
     directory = OUTPUT / str(slot)
-    directory.mkdir()
+    directory.mkdir(exist_ok=True)
     unit = f"hmcp2000-{os.getpid()}-{slot}"
     command = [
         "sudo",
@@ -153,14 +242,7 @@ def service(slot: int, timeout: int) -> float:
         str(slot),
     ]
     started = time.monotonic()
-    with (directory / "pytest.log").open("w") as output:
-        subprocess.run(
-            command,
-            stdout=output,
-            stderr=subprocess.STDOUT,
-            timeout=timeout + 15,
-            check=True,
-        )  # nosec B603 # Fixed owned service.
+    capture_log(command, directory, timeout + 15)
     return time.monotonic() - started
 
 
@@ -209,6 +291,7 @@ def preflight() -> dict[str, object]:
     elapsed = service(0, 20)
     metadata = {
         "head": head,
+        "hmcpctl_version": importlib.metadata.version("hmcpctl"),
         "python": sys.version,
         "machine": platform.machine(),
         "platform": platform.platform(),
@@ -219,11 +302,77 @@ def preflight() -> dict[str, object]:
             for name in ("pytest", "pytest-cov", "pytest-xdist", "coverage")
         },
         "resources": json.loads((OUTPUT / "0/resources.json").read_text()),
+        "inputs": input_fingerprints(),
         "cache": "fresh hosted VM; setup-uv cache disabled; samples reuse one venv and OS caches",
     }
+    runtime = {key: metadata[key] for key in ("python", "packages", "lock_sha256")}
+    runtime["coverage_core"] = metadata["resources"]["coverage_core"]
+    metadata["runtime_sha256"] = digest(runtime)
+    metadata["expected_runtime_sha256"] = ORIGINAL_RUNTIME_SHA256
     (OUTPUT / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(json.dumps(metadata), flush=True)
+    if metadata["runtime_sha256"] != ORIGINAL_RUNTIME_SHA256:
+        raise ValueError(
+            "diagnostic runtime/lock/core differs from original Python 3.12; see metadata.json"
+        )
     return metadata
+
+
+def retain_sample(slot: int, expected: dict) -> dict:
+    """Persist raw output and current observation before a comparison can reject it."""
+    directory = OUTPUT / str(slot)
+    directory.mkdir()
+    record: dict = {
+        "slot": slot,
+        "expected": expected.copy(),
+        "inputs_before": input_fingerprints(),
+        "identity_actual": None,
+        "coverage_actual": None,
+        "resources": None,
+        "inputs_after": None,
+        "errors": {},
+    }
+    observation = directory / "observation.json"
+    observation.write_text(json.dumps(record, indent=2) + "\n")
+    if record["inputs_before"] != expected["inputs"]:
+        raise ValueError(
+            f"sample {slot} changed source/input fingerprints; no comparison"
+        )
+    started = time.monotonic()
+    failure = None
+    try:
+        record["wall_seconds"] = service(slot, SAMPLE_SECONDS)
+    except Exception as error:  # noqa: BLE001 # Collect evidence, then re-raise this same error.
+        failure = error
+        record["errors"]["service"] = f"{type(error).__name__}: {error}"
+    finally:
+        record.setdefault("wall_seconds", time.monotonic() - started)
+        observation.write_text(json.dumps(record, indent=2) + "\n")
+    covered = SAMPLES[record["slot"] - 1][1]
+    collectors = {
+        "identity_actual": lambda: junit_result(directory / "junit.xml"),
+        "coverage_actual": lambda: (
+            coverage_result(directory / "coverage.json") if covered else None
+        ),
+        "resources": lambda: json.loads((directory / "resources.json").read_text()),
+        "inputs_after": input_fingerprints,
+    }
+    for name, collect in collectors.items():
+        try:
+            record[name] = collect()
+        except Exception as error:  # noqa: BLE001 # Collect other fields; re-raise the first error.
+            record["errors"][name] = f"{type(error).__name__}: {error}"
+            if failure is None:
+                failure = error
+        finally:
+            observation.write_text(json.dumps(record, indent=2) + "\n")
+    if failure is not None:
+        raise failure
+    if record["inputs_after"] != expected["inputs"]:
+        raise ValueError(
+            f"sample {slot} changed source/input fingerprints; no comparison"
+        )
+    return record
 
 
 def measure() -> None:
@@ -232,29 +381,31 @@ def measure() -> None:
     rows = []
     identity = coverage = None
     for slot, (workers, covered) in enumerate(SAMPLES, 1):
-        elapsed = service(slot, SAMPLE_SECONDS)
-        directory = OUTPUT / str(slot)
-        result = junit_result(directory / "junit.xml")
+        record = retain_sample(
+            slot,
+            {"inputs": metadata["inputs"], "identity": identity, "coverage": coverage},
+        )
+        result = record["identity_actual"]
         if identity is not None and result != identity:
             raise ValueError(
                 f"sample {slot} changed test identities/outcomes; no comparison"
             )
         identity = result
         if covered:
-            signature = coverage_result(directory / "coverage.json")
+            signature = record["coverage_actual"]
             if coverage is not None and signature != coverage:
                 raise ValueError(
                     f"sample {slot} changed per-file coverage; no comparison"
                 )
             coverage = signature
-        resources = json.loads((directory / "resources.json").read_text())
+        resources = record["resources"]
         if resources["peak_bytes"] <= 0:
             raise ValueError(f"sample {slot} lacks a kernel memory peak")
         row = {
             "slot": slot,
             "workers": workers,
             "coverage": covered,
-            "wall_seconds": elapsed,
+            "wall_seconds": record["wall_seconds"],
             **result,
             "peak_bytes": resources["peak_bytes"],
             "coverage_sha256": coverage if covered else None,
