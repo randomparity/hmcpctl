@@ -268,6 +268,25 @@ def test_full_widened_history_reports_evidence_or_an_explicit_gap(
         assert len(result["observed"]) == 100
 
 
+@pytest.mark.parametrize("boot_evidence", [False, True])
+def test_null_baseline_does_not_match_a_blank_refcode_identity(boot, boot_evidence):
+    history = _history(100)
+    history[10] = _row("", "")
+    if boot_evidence:
+        history[25] = _row("11/03/2026 10:00:05", "CA00E105")
+    boot.refcodes = [[], history]
+
+    record = _submit(boot)
+
+    assert boot.counts == [1, 20, 100]
+    assert record.outcome == ("boot_started" if boot_evidence else "needs_attention")
+    if not boot_evidence:
+        assert (
+            "history is incomplete"
+            in _step(record, "wait_boot_started").result["reason"]
+        )
+
+
 def test_initial_boot_evidence_does_not_depend_on_a_wider_read(boot, monkeypatch):
     boot.refcodes = [[OLD], [*_history(19), _row("11/03/2026 10:00:05", "CA00E105")]]
     original = boot.read_refcodes
@@ -329,6 +348,11 @@ def test_refcode_read_errors_at_either_depth_use_the_existing_result(
     assert record.outcome == "needs_attention"
     reason = _step(record, "wait_boot_started").result["reason"]
     assert reason == f"a refcode read failed: {error.__name__}: poll failed"
+    observed = _step(record, "wait_boot_started").result["observed"]
+    expected = [
+        {key: row[key] for key in ("time_stamp", "refcode")} for row in _history(20)
+    ]
+    assert observed == (expected if depth == 100 else [])
     assert boot.calls.count("power_on") == 1
 
 

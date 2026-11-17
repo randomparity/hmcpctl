@@ -84,16 +84,23 @@ def newer_rows(
 def _history_may_be_incomplete(
     rows: Sequence[Row], baseline: Mapping[str, Any], count: int
 ) -> bool:
-    return len(rows) >= count and not any(
-        row_identity(row) == row_identity(baseline) for row in rows
+    base = row_identity(baseline)
+    return len(rows) >= count and (
+        base == row_identity(None) or not any(row_identity(row) == base for row in rows)
     )
 
 
 async def _read_boot_window(
-    read: Callable[[int], Awaitable[Sequence[Row]]], baseline: Mapping[str, Any]
+    read: Callable[[int], Awaitable[Sequence[Row]]],
+    baseline: Mapping[str, Any],
+    observed: list[dict[str, Any]],
 ) -> BootWait:
     for count in (REFCODE_ROWS, MAX_REFCODE_COUNT):
-        rows = await read(count)
+        try:
+            rows = await read(count)
+        except _READ_ERRORS as exc:
+            reason = f"a refcode read failed: {type(exc).__name__}: {exc}"[:512]
+            return BootWait(None, observed, reason)
         observed = newer_rows(rows, baseline)
         for row in observed:
             if row["refcode"] in BOOT_STARTED_CODES:
@@ -124,11 +131,7 @@ async def wait_for_boot(
     deadline = clock() + wait_seconds
     observed: list[dict[str, Any]] = []
     while True:
-        try:
-            poll = await _read_boot_window(read, baseline)
-        except _READ_ERRORS as exc:
-            reason = f"a refcode read failed: {type(exc).__name__}: {exc}"[:512]
-            return BootWait(None, observed, reason)
+        poll = await _read_boot_window(read, baseline, observed)
         observed = poll.observed
         if poll.started is not None or poll.reason is not None:
             return poll
