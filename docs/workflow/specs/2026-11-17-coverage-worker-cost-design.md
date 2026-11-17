@@ -7,7 +7,7 @@ C2: compare covered two/three/four workers, with wall time and fresh cgroup memo
 C3: report exact commit/lock/interpreters/packages/core, resources, hashes, order and limits.
 Cycle 2 adds durable current-sample evidence before identity/coverage rejection: elapsed/resources,
 expected/actual hashes, full coverage maps, JUnit, bounded logs and source/input fingerprints.
-Authority: [complete scope](https://github.com/randomparity/hmcpctl/issues/2000#issuecomment-6944842344).
+Authority: [complete scope](https://github.com/randomparity/hmcpctl/issues/2000#issuecomment-6946127768).
 The first run at `11b84927b713d52206d324c7f679ca1bd60859c3` rejected Python 3.12 sample 8,
 but its coverage map/hash/elapsed were not uploaded. That underlying drift remains unexplained.
 Application is one representative multi-file shard; reuse its selector without ownership transition.
@@ -32,7 +32,10 @@ overall including push/queue, 60 aggregate runner-minutes; cumulative target job
 Start one monotonic deadline before push; cancel before expiry with a 60-second reserve.
 Fingerprint source/fixtures/selector before and after each sample; stop on changed inputs.
 Retain metadata before rejecting a different build/package/lock/core fingerprint from original Py3.12.
+Record actual hmcpctl distribution version separately; the new commit necessarily differs from
+original `0.2.1.dev158+g11b84927b`. Proven equality covers workload bytes/args/lock and named tools only.
 Persist current observation and raw owned outputs before the unchanged identity/coverage guards.
+Collect available fields independently after service/parser failure; record field errors and rethrow.
 Drain logs continuously, retaining first/last MiB with omitted-byte count; do not bound the child
 by truncating its pipe. Artifacts allowlist only owned diagnostic files, including raw JUnit/maps.
 Errors/mismatches stop the job and retain partial evidence without restart or expansion.
