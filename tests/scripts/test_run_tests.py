@@ -1410,6 +1410,10 @@ def _group_project(root: Path) -> None:
     )
     for name in (
         "tests/app/test_application.py",
+        "tests/app/test_cli_commands.py",
+        "tests/app/test_cli_e2e.py",
+        "tests/app/test_cli_future.py",
+        "tests/app/nested/test_future.py",
         "tests/scripts/test_tooling.py",
         "tests/test_live_case.py",
         "tests/unit/test_tool_registry.py",
@@ -1458,9 +1462,60 @@ def test_group_selection_partitions_current_and_future_files(tmp_path: Path) -> 
         collect(run_tests._group_arguments(group, tmp_path)) for group in _GROUPS
     ]
     assert set.union(*members) == baseline
-    assert sum(map(len, members)) == len(baseline) == 7
+    assert sum(map(len, members)) == len(baseline) == 11
     assert any("future_test.py" in item for item in members[0])
-    assert len(members[1]) == 3
+    assert len(members[0]) == 4
+    assert len(members[1]) == 5
+    for name in ("test_cli_commands.py", "test_cli_e2e.py"):
+        assert f"tests/app/{name}::test_case" in members[0]
+    assert "tests/app/test_cli_future.py::test_case" in members[1]
+    assert "tests/app/nested/test_future.py::test_case" in members[1]
+
+
+def _collect_group_nodes(root: Path, arguments: list[str]) -> set[str]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "--no-cov",
+            "-q",
+            "-o",
+            "addopts=",
+            *arguments,
+        ],
+        cwd=root,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"PYTEST_ADDOPTS", "COVERAGE_FILE", "COVERAGE_RCFILE"}
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+    nodes = [
+        line
+        for line in result.stdout.splitlines()
+        if line.startswith("tests/") and "::" in line
+    ]
+    assert nodes, result.stdout + result.stderr
+    assert len(nodes) == len(set(nodes)), "collection contains duplicate node IDs"
+    return set(nodes)
+
+
+def test_group_selection_partitions_repository_collection() -> None:
+    root = MODULE_PATH.parents[1]
+    baseline = _collect_group_nodes(root, ["tests"])
+    members = [
+        _collect_group_nodes(root, run_tests._group_arguments(group, root))
+        for group in _GROUPS
+    ]
+    union = set.union(*members)
+    assert union == baseline, {"missing": baseline - union, "extra": union - baseline}
+    assert sum(map(len, members)) == len(union), "groups overlap"
 
 
 @pytest.mark.parametrize("group", ["unknown", "procedure-arms"])

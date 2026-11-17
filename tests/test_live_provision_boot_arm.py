@@ -112,7 +112,10 @@ class BootWorld(World):
 
     def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
         if kwargs.get("continuation") == "abandon":
-            return {**arm._provisioned(False, "terminal"), "steps": []}
+            result = {**arm._provisioned(False, "terminal"), "steps": []}
+            result["operation"]["request_id"] = kwargs["request_id"]
+            self.operations[kwargs["request_id"]] = result["operation"]
+            return result
         self.provisions.append(kwargs)
         uuid = self._new(kwargs["name"], kwargs["caller_token"], kwargs["resources"])
         name = kwargs["storage"]["storage_name"]
@@ -245,6 +248,52 @@ def test_a_clean_boot_holds_every_assertion_and_leaves_nothing(schemas, tmp_path
         "hmc_delete_optical_media"
     )
     assert tools.index("hmc_power_off_lpar") < tools.index("hmc_unmount_optical_media")
+
+
+@pytest.mark.parametrize("status", ["running", "error", "missing"])
+def test_unconfirmed_abandon_retains_st72_media_and_resources(
+    schemas, tmp_path, status
+):
+    world = BootWorld()
+    world.overrides["hmc_operation_status"] = lambda kwargs: (
+        ValueError("status unavailable")
+        if status == "error"
+        else {
+            "operations": []
+            if status == "missing"
+            else [{**_record(status), "request_id": kwargs["request_id"]}],
+            "limit": 50,
+            "truncated": False,
+            "next_cursor": None,
+        }
+    )
+
+    state = _run(schemas, world, tmp_path)
+
+    assert _observation(state)["cleanup"] == "failed"
+    assert (
+        len(world.partitions) == 1
+        and world.media == {MEDIA}
+        and world.optical == [MEDIA]
+    )
+    assert not {
+        "hmc_unmount_optical_media",
+        "hmc_delete_optical_media",
+        "hmc_delete_lpar",
+        "hmc_detach_storage_mapping",
+        "hmc_delete_virtual_disk",
+        "hmc_power_off_lpar",
+    }.intersection(world.tools())
+    (abandon,) = [
+        kwargs
+        for kwargs in world.calls_to("hmc_provision_lpar")
+        if kwargs.get("continuation") == "abandon"
+    ]
+    manual = arm._rows(state, "operation abandon recovery")
+    assert any(
+        abandon["request_id"] in row["data"] and "MANUAL RECOVERY" in row["data"]
+        for row in manual
+    )
 
 
 def test_a_refused_mount_fails_its_assertion_and_still_cleans_up(schemas, tmp_path):

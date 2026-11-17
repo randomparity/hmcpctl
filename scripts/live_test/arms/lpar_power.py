@@ -1433,7 +1433,8 @@ async def _partition_p(
 # ---------------------------------------------------------------------------
 
 
-async def _abandon(client: Client, state: RunState, run: Run) -> None:
+async def _abandon(client: Client, state: RunState, run: Run) -> bool:
+    clean = True
     for request_id, terminal in run.requests.items():
         if terminal:
             continue
@@ -1459,6 +1460,25 @@ async def _abandon(client: Client, state: RunState, run: Run) -> None:
                 client, "hmc_power_lpar", request_id=request_id, continuation="abandon"
             )
         state.record(SUBTASK, f"{tool} ({request_id} abandon)", st, data)
+        st, data = await state.call(
+            client, "hmc_operation_status", request_id=request_id
+        )
+        state.record(SUBTASK, f"hmc_operation_status ({request_id} abandon)", st, data)
+        terminal = st == "PASS" and any(
+            item.get("request_id") == request_id and item.get("state") == "terminal"
+            for item in _items(data, "operations")
+        )
+        run.requests[request_id] = terminal
+        if not terminal:
+            clean = False
+            _manual(
+                state,
+                "operation abandon recovery",
+                f"operation {request_id!r} was not confirmed terminal after abandon; "
+                "inspect it with hmc_operation_status and confirm it is terminal "
+                "before recovering the retained run resources.",
+            )
+    return clean
 
 
 async def _remove(client: Client, state: RunState, run: Run, name: str) -> str | None:
@@ -1541,7 +1561,9 @@ async def _teardown_storage(client: Client, state: RunState, run: Run) -> bool:
 
 async def _teardown(client: Client, state: RunState, run: Run) -> None:
     """Spec step 12: abandon, detach, delete partitions, delete the volume."""
-    await _abandon(client, state, run)
+    if not await _abandon(client, state, run):
+        run.clean = False
+        return
     if run.decommission_failed:
         _manual(
             state,
