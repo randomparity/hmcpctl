@@ -17,6 +17,7 @@ from hmcpctl.operations.affinity.rest import ProvisionAffinityAssessment
 from hmcpctl.operations.lpar.assignments import (
     DedicatedPcieAssignment,
     LparPcieAssignments,
+    VnicAssignment,
 )
 from hmcpctl.operations.lpar.plan import (
     CAPACITY_TOOL,
@@ -47,6 +48,7 @@ from hmcpctl.operations.lpar.provisioning.media import (
     InstallRoute,
     LparInstall,
 )
+from hmcpctl.operations.virtualization.vnic import VnicBackingSelector
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy
 from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME
 
@@ -977,6 +979,43 @@ def test_install_plan_adds_media_changes_and_unverified() -> None:
     assert "deferred" in deferred.intended_changes[-1].detail
 
 
+@pytest.mark.parametrize("with_dedicated", [False, True], ids=["current-only", "mixed"])
+def test_install_assignment_phases(with_dedicated: bool) -> None:
+    dedicated = (DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, "21010001"),)
+    assignments = LparPcieAssignments(
+        dedicated=dedicated if with_dedicated else (),
+        sriov=(SriovLogicalPortAssignment("default", "1", "0", "2", Decimal("2.5")),),
+        vnics=(
+            VnicAssignment(
+                VnicBackingSelector("vios1", "1", "0", "2", Decimal("2.5")), 100
+            ),
+        ),
+    )
+    plan = _plan(
+        FakeHMC(World()), _install_request(_prepared(), assignments=assignments)
+    )
+    assert plan.selected is not None
+    kinds = [change.kind for change in plan.intended_changes]
+    assert kinds[kinds.index("map_storage") :] == [
+        "map_storage",
+        "assign_pcie",
+        "bind_media",
+        "upload_media",
+        "mount_media",
+        "write_profile",
+        *(["assign_pcie"] if with_dedicated else []),
+        "set_boot_order",
+        "power_on",
+    ]
+    system = plan.selected.system.id
+    expected = [(system, "apply 1 sriov, 1 vnics, in order")]
+    if with_dedicated:
+        expected.append((system, "apply 1 dedicated to the saved profile"))
+    assert [
+        (c.target, c.detail) for c in plan.intended_changes if c.kind == "assign_pcie"
+    ] == expected
+
+
 @pytest.mark.parametrize(
     ("request_", "expected"),
     [
@@ -1021,11 +1060,16 @@ def test_intended_changes_order(request_: PlanRequest, expected: list[str]) -> N
         assert kinds.index("set_minimum_affinity_policy") == 2
     if "assign_pcie" in kinds:
         assert kinds.index("assign_pcie") > kinds.index("map_storage")
-        assert kinds.index("write_profile") > kinds.index("assign_pcie")
+        assert kinds.index("assign_pcie") == kinds.index("write_profile") + 1
     if request_.power_on is False:
         assert "power_on" not in kinds
         # ADR 0331: without power-on the saved profile is applied instead.
-        assert kinds[kinds.index("write_profile") + 1] == "apply_profile"
+        profile_changes = kinds[
+            kinds.index("write_profile") + 1 : kinds.index("apply_profile")
+        ]
+        assert profile_changes == (
+            ["assign_pcie"] if request_.assignments.dedicated else []
+        )
     else:
         assert "apply_profile" not in kinds
     assert [change.order for change in plan.intended_changes] == list(
@@ -1449,7 +1493,7 @@ def test_resolution_transport_failure_stops_later_selectors() -> None:
     assert hmc.calls == [("list_system_summaries", None)]
 
 
-def test_intended_changes_collapse_assignments_into_one_bounded_change() -> None:
+def test_intended_changes_collapse_dedicated_slots_into_one_bounded_change() -> None:
     assignments = LparPcieAssignments(
         dedicated=tuple(
             DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, f"2101{i:04d}")
@@ -1458,7 +1502,8 @@ def test_intended_changes_collapse_assignments_into_one_bounded_change() -> None
     )
     plan = _plan(FakeHMC(World()), _new_disk(assignments=assignments))
     (change,) = [c for c in plan.intended_changes if c.kind == "assign_pcie"]
-    assert "40 dedicated" in change.detail
+    assert change.detail == "apply 40 dedicated to the saved profile"
+    assert plan.intended_changes[change.order - 2].kind == "write_profile"
 
 
 @pytest.mark.parametrize(

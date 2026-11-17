@@ -241,22 +241,19 @@ Their `kind` values, in order:
 5. `add_vscsi_adapter`;
 6. `create_virtual_disk`, with `capacity_mib` only;
 7. `map_storage`;
-8. `assign_pcie`, once, with the count of each `assignments` collection, when any is set;
-9. `write_profile` (#637's profile write).
+8. `assign_pcie` for current-configuration assignments, with counts of populated `sriov`
+   and `vnics` collections;
+9. `bind_media`, `upload_media` and `mount_media`, in that order, with `install` only;
+10. `write_profile` (write and read back the partition profile);
+11. `assign_pcie` for dedicated slots, with the count written to the saved profile.
 
-Without `install`, these follow:
+Each populated assignment phase produces one entry targeting the selected system. A mixed
+request therefore produces two `assign_pcie` entries. An empty phase produces zero entries.
 
-10. `power_on`, with `power_on` only;
-11. `assess_affinity`, with `affinity_assessment` only.
-
-With `install`, these follow instead:
-
-10. `bind_media`;
-11. `upload_media`;
-12. `mount_media`;
-13. `set_boot_order`;
-14. `power_on`, whose `detail` says that `boot: deferred` stops before it;
-15. `assess_affinity`, with `affinity_assessment` only.
+Without `install`, `power_on` follows unless explicitly disabled. When disabled,
+`apply_profile` applies the saved profile without activation (ADR 0331).
+With `install`, `set_boot_order` is followed by `power_on`, whose `detail` explains that
+`boot: deferred` stops before power-on. `assess_affinity` follows when requested.
 
 `unverified[]` is a list of fixed statements. Each one is included when its condition holds:
 

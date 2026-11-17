@@ -1084,6 +1084,7 @@ def _intended_changes(
         )
     steps.append(("map_storage", vios, f"map {storage.kind} {storage.storage_name!r}"))
     counts = _assignment_counts(request.assignments)
+    dedicated = counts.pop("dedicated")
     if any(counts.values()):
         detail = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
         steps.append(("assign_pcie", system, f"apply {detail}, in order"))
@@ -1099,6 +1100,10 @@ def _intended_changes(
     steps.append(
         ("write_profile", system, "write and read back the partition profile (#637)")
     )
+    if dedicated:
+        steps.append(
+            ("assign_pcie", system, f"apply {dedicated} dedicated to the saved profile")
+        )
     if request.install is not None:
         steps.extend(
             [
