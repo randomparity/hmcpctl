@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from hmcpctl.ssh.refcodes import MAX_REFCODE_COUNT
 from hmcpctl.ssh.transport import HMCCLIError
 
 # Codes that mean the installer boot has started, observed in both native windows
@@ -80,8 +81,42 @@ def newer_rows(
     return newer
 
 
+def _history_may_be_incomplete(
+    rows: Sequence[Row], baseline: Mapping[str, Any], count: int
+) -> bool:
+    base = row_identity(baseline)
+    return len(rows) >= count and (
+        base == row_identity(None) or not any(row_identity(row) == base for row in rows)
+    )
+
+
+async def _read_boot_window(
+    read: Callable[[int], Awaitable[Sequence[Row]]],
+    baseline: Mapping[str, Any],
+    observed: list[dict[str, Any]],
+) -> BootWait:
+    for count in (REFCODE_ROWS, MAX_REFCODE_COUNT):
+        try:
+            rows = await read(count)
+        except _READ_ERRORS as exc:
+            reason = f"a refcode read failed: {type(exc).__name__}: {exc}"[:512]
+            return BootWait(None, observed, reason)
+        observed = newer_rows(rows, baseline)
+        for row in observed:
+            if row["refcode"] in BOOT_STARTED_CODES:
+                return BootWait(row, observed)
+        if not _history_may_be_incomplete(rows, baseline, count):
+            return BootWait(None, observed)
+    return BootWait(
+        None,
+        observed,
+        "reference-code history is incomplete: the baseline is absent "
+        f"from the newest {MAX_REFCODE_COUNT} rows; boot evidence may be missing",
+    )
+
+
 async def wait_for_boot(
-    read: Callable[[], Awaitable[Sequence[Row]]],
+    read: Callable[[int], Awaitable[Sequence[Row]]],
     baseline: Mapping[str, Any],
     wait_seconds: float,
     *,
@@ -90,20 +125,16 @@ async def wait_for_boot(
 ) -> BootWait:
     """Read refcodes at least once, then every ``POLL_SECONDS`` until *wait_seconds*.
 
-    Ends early on a newer row whose code is in ``BOOT_STARTED_CODES``.
+    Honor newer boot evidence before widening a saturated missing-baseline window.
+    End with an explicit gap reason when the maximum read cannot establish coverage.
     """
     deadline = clock() + wait_seconds
     observed: list[dict[str, Any]] = []
     while True:
-        try:
-            rows = await read()
-        except _READ_ERRORS as exc:
-            reason = f"a refcode read failed: {type(exc).__name__}: {exc}"[:512]
-            return BootWait(None, observed, reason)
-        observed = newer_rows(rows, baseline)
-        for row in observed:
-            if row["refcode"] in BOOT_STARTED_CODES:
-                return BootWait(row, observed)
+        poll = await _read_boot_window(read, baseline, observed)
+        observed = poll.observed
+        if poll.started is not None or poll.reason is not None:
+            return poll
         if clock() + POLL_SECONDS > deadline:
             break
         await sleep(POLL_SECONDS)
