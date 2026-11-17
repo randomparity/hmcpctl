@@ -15,10 +15,11 @@ passes a count-taking read callable through to the existing SSH adapter. No publ
 interface, persisted identity, state, or compatibility path is added. The baseline,
 HMC row ordering/timestamp filter, native boot-code set, and power-on stay unchanged.
 
-Read 20 rows per poll. A saturated window (at least the requested count) lacking
+Read 20 rows per poll and honor qualifying newer boot evidence immediately. Only
+without such evidence, a saturated window (at least the requested count) lacking
 the baseline identity triggers a fresh read of `MAX_REFCODE_COUNT` (100). A null
 baseline is also absent, so saturated initial history receives the same treatment.
-Search the resulting newer rows for boot evidence first. If none qualifies and the
+Search the widened newer rows for boot evidence before diagnosing a gap. If none qualifies and the
 maximum window is saturated without the baseline, end with an explicit incomplete
 history reason, the observed rows, and existing `needs_attention` semantics.
 Otherwise use the existing polling deadline and no-boot timeout. The additional read
@@ -36,7 +37,8 @@ nor captured evidence establishes a worst-case emission rate or retention guaran
   a same-second identity comparison and a null baseline.
 - A full100 without baseline or boot evidence reports incomplete history; evidence
   in that same full100 takes precedence over the diagnostic.
-- A baseline at row20 prevents widening; a short/empty history remains bounded and
+- Initial-window boot evidence prevents a reread, including when a reread would fail
+  or replace that evidence. A baseline at row20 prevents widening; a short/empty history remains bounded and
   follows existing timeout semantics. Older boot codes remain excluded.
 - Normal and widened read failures preserve the existing bounded read-error result.
 - Focused boot/SSH/application tests, mutation proof, `just verify`, and pinned prek

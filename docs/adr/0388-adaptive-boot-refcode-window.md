@@ -15,7 +15,8 @@ metadata enrichment does not discard records.
 
 ## Decision
 
-Keep20-row polls; when saturated and lacking the baseline, reread up to the existing
+Inspect20-row polls for qualifying evidence first and return success immediately.
+Only without success, when saturated and lacking the baseline, reread up to the existing
 100-row cap. Search for newer boot evidence before diagnosing a gap. A full maximum
 window lacking both baseline and qualifying evidence ends `needs_attention` with an
 explicit incomplete-history reason. Short reads follow the existing timeout behavior.
