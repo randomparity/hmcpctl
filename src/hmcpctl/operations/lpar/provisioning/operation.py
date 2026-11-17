@@ -55,7 +55,6 @@ from hmcpctl.operations.lpar.profiles.core import (
 )
 from hmcpctl.operations.lpar.profiles.persist import profile_failure_summary
 from hmcpctl.operations.lpar.provisioning.boot import (
-    REFCODE_ROWS,
     row_identity,
     wait_for_boot,
 )
@@ -774,7 +773,7 @@ class _Run:
         ):
             return self._attention(lpar_uuid, _BOOT_STEPS[3])
         wait = await wait_for_boot(
-            lambda: list_lpar_refcodes(self.hmc.config, *names, REFCODE_ROWS),
+            lambda count: list_lpar_refcodes(self.hmc.config, *names, count),
             baseline,
             max(0.0, self.wait_deadline - time.monotonic()),
         )
