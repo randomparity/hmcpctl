@@ -221,6 +221,117 @@ def test_the_native_set_is_the_firmware_handoff_code_alone():
     assert provision_boot.BOOT_STARTED_CODES == frozenset({"CA00E105"})
 
 
+def _history(size: int) -> list[dict[str, Any]]:
+    return [_row("11/03/2026 10:00:05", f"progress-{i}") for i in range(size)]
+
+
+@pytest.mark.parametrize("baseline", [OLD, {"time_stamp": None, "refcode": None}])
+def test_boot_wait_recovers_more_than_twenty_codes_between_polls(baseline):
+    now = [0.0]
+    reads = []
+    initial = [OLD] if baseline["refcode"] else []
+    history = [*_history(25), _row("11/03/2026 10:00:05", "CA00E105"), *initial]
+
+    async def read(count):
+        reads.append((now[0], count))
+        return (initial if now[0] == 0 else history)[:count]
+
+    async def sleep(seconds):
+        now[0] += seconds
+
+    wait = asyncio.run(
+        wait_for_boot(read, baseline, 30, sleep=sleep, clock=lambda: now[0])
+    )
+
+    assert wait.started == {"time_stamp": "11/03/2026 10:00:05", "refcode": "CA00E105"}
+    assert reads == [(0.0, 20), (15.0, 20), (15.0, 100)]
+
+
+@pytest.mark.parametrize("empty_baseline", [False, True])
+@pytest.mark.parametrize("boot_evidence", [False, True])
+def test_full_widened_history_reports_evidence_or_an_explicit_gap(
+    boot, empty_baseline, boot_evidence
+):
+    history = _history(100)
+    if boot_evidence:
+        history[25] = _row("11/03/2026 10:00:05", "CA00E105")
+    boot.refcodes = [[] if empty_baseline else [OLD], history]
+
+    record = _submit(boot)
+
+    assert record.outcome == ("boot_started" if boot_evidence else "needs_attention")
+    assert boot.counts == [1, 20, 100]
+    assert boot.calls.count("power_on") == 1
+    if not boot_evidence:
+        result = _step(record, "wait_boot_started").result
+        assert "history is incomplete" in result["reason"]
+        assert len(result["observed"]) == 100
+
+
+def test_initial_boot_evidence_does_not_depend_on_a_wider_read(boot, monkeypatch):
+    boot.refcodes = [[OLD], [*_history(19), _row("11/03/2026 10:00:05", "CA00E105")]]
+    original = boot.read_refcodes
+
+    async def read(config, system, lpar, count):
+        if count == 100:
+            raise HMCCLIError("a reread must not erase observed boot evidence")
+        return await original(config, system, lpar, count)
+
+    monkeypatch.setattr(provision_operation, "list_lpar_refcodes", read)
+
+    assert _submit(boot).outcome == "boot_started"
+    assert boot.counts == [1, 20]
+
+
+@pytest.mark.parametrize("size", [0, 19, 20])
+def test_short_or_baseline_bounded_history_needs_no_wider_read(boot, size):
+    history = [*_history(19), OLD] if size == 20 else _history(size)
+    boot.refcodes = [[OLD], history]
+
+    record = _submit(boot)
+
+    assert record.outcome == "needs_attention"
+    assert boot.counts == [1, 20]
+    assert "before wait_seconds" in _step(record, "wait_boot_started").result["reason"]
+
+
+def test_widened_history_still_excludes_boot_evidence_older_than_the_baseline(boot):
+    boot.refcodes = [
+        [OLD],
+        [*_history(20), _row("11/03/2026 09:59:59", "CA00E105"), OLD],
+    ]
+
+    record = _submit(boot)
+
+    assert record.outcome == "needs_attention"
+    assert boot.counts == [1, 20, 100]
+    observed = _step(record, "wait_boot_started").result["observed"]
+    assert len(observed) == 20
+    assert all(row["refcode"] != "CA00E105" for row in observed)
+
+
+@pytest.mark.parametrize("error", [HMCCLIError, ValueError, TypeError])
+@pytest.mark.parametrize("depth", [20, 100])
+def test_refcode_read_errors_at_either_depth_use_the_existing_result(
+    boot, monkeypatch, error, depth
+):
+    boot.refcodes = [[OLD], _history(20)]
+    original = boot.read_refcodes
+
+    async def read(config, system, lpar, count):
+        if count == depth:
+            raise error("poll failed")
+        return await original(config, system, lpar, count)
+
+    monkeypatch.setattr(provision_operation, "list_lpar_refcodes", read)
+    record = _submit(boot)
+
+    assert record.outcome == "needs_attention"
+    reason = _step(record, "wait_boot_started").result["reason"]
+    assert reason == f"a refcode read failed: {error.__name__}: poll failed"
+    assert boot.calls.count("power_on") == 1
+
+
 def test_a_resume_that_sees_the_handoff_code_ends_boot_started(boot):
     """Natively the handoff came ~130 s after power-on, past a short first wait."""
     rid = f"boot-{next(_IDS)}"
@@ -425,7 +536,7 @@ def test_the_wait_reads_until_wait_seconds_then_stops():
     now = [0.0]
     reads: list[float] = []
 
-    async def read():
+    async def read(_count):
         reads.append(now[0])
         return [OLD]
 
@@ -441,7 +552,7 @@ def test_the_wait_reads_until_wait_seconds_then_stops():
 def test_a_zero_second_wait_still_reads_once():
     reads = []
 
-    async def read():
+    async def read(_count):
         reads.append(1)
         return []
 
