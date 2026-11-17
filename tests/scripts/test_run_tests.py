@@ -888,6 +888,50 @@ def test_serial_cli_preserves_original_invocation(tmp_path: Path) -> None:
     assert result.stdout == "test: passed; configured coverage gate passed\n"
 
 
+@pytest.mark.parametrize("missing", ["worker-gw1", "ready-222"])
+def test_parallel_worker_readiness_requires_both_handlers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    for name, value in {
+        "worker-gw0": "111",
+        "worker-gw1": "222",
+        "ready-111": "",
+        "ready-222": "",
+    }.items():
+        if name != missing:
+            (tmp_path / name).write_text(value)
+    process = cast(
+        subprocess.Popen[bytes], SimpleNamespace(returncode=7, poll=lambda: 7)
+    )
+    killed = []
+    monkeypatch.setattr(sys.modules[__name__], "_kill_process_group", killed.append)
+    with pytest.raises(pytest.fail.Exception, match="before becoming ready"):
+        _wait_for_parallel_workers(tmp_path, process)
+    assert killed == [process]
+
+
+def test_parallel_worker_readiness_requires_distinct_pids(tmp_path: Path) -> None:
+    for worker in ("gw0", "gw1"):
+        (tmp_path / f"worker-{worker}").write_text("111")
+    (tmp_path / "ready-111").touch()
+    process = cast(subprocess.Popen[bytes], SimpleNamespace())
+    with pytest.raises(AssertionError, match="distinct"):
+        _wait_for_parallel_workers(tmp_path, process)
+
+
+def _wait_for_parallel_workers(
+    tmp_path: Path, process: subprocess.Popen[bytes]
+) -> None:
+    pids = []
+    for worker in ("gw0", "gw1"):
+        identity = tmp_path / f"worker-{worker}"
+        _wait_for_process_marker(identity, process)
+        pids.append(int(identity.read_text()))
+    assert len(set(pids)) == 2, "parallel workers must have distinct PIDs"
+    for pid in pids:
+        _wait_for_process_marker(tmp_path / f"ready-{pid}", process)
+
+
 def _parallel_probe(
     tmp_path: Path,
     controller: str | None,
@@ -913,8 +957,9 @@ libc.prctl(36, {initial}, 0, 0, 0)
 before = signal.getsignal(signal.SIGINT)
 r._resources_allow_parallel = lambda: True
 r.TEST_TIMEOUT_SECONDS = 30 if {bool(interrupts) or controller is None!r} else 2
-r.TERMINATE_GRACE_SECONDS = .3
-r.INTERRUPT_GRACE_SECONDS = 5
+if {controller is not None!r}:
+    r.TERMINATE_GRACE_SECONDS = .3
+    r.INTERRUPT_GRACE_SECONDS = 5
 original_wait = getattr(r, '_wait_parallel', None)
 def ready_timeout(process, timeout):
     deadline = time.monotonic() + 60
@@ -981,7 +1026,10 @@ print(json.dumps(result))
     )
     try:
         if interrupts:
-            _wait_for_process_marker(tmp_path / "ready", process)
+            if controller is None:
+                _wait_for_parallel_workers(tmp_path, process)
+            else:
+                _wait_for_process_marker(tmp_path / "ready", process)
             (os.killpg if group else os.kill)(process.pid, signal.SIGINT)
             if controller is not None:
                 _wait_for_process_marker(tmp_path / "interrupted", process)
@@ -1326,7 +1374,19 @@ def test_real_parallel_interrupt_keeps_pytest_diagnostic(
 ) -> None:
     for number in range(2):
         tmp_path.joinpath(f"test_{number}.py").write_text(
-            "from pathlib import Path\nimport time\ndef test_slow():\n    Path('ready').touch()\n    time.sleep(60)\n"
+            """from pathlib import Path
+import os, signal, time
+
+def test_slow():
+    pid = os.getpid()
+    identity = Path('worker-' + os.environ['PYTEST_XDIST_WORKER'])
+    temporary = identity.with_suffix('.tmp')
+    temporary.write_text(str(pid))
+    temporary.rename(identity)
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    Path('ready-' + str(pid)).touch()
+    time.sleep(60)
+"""
         )
     result = _parallel_probe(tmp_path, None, interrupts=1, group=group)
     assert (result["status"], result["survivors"]) == (130, [])
