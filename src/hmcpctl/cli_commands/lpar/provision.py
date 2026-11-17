@@ -36,6 +36,7 @@ from ...operations.logical import engine, store
 from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
 from ..output import (
     VerbatimTable,
+    confirm_on_stderr,
     console,
     escape_controls,
     fail,
@@ -314,9 +315,10 @@ def lpars_provision(
             _render_provision_result(result, request.name, True, as_json)
             return
     if not yes:
-        typer.confirm(
-            f"Provision LPAR '{terminal_field(name)}' on system '{terminal_field(system)}"
-            f"' (VLAN {terminal_field(port_vlan_id)}, VIOS {terminal_field(vios_uuid)})?",
+        confirm_on_stderr(
+            f"Provision LPAR '{terminal_field(name, err=True)}' on system "
+            f"'{terminal_field(system, err=True)}' (VLAN {terminal_field(port_vlan_id, err=True)}, "
+            f"VIOS {terminal_field(vios_uuid, err=True)})?",
             abort=True,
         )
     _run(ctx, request_id, continuation, arguments, as_json)

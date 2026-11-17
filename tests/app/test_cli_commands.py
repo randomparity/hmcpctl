@@ -1843,6 +1843,18 @@ def test_provision_installer_rejects_unknown_typed_fields(
     body.assert_not_called()
 
 
+def test_provision_installer_interactive_json(monkeypatch, fake_hmc, tmp_path):
+    _fake_provision(monkeypatch, _PROVISIONED, "ready_to_boot")
+    args = _installer_args(tmp_path, BUILT_INSTALL, "--boot", "deferred", "--json")
+    args.remove("--yes")
+
+    confirmed = RUNNER.invoke(cli.app, args, input="y\n")
+
+    assert confirmed.exit_code == 0, confirmed.output
+    assert json.loads(confirmed.stdout)["operation"]["outcome"] == "ready_to_boot"
+    assert "Provision LPAR" in confirmed.stderr
+
+
 def test_provision_installer_schema_and_journal_size_limits(
     monkeypatch, fake_hmc, tmp_path
 ):
