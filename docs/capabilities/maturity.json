@@ -6795,7 +6795,7 @@
               },
               {
                 "name": "patch.installer_media",
-                "constraint": "detach: removes the provision-ledgered installer media mapping; needs exclusive_writer_window and an all-targets hmc_unmount_optical_media grant; refused unless not activated or RMC active"
+                "constraint": "Detach removes the ledgered installer media mapping. It requires exclusive_writer_window, a matching hmc_unmount_optical_media grant for the connection, LPAR, system and ledger VIOS UUID, and an inactive partition or active RMC."
               }
             ]
           },

@@ -255,7 +255,15 @@ write resumes by reading the profile back; an interrupted DLPAR write always nee
 `boot` and `installer_media` act on a partition `hmc_provision_lpar` created:
 `boot: root_disk` sets its next boot to its root disk (`hmc_set_lpar_boot_order`), and
 `installer_media: detach` removes the installer media mapping and keeps the medium
-(`hmc_unmount_optical_media`, granted for all targets). `disks.add` creates and maps a new disk
+in its repository. One `hmc_unmount_optical_media` grant must cover the connection,
+the original system and LPAR selector strings, and the VIOS UUID recorded by provision.
+An all-targets grant on that connection also works. New operations record the physical
+target and medium at admission. An executable resume compares the original binding with
+the current ledger. If neither a historical record nor its ledger identifies the VIOS,
+a matching all-targets unmount grant can still replay or abandon that same operation
+without opening an HMC connection. [ADR 0392](adr/0392-authorize-detach-on-the-provisioned-vios.md)
+
+`disks.add` creates and maps a new disk
 that decommission's `delete_owned` later deletes, and `disks.detach` removes one disk's mapping,
 never the disk. `networks.add` and `networks.remove` add a client network adapter on a VLAN or
 remove the one carrying a MAC. Disk and network changes then save the current configuration

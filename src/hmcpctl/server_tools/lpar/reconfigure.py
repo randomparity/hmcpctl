@@ -197,8 +197,10 @@ def reconfigure_handler(
         pending boot order to its root disk only (``next_activation``: the next
         activation uses it) and needs ``hmc_set_lpar_boot_order``.
         ``installer_media: detach`` removes the mapping of the installer media provision
-        mounted, keeping the medium, and needs ``hmc_unmount_optical_media`` granted for
-        all targets and ``exclusive_writer_window=true``. Detach is refused unless the
+        mounted and keeps the medium. It needs ``exclusive_writer_window=true`` and one
+        ``hmc_unmount_optical_media`` grant covering the selected connection, original
+        system and LPAR selectors, and the provision-ledger VIOS UUID. An all-targets
+        grant also permits detach on its eligible connection. Detach is refused unless the
         partition is not activated or RMC is active: power it off, then detach. Media
         already detached or a boot order already set plans no change.
 
