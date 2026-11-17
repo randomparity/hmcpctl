@@ -850,7 +850,7 @@ def test_system_profiles_preflight(monkeypatch):
         ),
         system_profile_writer_window=True,
     )
-    monkeypatch.setattr(preflight, "_check_configuration", lambda: (config, ""))
+    monkeypatch.setattr(preflight, "_check_configuration", lambda _group: (config, ""))
     monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
     probe = AsyncMock(return_value={})
     monkeypatch.setattr(system_profiles, "preflight", probe)
@@ -1165,7 +1165,7 @@ def test_vios_source_preflight_rejects_effect_assertions(monkeypatch, flag):
 
 def test_statistics_preflight_requires_existing_fixture(monkeypatch, capsys):
     config = live_config.LiveTestConfig(system_name="sys-R1", lp3_name="guest-R1")
-    monkeypatch.setattr(preflight, "_check_configuration", lambda: (config, ""))
+    monkeypatch.setattr(preflight, "_check_configuration", lambda _group: (config, ""))
     monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
     assert preflight.main(["--group", "lpar-memory-statistics", "--skip-hardware"]) == 0
     output = capsys.readouterr().out
@@ -1381,7 +1381,7 @@ def test_paging_preflight_requires_expected_provider_and_window(monkeypatch, cap
         paging_expected_current_vios="paging-R1",
         paging_writer_window=True,
     )
-    monkeypatch.setattr(preflight, "_check_configuration", lambda: (config, ""))
+    monkeypatch.setattr(preflight, "_check_configuration", lambda _group: (config, ""))
     monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
     assert preflight.main(["--group", "lpar-paging-switchover", "--skip-hardware"]) == 0
     assert "separate restoration authorization" in capsys.readouterr().out
@@ -1562,3 +1562,49 @@ def test_output_refusal_names_eligible_packet_routes(capsys):
     assert "system-profile-activation-source" in diagnostic
     assert "vios-ame-source" in diagnostic
     assert "system-profile-source" not in diagnostic
+
+
+@pytest.mark.parametrize(
+    "group",
+    [
+        None,
+        "all",
+        "vmedia",
+        "provision-boot",
+        "native-ubuntu-boot-started",
+        "native-rocky-boot-started",
+    ],
+)
+def test_iso_bind_refusal_precedes_hardware(workspace, monkeypatch, capsys, group):
+    (workspace / ".env").write_text(_env_text(LIVE_TEST_ISO_BIND_HOST="0.0.0.0"))
+    _credentials(monkeypatch)
+    monkeypatch.setattr(
+        preflight, "_probe_environment", lambda *_a: pytest.fail("probed hardware")
+    )
+    assert preflight.main(["--group", group] if group else []) == 1
+    assert "LIVE_TEST_ISO_BIND_HOST" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bind_line", ["", "LIVE_TEST_ISO_BIND_HOST=\n"])
+def test_iso_bind_operator_file_requires_a_value(
+    workspace, monkeypatch, capsys, bind_line
+):
+    lines = _env_text().splitlines(keepends=True)
+    (workspace / ".env").write_text(
+        "".join(
+            bind_line if line.startswith("LIVE_TEST_ISO_BIND_HOST=") else line
+            for line in lines
+        )
+    )
+    _credentials(monkeypatch)
+    monkeypatch.setattr(
+        preflight, "_probe_environment", lambda *_a: pytest.fail("probed hardware")
+    )
+    assert preflight.main(["--group", "vmedia"]) == 1
+    assert "LIVE_TEST_ISO_BIND_HOST" in capsys.readouterr().out
+
+
+def test_iso_bind_does_not_gate_a_nonserving_selection(workspace, monkeypatch):
+    (workspace / ".env").write_text(_env_text(LIVE_TEST_ISO_BIND_HOST="0.0.0.0"))
+    _credentials(monkeypatch)
+    assert preflight.main(["--group", "vmedia-media-change", "--skip-hardware"]) == 0

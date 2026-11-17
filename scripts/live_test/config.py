@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -99,7 +100,7 @@ class LiveTestConfig:
     accept_platform_dump: str = ""
     iso_path: str = "/srv/example-lt-609/example-lt-609.iso"
     iso_media_name: str = "example-lt-609.iso"
-    iso_bind_host: str = "0.0.0.0"
+    iso_bind_host: str = "127.0.0.1"
     iso_advertised_host: str = "iso.example.test"
     iso_http_port: int = 18090
     vmedia_repository_size_mib: int = 6144
@@ -107,6 +108,22 @@ class LiveTestConfig:
     placement_memory_mib: int = 3072
     vlan_range_start: int = 3100
     vlan_range_end: int = 3199
+
+    def iso_bind_address(self) -> str:
+        """Resolve the specific IPv4 address the ISO HTTP server will bind."""
+        requirement = (
+            "set LIVE_TEST_ISO_BIND_HOST to a specific local IPv4 address or hostname"
+        )
+        if not self.iso_bind_host.strip():
+            raise ValueError(requirement)
+        try:
+            address = socket.gethostbyname(self.iso_bind_host)
+        except (OSError, UnicodeError, TypeError) as exc:
+            raise ValueError(requirement) from exc
+        # Some IPv4 stacks also treat the limited broadcast address as a wildcard bind.
+        if address in {"0.0.0.0", "255.255.255.255"}:
+            raise ValueError(requirement)
+        return address
 
     @property
     def iso_filename(self) -> str:

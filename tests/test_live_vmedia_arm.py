@@ -1158,10 +1158,22 @@ def test_iso_http_fixture_serves_only_the_iso_once_and_releases_socket(
     config = replace(
         live_config.LiveTestConfig(),
         iso_path=str(image),
-        iso_bind_host="127.0.0.1",
-        iso_advertised_host="127.0.0.1",
+        iso_bind_host="runner.example.test",
+        iso_advertised_host="published.example.test",
         iso_http_port=0,
     )
+    real_server = http_fixture.http.server.HTTPServer
+
+    def resolve(host):
+        assert host == config.iso_bind_host
+        return "127.0.0.1"
+
+    def bind(address, handler):
+        assert address == ("127.0.0.1", 0)
+        return real_server(address, handler)
+
+    monkeypatch.setattr(socket, "gethostbyname", resolve)
+    monkeypatch.setattr(http_fixture.http.server, "HTTPServer", bind)
     fixture = http_fixture.IsoHttpServer()
     try:
         fixture.start(config)
@@ -1288,3 +1300,70 @@ def test_iso_http_fixture_releases_resources_after_thread_start_failure(
         for raw in servers:
             raw.server_close()
         fixture._server = None
+
+
+@pytest.mark.parametrize(
+    "bind_host",
+    [
+        "",
+        " ",
+        "0.0.0.0",
+        "0",
+        "255.255.255.255",
+        "any.test",
+        "bad.test",
+        "x\0",
+        "a" * 65,
+    ],
+)
+def test_iso_bind_refuses_before_socket_or_allowlist(monkeypatch, bind_host):
+    original = "existing.example.test:80"
+    monkeypatch.setattr(os, "environ", {"HMC_ISO_URL_ALLOWLIST": original})
+    monkeypatch.setattr(
+        http_fixture.http.server,
+        "HTTPServer",
+        lambda *_a: pytest.fail("opened listener"),
+    )
+    if bind_host.endswith(".test"):
+
+        def resolve(host):
+            assert host == bind_host
+            if host == "bad.test":
+                raise socket.gaierror("unknown host")
+            return "0.0.0.0"
+
+        monkeypatch.setattr(socket, "gethostbyname", resolve)
+    fixture = http_fixture.IsoHttpServer()
+    with pytest.raises(ValueError, match="LIVE_TEST_ISO_BIND_HOST"):
+        fixture.start(replace(live_config.LiveTestConfig(), iso_bind_host=bind_host))
+    assert os.environ["HMC_ISO_URL_ALLOWLIST"] == original
+
+
+def test_iso_bind_socket_failure_keeps_allowlist(monkeypatch):
+    original = "existing.example.test:80"
+    monkeypatch.setattr(os, "environ", {"HMC_ISO_URL_ALLOWLIST": original})
+
+    def occupied(address, _handler):
+        assert address[0] == "127.0.0.1"
+        raise OSError("socket occupied")
+
+    monkeypatch.setattr(http_fixture.http.server, "HTTPServer", occupied)
+    with pytest.raises(OSError, match="socket occupied"):
+        http_fixture.IsoHttpServer().start(
+            replace(live_config.LiveTestConfig(), iso_bind_host="127.0.0.1")
+        )
+    assert os.environ["HMC_ISO_URL_ALLOWLIST"] == original
+
+
+def test_iso_bind_arm_reports_an_unsafe_address(monkeypatch):
+    config = replace(live_config.LiveTestConfig(), iso_bind_host="0.0.0.0")
+    state = runner.RunState(config=config)
+    monkeypatch.setattr(
+        http_fixture.http.server,
+        "HTTPServer",
+        lambda *_a: pytest.fail("opened listener"),
+    )
+    monkeypatch.setattr(os, "environ", {"HMC_ISO_URL_ALLOWLIST": "old.test:80"})
+    assert vmedia._start_iso_server(state, 18)
+    assert state.results[-1]["status"] == "FAIL"
+    assert "LIVE_TEST_ISO_BIND_HOST" in str(state.results[-1])

@@ -790,6 +790,14 @@ def _selected_tasks(subtask: int | None, group: str | None) -> list[int]:
     return list(tasks)
 
 
+def validate_iso_bind_selection(
+    config: LiveTestConfig, subtask: int | None, group: str | None
+) -> None:
+    """Require a specific bind before dispatching a task that serves an ISO."""
+    if {18, 20, 72}.intersection(_selected_tasks(subtask, group)):
+        config.iso_bind_address()
+
+
 def _validate_private_results(
     tasks: list[int], group: str | None, results_path: str
 ) -> None:
@@ -936,6 +944,7 @@ def _run_from_arguments(argv: list[str] | None = None) -> int:
         return 1
     try:
         config = LiveTestConfig.from_env_file()
+        validate_iso_bind_selection(config, arguments.subtask, arguments.group)
         # Validated here, beside the rest of the configuration: `evidence.emit_observations`
         # runs after a completed hardware run, and an uncaught ValueError there
         # would replace the run summary and failed-test listing with a traceback.
@@ -1108,6 +1117,7 @@ async def main(
             print(f"❌ {redact_failure_text(str(exc))}")
             return 1
     try:
+        validate_iso_bind_selection(config, subtask_filter, group)
         scenario_validation.validate_declared_outcomes(_SCENARIO_MODULES)
         repo_root = evidence.repository_root()
         known_gaps = (
