@@ -185,7 +185,7 @@ def create_mcp(
         application, TOOL_SECURITY, permits=permits, authorize=authorize
     )
     register_reconfigure_tool(
-        application, TOOL_SECURITY, permits=permits, authorize=authorize
+        application, TOOL_SECURITY, policy=policy, authorize=authorize
     )
     register_inspect_tool(
         application, TOOL_SECURITY, permits=permits, authorize=authorize

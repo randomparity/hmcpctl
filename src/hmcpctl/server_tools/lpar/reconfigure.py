@@ -8,24 +8,31 @@ gates, so it is built by a factory, as ``hmc_power_lpar`` is.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 from fastmcp import FastMCP
 
+from ..._app import run_sync
+from ...authorization.access_policy import AccessPolicy
+from ...authorization.dispatch_scope import dispatch_authorizer
 from ...authorization.target_scope import TargetScopeError
 from ...config import build_config
+from ...errors import HMCError
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
 from ...operations.logical.models import OperationRecord
 from ...operations.logical.store import connection_label
 from ...operations.lpar.reconfiguration.core import (
-    RECONFIGURE_CLASSIFIERS,
     ReconfigurePatch,
     delegated_tools,
     disk_vios_uuids,
+    installer_media_admission,
+    media_classifiers,
     reconfigure_body,
 )
+from ...operations.lpar.reconfiguration.media import InstallerMedia
 from ...tool_registry import (
     Authorize,
     TargetSelector,
@@ -76,9 +83,60 @@ def _effective(
     return continuation_arguments(recorded, given, request_id)
 
 
+def _authorize_media(
+    policy: AccessPolicy,
+    security: Mapping[str, ToolSecurity],
+    request: OperationRequest,
+    continuation: str,
+    by_kind: Mapping[str, str],
+    profile: str | None,
+) -> tuple[InstallerMedia | None, engine.Admission]:
+    """Resolve inferred targets inside the specialist's connection-eligible gate."""
+    resolved: tuple[InstallerMedia | None, engine.Admission] | None = None
+
+    def targets(_name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        nonlocal resolved
+        try:
+            resolved = run_sync(
+                lambda: installer_media_admission(
+                    request, continuation, by_kind["managed_system"], by_kind["lpar"]
+                )
+            )
+        except (
+            HMCError,
+            engine.OperationFailed,
+            ValueError,
+            LookupError,
+            TypeError,
+            OSError,
+            sqlite3.Error,
+        ):
+            raise TargetScopeError(
+                f"{UNMOUNT_TOOL_NAME} cannot verify this request's installer-media target; "
+                "check the original request, connection and provision ledger"
+            ) from None
+        binding, _ = resolved
+        return {
+            **arguments,
+            "vios_name_or_uuid": None if binding is None else binding.vios_uuid,
+        }
+
+    authorize_as(
+        security,
+        dispatch_authorizer(
+            policy, resolve_targets=targets, expected_connection=request.connection
+        ),
+        UNMOUNT_TOOL_NAME,
+        by_kind,
+        profile,
+    )
+    assert resolved is not None  # The dispatch gate resolved the specialist's targets.
+    return resolved
+
+
 def reconfigure_handler(
     tool_security: Mapping[str, ToolSecurity],
-    permits: Callable[[str], bool],
+    policy: AccessPolicy,
     authorize: Authorize,
 ) -> Callable[..., OperationRecord]:
     """The unwrapped ``hmc_reconfigure_lpar`` handler bound to the served gates."""
@@ -196,30 +254,6 @@ def reconfigure_handler(
             "lpar": effective["lpar_name_or_uuid"],
             "managed_system": effective["system_name_or_uuid"],
         }
-        for delegated in delegated_tools(model):
-            if not permits(delegated):
-                raise PermissionError(
-                    f"{delegated} is not permitted by this server's access policy; "
-                    f"{RECONFIGURE_TOOL_NAME} needs it for this patch (ADR 0189)"
-                )
-            for vios in disk_vios_uuids(model, delegated) or (None,):
-                try:
-                    authorize_as(
-                        tool_security,
-                        authorize,
-                        delegated,
-                        by_kind if vios is None else {**by_kind, "vios": vios},
-                        profile,
-                    )
-                except TargetScopeError as exc:
-                    if delegated != UNMOUNT_TOOL_NAME:
-                        raise
-                    # The generic denial asks for a vios argument this tool does not take.
-                    raise TargetScopeError(
-                        f"installer_media needs {UNMOUNT_TOOL_NAME} granted for all "
-                        "targets: the VIOS is known only from the operation ledger, after "
-                        "this check (ADR 0321 Decision 6)"
-                    ) from exc
         request = OperationRequest(
             RECONFIGURE_TOOL_NAME,
             agent_id,
@@ -228,16 +262,44 @@ def reconfigure_handler(
             request_id,
             effective if continuation == "none" else given,
         )
+        specialist_gate = (
+            authorize
+            if model.installer_media is None
+            else dispatch_authorizer(policy, expected_connection=request.connection)
+        )
+        for delegated in delegated_tools(model):
+            if not policy.permits_tool(delegated):
+                raise PermissionError(
+                    f"{delegated} is not permitted by this server's access policy; "
+                    f"{RECONFIGURE_TOOL_NAME} needs it for this patch (ADR 0189)"
+                )
+            if delegated == UNMOUNT_TOOL_NAME:
+                continue
+            for vios in disk_vios_uuids(model, delegated) or (None,):
+                authorize_as(
+                    tool_security,
+                    specialist_gate,
+                    delegated,
+                    by_kind if vios is None else {**by_kind, "vios": vios},
+                    profile,
+                )
+        binding = admission = None
+        if model.installer_media is not None:
+            binding, admission = _authorize_media(
+                policy, tool_security, request, continuation, by_kind, profile
+            )
         body = reconfigure_body(
             model,
             effective["allow_disruption"],
             effective["system_name_or_uuid"],
             effective["lpar_name_or_uuid"],
+            authorized_media=binding,
         )
         return engine.submit(
             request,
             body,
-            classifiers=RECONFIGURE_CLASSIFIERS,
+            classifiers=media_classifiers(binding),
+            admission=admission,
             continuation=continuation,
             wait_seconds=wait_seconds,
         )
@@ -249,13 +311,13 @@ def register_reconfigure_tool(
     mcp: FastMCP,
     tool_security: Mapping[str, ToolSecurity],
     *,
-    permits: Callable[[str], bool],
+    policy: AccessPolicy,
     authorize: Authorize,
 ) -> None:
     """Register ``hmc_reconfigure_lpar`` on *mcp* when the ceiling admits it."""
-    if not permits(RECONFIGURE_TOOL_NAME):
+    if not policy.permits_tool(RECONFIGURE_TOOL_NAME):
         return
-    handler = reconfigure_handler(tool_security, permits, authorize)
+    handler = reconfigure_handler(tool_security, policy, authorize)
     validate_security(RECONFIGURE_SECURITY, handler)
     mcp.tool(
         authorized(RECONFIGURE_TOOL_NAME, RECONFIGURE_SECURITY, handler, authorize),

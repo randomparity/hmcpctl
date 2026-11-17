@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
-from unit.test_lpar_reconfigure import LPAR, FakeHMC
+from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC
 from unit.test_lpar_reconfigure import hmc as hmc  # noqa: PLC0414 - fixture import
-from unit.test_lpar_reconfigure_media import MEDIA, MediaHMC, _provisioned
+from unit.test_lpar_reconfigure_media import (
+    MEDIA,
+    VIOS,
+    MediaHMC,
+    _ledger,
+    _provisioned,
+)
 from unit.test_lpar_reconfigure_media import media as media  # noqa: PLC0414 - fixture
 
 from hmcpctl.authorization.access_policy import compile_access_policy
+from hmcpctl.operations.logical import engine, store
+from hmcpctl.operations.lpar.reconfiguration import core
 from hmcpctl.server import PRIMARY_TOOLS, TOOL_SECURITY, create_mcp
+from hmcpctl.server_tools.lpar import reconfigure as handler
 
 TOOL = "hmc_reconfigure_lpar"
 PROFILE_WRITE = "hmc_update_partition_profile"
@@ -166,13 +176,192 @@ def test_detach_runs_under_an_all_targets_unmount_grant(media: MediaHMC):
     assert media.mounted == []
 
 
-def test_a_target_limited_unmount_grant_refuses_detach(media: MediaHMC):
+def _targets(vios=VIOS, *, system="sysA", lpar="web1"):
+    return {"lpar": [lpar], "managed_system": [system], "vios": [vios]}
+
+
+def test_detach_binds_the_admitted_partition_and_medium(media: MediaHMC):
     _provisioned()
-    targets = {"lpar": ["web1"], "managed_system": ["sysA"], "vios": ["vios1"]}
-    app = _app(_grant(TOOL), _grant(UNMOUNT, targets=targets))
-    with pytest.raises(ToolError, match="ADR 0321"):
-        _call(app, DETACH)
+    app = _app(_grant(TOOL), _grant(UNMOUNT, targets=_targets()))
+    record = _call(app, DETACH)
+    assert record["outcome"] == "completed"
+    assert media.mounted == []
+    binding = next(e for e in record["effects"] if e["key"] == "admitted_media")
+    assert binding["identity"] == {
+        "system_uuid": SYS,
+        "lpar_uuid": LPAR,
+        "vios_uuid": VIOS,
+        "media_name": MEDIA,
+    }
+
+
+@pytest.mark.parametrize(
+    "grants",
+    [
+        [_grant(UNMOUNT, targets=_targets("vios1"))],
+        [
+            _grant(UNMOUNT, targets=_targets(lpar="other")),
+            _grant(UNMOUNT, targets=_targets(system="other")),
+        ],
+    ],
+)
+def test_unmatched_grants_refuse_before_admission(media: MediaHMC, grants):
+    _provisioned()
+    arguments = {**DETACH, "patch": {"installer_media": "detach", "name": "web2"}}
+    with pytest.raises(ToolError, match=UNMOUNT) as exc:
+        _call(_app(_grant(TOOL, MODIFY, RENAME), *grants), arguments)
+    assert VIOS not in str(exc.value)
+    assert media.mounted == [MEDIA] and media.fake.name == "web1"
+    with store.read_session() as conn:
+        assert conn is not None and store.find_operation(conn, "hmcpctl", "r1") is None
+
+
+def _suspend_before_worker(app, monkeypatch, arguments=DETACH):
+    with monkeypatch.context() as start:
+        start.setattr(engine, "_start_worker", lambda *_args: None)
+        return _call(app, {**arguments, "wait_seconds": 0})
+
+
+def _replace_ledger_media(name):
+    with store.session() as conn, store.write_transaction(conn):
+        conn.execute("DELETE FROM ledger WHERE kind = 'installer_media'")
+    if name is not None:
+        _ledger(
+            key="installer_media",
+            kind="installer_media",
+            identity={"vios_uuid": VIOS, "media_name": name},
+        )
+
+
+def test_specialist_connection_denial_precedes_identity_lookup(media: MediaHMC):
+    grant = {**_grant(UNMOUNT, targets=_targets()), "connections": ["other"]}
+    with pytest.raises(ToolError, match=UNMOUNT):
+        _call(_app(_grant(TOOL), grant), DETACH)
     assert media.fake.calls == []
+    with store.read_session() as conn:
+        assert conn is None or store.find_operation(conn, "hmcpctl", "r1") is None
+
+
+def test_specialist_must_authorize_the_connection_bound_to_the_operation(
+    media, monkeypatch
+):
+    _provisioned()
+    monkeypatch.setattr(handler, "connection_label", lambda *_args, **_kwargs: "other")
+    with pytest.raises(ToolError, match="connection changed"):
+        _call(_app(_grant(TOOL, UNMOUNT)), DETACH)
+    assert media.fake.calls == [] and media.mounted == [MEDIA]
+
+
+@pytest.mark.parametrize("bad", ["missing", "ambiguous", "malformed"])
+def test_unusable_ledger_refuses_without_disclosing_identity(media: MediaHMC, bad):
+    _provisioned(media=False)
+    if bad != "missing":
+        _ledger(
+            key="installer_media",
+            kind="installer_media",
+            identity={
+                "vios_uuid": VIOS if bad == "ambiguous" else "alias",
+                "media_name": MEDIA,
+            },
+        )
+    if bad == "ambiguous":
+        _ledger(
+            key="another",
+            kind="installer_media",
+            identity={"vios_uuid": VIOS, "media_name": MEDIA},
+        )
+    with pytest.raises(ToolError, match="check the original request") as exc:
+        _call(_app(_grant(TOOL, UNMOUNT)), DETACH)
+    assert all(value not in str(exc.value) for value in (LPAR, VIOS, MEDIA, "entries"))
+    assert media.mounted == [MEDIA]
+    with store.read_session() as conn:
+        assert conn is not None and store.find_operation(conn, "hmcpctl", "r1") is None
+
+
+def test_crash_before_guard_resumes_only_the_admitted_medium(media, monkeypatch):
+    _provisioned()
+    app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
+    mixed = {**DETACH, "patch": {"name": "web2", "installer_media": "detach"}}
+    first = _suspend_before_worker(app, monkeypatch, mixed)
+    assert first["partition_uuid"] is None
+    _replace_ledger_media("changed.iso")
+    with pytest.raises(ToolError, match="verify"):
+        _call(app, {"continuation": "resume"})
+    assert media.fake.name == "web1" and media.mounted == [MEDIA]
+    _replace_ledger_media(MEDIA)
+    done = _call(app, {"continuation": "resume"})
+    assert done["outcome"] == "completed"
+    assert media.fake.name == "web2" and media.mounted == []
+
+
+@pytest.mark.parametrize("action", ["replay", "abandon"])
+def test_journal_only_refuses_conflict_and_uses_remaining_local_evidence(
+    media, monkeypatch, action
+):
+    _provisioned()
+    app = _app(_grant(TOOL), _grant(UNMOUNT, targets=_targets()))
+    first = _suspend_before_worker(app, monkeypatch)
+    arguments = DETACH if action == "replay" else {"continuation": "abandon"}
+
+    def unexpected_client(*_args):
+        pytest.fail("journal-only detach opened an HMC client")
+
+    monkeypatch.setattr(core, "open_client", unexpected_client)
+    _replace_ledger_media("changed.iso")
+    with pytest.raises(ToolError, match="verify"):
+        _call(app, arguments)
+    _replace_ledger_media(None)
+    record = _call(app, arguments)
+    assert record["operation_id"] == first["operation_id"]
+    assert record["outcome"] == ("abandoned" if action == "abandon" else None)
+    assert media.mounted == [MEDIA]
+
+
+def test_historical_journal_with_no_evidence_requires_all_targets(media, monkeypatch):
+    _provisioned()
+    scoped = _app(_grant(TOOL), _grant(UNMOUNT, targets=_targets()))
+    first = _suspend_before_worker(scoped, monkeypatch)
+    with store.session() as conn, store.write_transaction(conn):
+        conn.execute(
+            "DELETE FROM effects WHERE operation_id=?", (first["operation_id"],)
+        )
+    _replace_ledger_media(None)
+    with pytest.raises(ToolError, match=UNMOUNT):
+        _call(scoped, {"continuation": "abandon"})
+    broad = _app(_grant(TOOL, UNMOUNT))
+    with pytest.raises(ToolError, match="verify"):
+        _call(broad, {"continuation": "resume"})
+    assert _call(broad, DETACH)["operation_id"] == first["operation_id"]
+    assert _call(broad, {"continuation": "abandon"})["outcome"] == "abandoned"
+    assert media.mounted == [MEDIA]
+
+
+def test_wrong_host_cannot_replay_bound_detach(media, monkeypatch):
+    _provisioned()
+    app = _app(_grant(TOOL, UNMOUNT))
+    _suspend_before_worker(app, monkeypatch)
+    monkeypatch.setenv("HMC_HOST", "other.test")
+    with pytest.raises(ToolError, match="verify"):
+        _call(app, DETACH)
+    assert media.mounted == [MEDIA]
+
+
+def test_recorded_plan_must_match_binding_before_resume(media, monkeypatch):
+    _provisioned()
+    app = _app(_grant(TOOL), _grant(UNMOUNT, targets=_targets()))
+    first = _call(app, DETACH)
+    with store.session() as conn, store.write_transaction(conn):
+        plan = store.load_effects(conn, first["operation_id"])["plan"].identity
+        assert plan is not None
+        plan["media"]["media_name"] = "changed.iso"
+        conn.execute(
+            "UPDATE effects SET identity_json=? WHERE operation_id=? AND key='plan'",
+            (json.dumps(plan), first["operation_id"]),
+        )
+        store.set_state(conn, first["operation_id"], "paused", "needs_attention")
+    with pytest.raises(ToolError, match="verify"):
+        _call(app, {"continuation": "resume"})
+    assert media.fake.calls.count("unmount") == 1
 
 
 @pytest.mark.parametrize(

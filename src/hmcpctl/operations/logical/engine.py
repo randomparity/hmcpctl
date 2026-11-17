@@ -150,6 +150,48 @@ def recorded_partition(
     return row["system_uuid"], row["partition_uuid"]
 
 
+def admission_record(
+    request: OperationRequest, continuation: str
+) -> OperationRecord | None:
+    """Read the existing matching record in one snapshot before delegated authorization."""
+    store.validate_request_id(request.request_id)
+    with store.read_session() as conn:
+        if conn is None:
+            return None
+        conn.execute("BEGIN")
+        row = store.find_operation(conn, request.agent_id, request.request_id)
+        if row is None:
+            return None
+        _check_binding(row, request, canonical_request(request)[1], continuation)
+        return store.read_record(conn, row["operation_id"])
+
+
+@dataclass(frozen=True)
+class Admission:
+    """The operation observed when resolving authority and what it admitted."""
+
+    operation_id: str | None
+    initial_effect: EffectRecord | None = None
+    journal_only: bool = False
+
+    def check_record(self, row: sqlite3.Row | None) -> None:
+        actual = None if row is None else row["operation_id"]
+        if actual != self.operation_id or (self.journal_only and actual is None):
+            raise OperationRefused(
+                "request_conflict",
+                "the operation changed during admission; retry the call",
+            )
+
+    def record_initial(self, conn: sqlite3.Connection, operation_id: str) -> None:
+        effect = self.initial_effect
+        if effect is not None:
+            identity = _check_identity(effect.identity or {})
+            store.record_intent(
+                conn, operation_id, effect.key, effect.kind, effect.target
+            )
+            store.record_outcome(conn, operation_id, effect.key, "applied", identity)
+
+
 def _check_inputs(
     request: OperationRequest, continuation: str, wait_seconds: int
 ) -> None:
@@ -175,6 +217,7 @@ def submit(
     body: Body,
     *,
     classifiers: Mapping[str, Classifier] | None = None,
+    admission: Admission | None = None,
     continuation: str = "none",
     wait_seconds: int = 60,
 ) -> OperationRecord:
@@ -197,13 +240,21 @@ def submit(
         store.acquire_execution_lock(live)
         with store.session() as conn, store.write_transaction(conn):
             row = store.find_operation(conn, request.agent_id, request.request_id)
+            if admission is not None:
+                admission.check_record(row)
             if row is None:
                 operation_id, run = _admit_new(
                     conn, request, request_json, digest, continuation
                 )
+                if admission is not None:
+                    admission.record_initial(conn, operation_id)
             else:
                 operation_id, run = _admit_existing(
                     conn, row, request, digest, continuation
+                )
+            if run and admission is not None and admission.journal_only:
+                raise OperationRefused(
+                    "request_conflict", "journal-only authority cannot start a worker"
                 )
         if run:
             _start_worker(operation_id, body, continuation, execution_classifiers)

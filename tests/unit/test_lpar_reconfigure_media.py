@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 from conftest import live_fixture
-from unit.test_lpar_reconfigure import LPAR, SYS, FakeHMC, _effects, _run
+from unit.test_lpar_reconfigure import LPAR, OTHER, SYS, FakeHMC, _effects, _run
 from unit.test_lpar_reconfigure import hmc as hmc  # noqa: PLC0414 - fixture import
 
 from hmcpctl.errors import HMCError, HMCTLSFingerprintError, LparUpdateError
-from hmcpctl.operations.logical import store
+from hmcpctl.operations.logical import engine, store
 from hmcpctl.operations.logical.engine import EffectNotApplied, OperationFailed
 from hmcpctl.operations.lpar.reconfiguration import core as reconfigure
 from hmcpctl.operations.lpar.reconfiguration import media as reconfigure_media
@@ -350,8 +350,8 @@ def test_detach_skips_the_partition_basis(media, monkeypatch):
     _provisioned()
     plan_media = reconfigure.plan_media
 
-    async def plan_then_halt(hmc, system_uuid, lpar_uuid):
-        planned = await plan_media(hmc, system_uuid, lpar_uuid)
+    async def plan_then_halt(hmc, system_uuid, lpar_uuid, **kwargs):
+        planned = await plan_media(hmc, system_uuid, lpar_uuid, **kwargs)
         # The installer halts between planning and the write: state and RMC change.
         media.fake.state, media.fake.rmc = "not activated", "inactive"
         return planned
@@ -402,8 +402,8 @@ def test_detach_rechecks_rmc_before_its_write(media, monkeypatch):
     monkeypatch.setattr(reconfigure_media, "unmount_optical_media", media.unmount)
     plan_media = reconfigure.plan_media
 
-    async def plan_then_lose_rmc(hmc, system_uuid, lpar_uuid):
-        planned = await plan_media(hmc, system_uuid, lpar_uuid)
+    async def plan_then_lose_rmc(hmc, system_uuid, lpar_uuid, **kwargs):
+        planned = await plan_media(hmc, system_uuid, lpar_uuid, **kwargs)
         media.fake.rmc = "inactive"
         return planned
 
@@ -615,3 +615,106 @@ def test_patch_accepts_only_the_literal_values():
         ReconfigurePatch(boot="disk")
     with pytest.raises(ValueError):
         ReconfigurePatch(installer_media="eject")
+
+
+@pytest.mark.parametrize("drift", ["partition", "medium"])
+def test_worker_checks_binding_before_planning_any_mixed_write(media, drift):
+    _provisioned()
+    binding = reconfigure_media.InstallerMedia(
+        SYS,
+        OTHER if drift == "partition" else LPAR,
+        VIOS,
+        "old.iso" if drift == "medium" else MEDIA,
+    )
+    patch = ReconfigurePatch(name="web2", installer_media="detach")
+    request = engine.OperationRequest(
+        "hmc_reconfigure_lpar", "agent-a", "<default>", "hmc.test", "r1", {}
+    )
+    listing = AsyncMock(wraps=media.fake.list_optical_mappings)
+    media.fake.list_optical_mappings = listing
+    result = engine.submit(
+        request,
+        reconfigure.reconfigure_body(
+            patch,
+            False,
+            "sysA",
+            "web1",
+            authorized_media=binding,
+        ),
+        wait_seconds=10,
+    )
+    assert result.outcome == "failed"
+    assert not result.effects and media.fake.name == "web1" and media.mounted == [MEDIA]
+    listing.assert_not_awaited()
+
+
+@pytest.mark.parametrize("drift", ["medium", "effect"])
+def test_resume_classifier_checks_binding_before_accessing_the_vios(media, drift):
+    _provisioned()
+    first = _run({"installer_media": "detach"})
+    binding = reconfigure_media.InstallerMedia(SYS, LPAR, VIOS, MEDIA)
+    with store.session() as conn, store.write_transaction(conn):
+        store.record_intent(
+            conn,
+            first.operation_id,
+            "media_detach",
+            "vios.optical_unmount",
+            f"lpar:{OTHER if drift == 'effect' else LPAR}",
+        )
+        if drift == "medium":
+            conn.execute("DELETE FROM ledger WHERE kind='installer_media'")
+    listing = AsyncMock(wraps=media.fake.list_optical_mappings)
+    media.fake.list_optical_mappings = listing
+    ctx = engine.OperationContext.load(
+        first.operation_id, "resume", reconfigure.media_classifiers(binding)
+    )
+    assert asyncio.run(ctx.reconcile())
+    listing.assert_not_awaited()
+    assert ctx.has_uncertain()
+
+
+def test_journal_only_admission_rolls_back_an_executable_transition(media):
+    _provisioned()
+    first = _run({"installer_media": "detach"})
+    with store.session() as conn, store.write_transaction(conn):
+        store.set_state(conn, first.operation_id, "paused", "needs_attention")
+    request = engine.OperationRequest(
+        "hmc_reconfigure_lpar", "agent-a", "<default>", "hmc.test", "r1", {}
+    )
+    admission = engine.Admission(first.operation_id, journal_only=True)
+    with pytest.raises(store.OperationRefused, match="cannot start a worker"):
+        engine.submit(request, AsyncMock(), continuation="resume", admission=admission)
+    with store.read_session() as conn:
+        assert conn is not None
+        assert store.read_record(conn, first.operation_id).state == "paused"
+
+
+def test_replaced_record_cannot_inherit_journal_authority(media):
+    _provisioned()
+    first = _run({"installer_media": "detach"})
+    request = engine.OperationRequest(
+        "hmc_reconfigure_lpar", "agent-a", "<default>", "hmc.test", "r1", {}
+    )
+    admission = engine.Admission("0" * 32, journal_only=True)
+    with pytest.raises(store.OperationRefused, match="changed during admission"):
+        engine.submit(request, AsyncMock(), continuation="abandon", admission=admission)
+    with store.read_session() as conn:
+        assert conn is not None
+        assert store.read_record(conn, first.operation_id).outcome == "completed"
+
+
+def test_admission_and_initial_evidence_roll_back_together(media):
+    request = engine.OperationRequest(
+        "hmc_reconfigure_lpar", "agent-a", "<default>", "hmc.test", "r1", {}
+    )
+    binding = reconfigure_media.InstallerMedia(SYS, LPAR, VIOS, MEDIA).effect()
+    assert binding.identity is not None
+    binding.identity["media_name"] = "x" * store.MAX_IDENTITY_BYTES
+    with pytest.raises(ValueError, match="bytes"):
+        engine.submit(
+            request,
+            AsyncMock(),
+            admission=engine.Admission(None, initial_effect=binding),
+        )
+    with store.read_session() as conn:
+        assert conn is not None and store.find_operation(conn, "agent-a", "r1") is None

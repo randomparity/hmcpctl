@@ -62,7 +62,9 @@ from .media import (
     MEDIA_KEY,
     MEDIA_KIND,
     BootPlan,
+    InstallerMedia,
     MediaPlan,
+    MissingProvisionEvidence,
     boot_classifier,
     boot_write,
     media_classifier,
@@ -70,6 +72,7 @@ from .media import (
     observed,
     plan_boot,
     plan_media,
+    recorded_media,
     require_detachable,
 )
 
@@ -985,6 +988,8 @@ async def _make_plan(
     allow_disruption: bool,
     system_uuid: str,
     lpar_uuid: str,
+    *,
+    authorized_media: InstallerMedia | None = None,
 ) -> ReconfigurationPlan:
     view = await _read_view(hmc, lpar_uuid)
     if patch.processors is not None:
@@ -1018,7 +1023,9 @@ async def _make_plan(
         boot, boot_change = await plan_boot(hmc, system_uuid, lpar_uuid)
     if patch.installer_media is not None:
         require_detachable(view, lpar_uuid)
-        media, media_change = await plan_media(hmc, system_uuid, lpar_uuid)
+        media, media_change = await plan_media(
+            hmc, system_uuid, lpar_uuid, authorized_media=authorized_media
+        )
     plan = plan_changes(patch, view, profile, allow_disruption, boot is not None)
     plan["changes"] += [c for c in (boot_change, media_change) if c is not None]
     disks = None
@@ -1616,8 +1623,99 @@ def _disk_warnings(ctx: OperationContext, plan: ReconfigurationPlan) -> list[str
     ]
 
 
+async def installer_media_admission(
+    request: engine.OperationRequest, continuation: str, system: str, lpar: str
+) -> tuple[InstallerMedia | None, engine.Admission]:
+    """Resolve executable detach, or authorize a strictly journal-only existing call."""
+    record = engine.admission_record(request, continuation)
+    if record is None:
+        if continuation != "none":
+            raise OperationFailed("the operation no longer exists")
+        async with open_client(request.connection, request.host) as hmc:
+            partition = await _resolve(hmc, system, lpar)
+        binding = InstallerMedia.from_ledger(*partition)
+        return binding, engine.Admission(None, initial_effect=binding.effect())
+
+    partition, original = recorded_media(record, plan_key=PLAN_KEY, plan_kind=PLAN_KIND)
+    journal_only = continuation in ("none", "abandon") or record.state == "terminal"
+    admission = engine.Admission(record.operation_id, journal_only=journal_only)
+    if partition is None:
+        if journal_only:
+            return None, admission
+        raise OperationFailed("the original installer-media binding is unavailable")
+    try:
+        current = InstallerMedia.from_ledger(*partition)
+    except MissingProvisionEvidence:
+        if journal_only:
+            return original, admission
+        raise
+    if original is not None and current != original:
+        raise OperationFailed(
+            "the provision ledger differs from the recorded installer media"
+        )
+    if not journal_only:
+        if original is None:
+            raise OperationFailed("the original installer-media binding is unavailable")
+        async with open_client(request.connection, request.host) as hmc:
+            if await _resolve(hmc, *partition) != partition:
+                raise OperationFailed(
+                    "the recorded partition no longer resolves on this HMC"
+                )
+    return current, admission
+
+
+def _check_media_binding(
+    ctx: OperationContext, binding: InstallerMedia, plan: ReconfigurationPlan | None
+) -> None:
+    if ctx.partition is not None and ctx.partition != binding.partition:
+        raise OperationFailed(
+            "the operation guards a different installer-media partition"
+        )
+    if InstallerMedia.from_ledger(*binding.partition) != binding:
+        raise OperationFailed(
+            "the provision ledger differs from the authorized installer media"
+        )
+    if plan is not None:
+        binding.check_plan(plan)
+
+
+def media_classifiers(
+    binding: InstallerMedia | None,
+) -> Mapping[str, engine.Classifier]:
+    if binding is None:
+        return RECONFIGURE_CLASSIFIERS
+
+    def guarded(classifier: engine.Classifier) -> engine.Classifier:
+        async def classify(
+            ctx: OperationContext, effect: EffectRecord
+        ) -> Classification:
+            plan = None if effect.kind == PLAN_KIND else _plan_of(ctx)
+            _check_media_binding(ctx, binding, plan)
+            if plan is not None and (
+                effect.key,
+                effect.kind,
+                effect.target,
+            ) not in _steps(plan):
+                raise OperationFailed(
+                    "the open effect differs from the authorized plan"
+                )
+            return await classifier(ctx, effect)
+
+        return classify
+
+    return {
+        kind: guarded(classifier)
+        for kind, classifier in RECONFIGURE_CLASSIFIERS.items()
+    }
+
+
 def reconfigure_body(
-    patch: ReconfigurePatch, allow_disruption: bool, system: str, lpar: str
+    patch: ReconfigurePatch,
+    allow_disruption: bool,
+    system: str,
+    lpar: str,
+    *,
+    authorized_media: InstallerMedia | None = None,
 ) -> engine.Body:
     """The operation body for one ``hmc_reconfigure_lpar`` request."""
 
@@ -1628,12 +1726,31 @@ def reconfigure_body(
                 plan = cast(ReconfigurationPlan, dict(recorded.identity or {}))
             else:
                 ctx.set_phase("validating")
-                system_uuid, lpar_uuid = await _resolve(hmc, system, lpar)
+                selectors = (system, lpar)
+                if authorized_media is not None and ctx.continuation == "resume":
+                    selectors = authorized_media.partition
+                system_uuid, lpar_uuid = await _resolve(hmc, *selectors)
+                if (
+                    authorized_media is not None
+                    and (system_uuid, lpar_uuid) != authorized_media.partition
+                ):
+                    raise OperationFailed(
+                        "the resolved partition differs from the authorized installer media"
+                    )
                 ctx.guard(system_uuid, lpar_uuid)
+                if authorized_media is not None:
+                    _check_media_binding(ctx, authorized_media, None)
                 made = await _make_plan(
-                    hmc, patch, allow_disruption, system_uuid, lpar_uuid
+                    hmc,
+                    patch,
+                    allow_disruption,
+                    system_uuid,
+                    lpar_uuid,
+                    authorized_media=authorized_media,
                 )
 
+                if authorized_media is not None:
+                    authorized_media.check_plan(made)
                 if len(json.dumps(made, sort_keys=True)) > store.MAX_IDENTITY_BYTES:
                     raise OperationFailed(
                         "the plan exceeds the operation store's effect identity bound; "
@@ -1651,6 +1768,8 @@ def reconfigure_body(
                         )
                     ),
                 )
+            if authorized_media is not None:
+                _check_media_binding(ctx, authorized_media, plan)
             ctx.set_phase("applying")
             try:
                 await _apply(ctx, hmc, plan)
