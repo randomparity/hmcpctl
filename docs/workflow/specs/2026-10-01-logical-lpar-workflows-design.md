@@ -144,7 +144,7 @@ the dispatch authorizer admits the call, as that tool, for each resolved target.
 | --- | --- |
 | plan | `hmc_list_systems` (enumerating placement only), `hmc_list_lpars`, `hmc_capacity_report`, `hmc_list_virtual_networks`, `hmc_list_vios`, `hmc_list_volume_groups`, `hmc_get_vios_storage_detail` (ADR 0198) |
 | inventory | `hmc_list_systems`, `hmc_list_lpars`, `hmc_capacity_report`, `hmc_list_lpar_ownership`, each authorized per source (ADR 0196) |
-| provision (no install) | `hmc_create_lpar`, `hmc_add_network_adapter`, `hmc_add_vscsi_adapter`, `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar`, `hmc_save_current_partition_profile`, `hmc_set_default_partition_profile` (ADR 0313) |
+| provision (no install) | `hmc_create_lpar`, `hmc_add_network_adapter`, `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar`, `hmc_save_current_partition_profile`, `hmc_set_default_partition_profile` (ADR 0313) |
 | provision `install` | the row above, plus `hmc_upload_iso`, `hmc_mount_optical_media`, `hmc_set_lpar_boot_order`, `hmc_power_on_lpar`, `hmc_read_lpar_refcodes` |
 | `power_on=true` (no `install`) | adds `hmc_power_on_lpar` |
 | reconfigure | `hmc_modify_lpar` and `hmc_rename_lpar` for `name`, `hmc_dlpar_proc`, `hmc_dlpar_mem`, `hmc_update_partition_profile` (ADR 0314 Decision 6); `hmc_unmount_optical_media` for `installer_media` and `hmc_set_lpar_boot_order` for `boot` (ADR 0321 Decision 6); `disks.add` adds `hmc_create_virtual_disk`, `hmc_map_storage_to_lpar` and `hmc_save_current_partition_profile`, and `disks.detach` adds `hmc_detach_storage_mapping`, each per VIOS (ADR 0322); `networks.add` adds `hmc_add_network_adapter` and `networks.remove` adds `hmc_delete_adapter`, each with `hmc_save_current_partition_profile` (ADR 0325) |
