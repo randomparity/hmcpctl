@@ -43,8 +43,15 @@ after `r.main()`, before fixture containment. See [ADR 0385](../../adr/0385-real
 
 ## Validation
 
-One coupled implementation task covers readiness and real supervisor waits. The plan
-inventories focused evidence. The existing Linux failure is the red cleanup observation;
-negative marker tests and mutations prove readiness does not accept partial/duplicate
-identity. Stress both delivery modes, including the causal contention schedule. Pure
-prose needs no invented text assertions. No new production or untrusted-input boundary.
+The plan maps readiness and real supervisor waits to focused red/green and mutation
+checks, plus both-mode loaded Linux stress. Pure prose needs no text assertions.
+
+## Threat model
+
+- Boundaries: no added/widened production boundary; generated PID identities are read
+  from the isolated fixture directory and used in readiness paths (security review trigger).
+- Actors: trusted local/CI fixture producer; no external input or credential use.
+- Controls: atomic identity publication, integer parsing, distinct PIDs, bounded marker
+  waits, and existing owned-process cleanup/containment.
+- Out of scope: hostile modification of the fixture's private temporary tree; its
+  producer is trusted under the existing test model. Production authorization is unchanged.
