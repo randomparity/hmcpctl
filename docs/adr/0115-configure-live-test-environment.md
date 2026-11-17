@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. [ADR 0395](0395-require-a-specific-live-iso-bind.md) supersedes the wildcard-listener allowance.
 
 ## Context
 
