@@ -299,7 +299,7 @@ Use verbose recipes only when live progress or expanded diagnostics are needed:
 
 ```sh
 just test-verbose   # live pytest output + missing-lines coverage
-just smoke-verbose  # list every exposed MCP tool
+just smoke-verbose  # list the tools a client's tools/list carries (the primary catalog)
 just test-timings   # retain pytest output, including the 30 slowest test phases
 just verify-timings # canonical verify with per-recipe wall time and pytest timings
 ```
