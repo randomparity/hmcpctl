@@ -392,7 +392,10 @@ class World:
 
     def _hmc_provision_lpar(self, kwargs: dict[str, Any]) -> Any:
         if kwargs.get("continuation") == "abandon":
-            return {**_provisioned(False, "terminal"), "steps": []}
+            result = {**_provisioned(False, "terminal"), "steps": []}
+            result["operation"]["request_id"] = kwargs["request_id"]
+            self.operations[kwargs["request_id"]] = result["operation"]
+            return result
         assignments = kwargs.get("assignments", {})
         try:
             validate_provision_assignments(
@@ -453,7 +456,10 @@ class World:
 
     def _hmc_decommission_lpar(self, kwargs: dict[str, Any]) -> Any:
         if kwargs.get("continuation") == "abandon":
-            return {**_decommissioned(False), "operation": _record("terminal")}
+            result = {**_decommissioned(False), "operation": _record("terminal")}
+            result["operation"]["request_id"] = kwargs["request_id"]
+            self.operations[kwargs["request_id"]] = result["operation"]
+            return result
         entry = self.by_selector(kwargs["lpar_name_or_uuid"])
         assert entry is not None
         radius = {
@@ -903,6 +909,120 @@ def test_a_paused_decommission_is_abandoned_with_its_own_tool(schemas):
         for k in world.calls_to("hmc_power_lpar")
         if k.get("request_id") == abandoned[0]["request_id"]
     ]
+
+
+@pytest.mark.parametrize("abandon_fails", [False, True])
+@pytest.mark.parametrize(
+    "status",
+    [
+        "terminal",
+        "running",
+        "interrupted",
+        "paused",
+        "error",
+        "missing",
+        "mismatch",
+        "mixed",
+    ],
+)
+def test_abandon_confirms_each_request_and_aggregates_failures(
+    schemas, status, abandon_fails
+):
+    world = World()
+    run = lpar_power.Run(SYSTEM, "test")
+    tools = {
+        "power": "hmc_power_lpar",
+        "provision": "hmc_provision_lpar",
+        "decommission": "hmc_decommission_lpar",
+    }
+    run.requests = dict.fromkeys(tools, False) | {"done": True}
+    run.provisions.add("provision")
+    run.decommissions.add("decommission")
+    world.operations = {key: {**_record("paused"), "request_id": key} for key in tools}
+
+    def read(kwargs):
+        request_id = kwargs["request_id"]
+        if status == "error":
+            return ValueError("status unavailable")
+        found = "terminal" if status in {"missing", "mismatch", "mixed"} else status
+        if status == "mixed" and request_id == "power":
+            found = "running"
+        record = {
+            **_record(found),
+            "request_id": "other" if status == "mismatch" else request_id,
+        }
+        return {
+            "operations": [] if status == "missing" else [record],
+            "limit": 50,
+            "truncated": False,
+            "next_cursor": None,
+        }
+
+    world.overrides["hmc_operation_status"] = read
+    if abandon_fails:
+        for tool in tools.values():
+            world.overrides[tool] = lambda _kwargs: ValueError("abandon unavailable")
+    state = runner.RunState(config=live_config.LiveTestConfig(), group="lpar-power")
+    state.schemas = schemas
+
+    clean = asyncio.run(lpar_power._abandon(FakeClient(world, _OUTPUTS), state, run))
+
+    assert clean is (status == "terminal")
+    assert [(tool, kwargs["request_id"]) for tool, kwargs in world.calls] == [
+        call
+        for request_id, tool in tools.items()
+        for call in [(tool, request_id), ("hmc_operation_status", request_id)]
+    ]
+    for request_id in tools:
+        terminal = status == "terminal" or (status == "mixed" and request_id != "power")
+        assert run.requests[request_id] is terminal
+        manual = [
+            row
+            for row in _rows(state, "operation abandon recovery")
+            if request_id in row["data"]
+        ]
+        assert bool(manual) is not terminal
+        assert all(
+            row["status"] == "FAIL" and "MANUAL RECOVERY" in row["data"]
+            for row in manual
+        )
+    assert run.requests["done"]
+
+
+@pytest.mark.parametrize(
+    "kind", ["composite_pauses", "provision_fails_after_storage", "decommission_pauses"]
+)
+def test_unconfirmed_abandon_fails_st41_cleanup_before_resource_mutation(schemas, kind):
+    world = World()
+    setattr(world, kind, True)
+    world.overrides["hmc_operation_status"] = lambda kwargs: {
+        "operations": [{**_record("running"), "request_id": kwargs["request_id"]}],
+        "limit": 50,
+        "truncated": False,
+        "next_cursor": None,
+    }
+
+    state = _run(schemas, world)
+
+    assert {entry["observation"]["cleanup"] for entry in state.observations} == {
+        "failed"
+    }
+    abandons = [
+        (i, kwargs["request_id"])
+        for i, (_, kwargs) in enumerate(world.calls)
+        if kwargs.get("continuation") == "abandon"
+    ]
+    assert abandons
+    assert not {
+        "hmc_delete_lpar",
+        "hmc_detach_storage_mapping",
+        "hmc_delete_virtual_disk",
+        "hmc_power_off_lpar",
+    }.intersection(world.tools()[abandons[0][0] + 1 :])
+    manual = _rows(state, "operation abandon recovery")
+    assert all(
+        any(request_id in row["data"] for row in manual) for _, request_id in abandons
+    )
 
 
 def test_a_repeat_stop_that_submits_fails_its_assertion(schemas):

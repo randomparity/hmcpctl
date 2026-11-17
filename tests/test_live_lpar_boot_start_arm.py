@@ -218,6 +218,116 @@ async def test_actual_owned_session_login_and_logout_are_counted():
     assert h.budget.used[0] == 2
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expire", [False, True])
+@pytest.mark.parametrize(
+    "route,maximum",
+    [
+        ("get", 2),
+        ("login", 2),
+        ("logout", 20),
+        ("create-rest", 60),
+        ("read-ssh", 2),
+        ("create-ssh", 60),
+        ("stamp-ssh", 20),
+    ],
+)
+async def test_physical_timeout_selection_and_cancellation(
+    monkeypatch, route, maximum, expire
+):
+    import asyncio
+    from types import SimpleNamespace
+
+    import httpx
+
+    p = packet()
+    c = HMCConfig.from_mapping(
+        p["candidate"]["hmc_identity"]
+        | {
+            "password": "test",  # pragma: allowlist secret — synthetic test credential
+        }
+    )
+    h = arm.CountedHMC(arm.bounded_config(c), arm.Budget("run", p))
+    await h._http.aclose()
+    selected = []
+
+    def timeout(seconds):
+        selected.append(seconds)
+        return asyncio.timeout(0 if expire else None)
+
+    async def handle(request):
+        await asyncio.sleep(0)
+        return httpx.Response(200, content=b"ok", request=request)
+
+    async def ssh(*args, **kwargs):
+        await asyncio.sleep(0)
+        return ""
+
+    # Observe the requested deadline but use deterministic next-turn expiry.
+    boundary = SimpleNamespace(**vars(asyncio))
+    boundary.timeout = timeout
+    monkeypatch.setattr(arm, "asyncio", boundary)
+    monkeypatch.setattr(arm, "run_hmc_command", ssh)
+    monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
+    h._http = httpx.AsyncClient(
+        base_url="https://hmc.test", transport=httpx.MockTransport(handle)
+    )
+    h.window = arm.Window(p, "digest", "digest", True)
+
+    async def dispatch():
+        if route.endswith("ssh"):
+            if route == "read-ssh":
+                command = "lscomgmt"
+            else:
+                h.effect = "create" if route == "create-ssh" else "stamp"
+                operation = "mksyscfg" if route == "create-ssh" else "chsyscfg"
+                command = f"{operation} -r lpar -m system -i name={p['name']}"
+                if route == "stamp-ssh":
+                    command += ",description=test"
+            return await h.ssh(h.config, command)
+        method, path = {
+            "get": ("GET", "/rest/api/uom/ManagedSystem/" + SYSTEM),
+            "login": ("PUT", "/rest/api/web/Logon"),
+            "logout": ("DELETE", "/rest/api/web/Logon"),
+            "create-rest": (
+                "PUT",
+                "/rest/api/uom/ManagedSystem/" + SYSTEM + "/LogicalPartition",
+            ),
+        }[route]
+        if route == "create-rest":
+            h.effect = "create"
+        return await h._request(method, path)
+
+    try:
+        if expire:
+            with pytest.raises(TimeoutError) as error:
+                await dispatch()
+            assert isinstance(error.value.__cause__, asyncio.CancelledError)
+        else:
+            await dispatch()
+        assert selected == [maximum]
+        assert h.budget.used[0:2] == ([0, 1] if route.endswith("ssh") else [1, 0])
+    finally:
+        await h._http.aclose()
+
+
+def test_physical_timeout_is_clipped_by_phase_and_grant(monkeypatch):
+    from types import SimpleNamespace
+
+    b = arm.Budget("run", packet())
+    monkeypatch.setattr(
+        arm, "time", SimpleNamespace(monotonic=lambda: 100, time=lambda: 200)
+    )
+    b.deadline, b.expiry = 102.5, 500
+    assert b.timeout(60) == 2.5
+    b.expiry = 201.25
+    assert b.timeout(60) == 1.25
+    assert b.timeout(60, close=True) == 2.5
+    b.expiry = 200
+    with pytest.raises(ValueError, match="absolute phase deadline expired"):
+        b.timeout(2)
+
+
 def fixture_entry():
     return {
         "identity": {
@@ -382,11 +492,12 @@ async def test_actual_stamp_journal_separates_acknowledgment_and_marker(
 
 @pytest.fixture
 def physical_world(monkeypatch, tmp_path):
-    """Use real HMC/domain/profile/native code; replace only HTTP and SSH providers."""
+    """Exercise physical budgets with fake providers, independent of host scheduling."""
     import csv
     import io
     import shlex
     import xml.etree.ElementTree as ET
+    from contextlib import nullcontext
     from types import SimpleNamespace
 
     import httpx
@@ -395,6 +506,11 @@ def physical_world(monkeypatch, tmp_path):
     from hmcpctl.documents.partition_profile import ATOM, N
     from hmcpctl.xmlutil import parse_feed
 
+    # HTTP/SSH providers are in memory; their elapsed scheduling time is not HMC latency.
+    # Keep Budget.timeout calculations, admission and byte/count accounting intact.
+    clock_boundary = SimpleNamespace(**vars(arm.asyncio))
+    clock_boundary.timeout = lambda _: nullcontext()
+    monkeypatch.setattr(arm, "asyncio", clock_boundary)
     tmp_path.chmod(0o700)
     monkeypatch.setattr(arm.files, "validate_deployed_candidate", lambda _: None)
     p = packet()
@@ -837,6 +953,53 @@ async def test_real_creation_owner_full_physical_route_and_independent_recovery(
         h.budget.used,
         recovery.budget.used,
     )
+
+
+@pytest.mark.asyncio
+async def test_offline_full_creation_route_ignores_provider_clock_delay(
+    monkeypatch, physical_world
+):
+    import asyncio
+
+    import httpx
+
+    w = physical_world
+    original_client = w.client
+    loop = asyncio.get_running_loop()
+    original_time = loop.time
+    advanced = False
+
+    async def delayed_client(mode):
+        h = await original_client(mode)
+        await h._http.aclose()
+
+        def handle(request):
+            nonlocal advanced
+            response = w.handle(request)
+            if (
+                not advanced
+                and h.budget.maximum[0] == 128
+                and h.effect == "create"
+                and request.method == "GET"
+                and request.url.path.endswith("/LogicalPartition")
+            ):
+                advanced = True
+                monkeypatch.setattr(loop, "time", lambda: original_time() + 2.01)
+            return response
+
+        h._http = httpx.AsyncClient(
+            base_url="https://hmc.test:443", transport=httpx.MockTransport(handle)
+        )
+        return h
+
+    monkeypatch.setattr(w, "client", delayed_client)
+    try:
+        await test_real_creation_owner_full_physical_route_and_independent_recovery(
+            w, "AIX/Linux", "create-power-names"
+        )
+        assert advanced
+    finally:
+        monkeypatch.setattr(loop, "time", original_time)
 
 
 @pytest.mark.asyncio
