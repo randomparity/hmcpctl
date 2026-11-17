@@ -31,6 +31,7 @@ Limits: 720-second workload plus at most 15-second containment/sample, 60 minute
 overall including push/queue, 60 aggregate runner-minutes; cumulative target jobs <=172.22.
 Start one monotonic deadline before push; cancel before expiry with a 60-second reserve.
 Fingerprint source/fixtures/selector before and after each sample; stop on changed inputs.
+Retain metadata before rejecting a different build/package/lock/core fingerprint from original Py3.12.
 Persist current observation and raw owned outputs before the unchanged identity/coverage guards.
 Drain logs continuously, retaining first/last MiB with omitted-byte count; do not bound the child
 by truncating its pipe. Artifacts allowlist only owned diagnostic files, including raw JUnit/maps.
