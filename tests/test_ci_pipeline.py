@@ -221,7 +221,7 @@ def _assert_quality_tool_pins(requirements: list[str]) -> None:
 
 
 def _assert_action_pins(workflow: str, expected_actions: set[str]) -> None:
-    lines = re.findall(r"^\s*(?:#\s*)?(?:-\s*)?uses:\s*(.*)$", workflow, re.MULTILINE)
+    lines = re.findall(r"uses:[ \t]*(.*)$", workflow, re.MULTILINE)
     names = set()
     for line in lines:
         pin = re.fullmatch(
@@ -315,6 +315,20 @@ def test_action_pins_check_each_repeated_occurrence() -> None:
     _assert_action_pins(f"{valid}\n{valid}", {"required/action"})
     with pytest.raises(AssertionError):
         _assert_action_pins(f"{valid}\nuses: required/action@v1", {"required/action"})
+
+
+@pytest.mark.parametrize("action", ["required/action", "extra/action"])
+@pytest.mark.parametrize("multiline", [False, True])
+def test_action_pins_reject_inline_mapping_occurrences(
+    action: str, multiline: bool
+) -> None:
+    valid = f"uses: required/action@{'a' * 40}  # v1"
+    if multiline:
+        inline = f"  - {{uses:\n      {action}@{'a' * 40}  # v1\n    }}"
+    else:
+        inline = f"  - {{uses: {action}@{'a' * 40}}}  # v1"
+    with pytest.raises(AssertionError):
+        _assert_action_pins(f"{valid}\n{inline}", {"required/action"})
 
 
 @pytest.fixture(scope="module")
