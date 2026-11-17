@@ -5,7 +5,7 @@
 Issue [#1918](https://github.com/randomparity/hmcpctl/issues/1918) reports that
 ST41/ST72 share a teardown which records abandon responses without proving that
 execution has stopped. Extend the existing `_abandon` owner and its `_teardown`
-caller; no owner transition, caller migration, or compatibility path is needed.
+caller and ST72 `provision_boot._teardown_media`; no owner transition or compatibility path.
 
 ## Design
 
@@ -19,7 +19,9 @@ inspect that operation and confirm terminality before recovering retained resour
 
 Return the aggregate verdict to `_teardown`; an unproved operation sets
 `run.clean = False` and stops resource deletion because execution may remain active.
-Already-terminal requests need no abandon or read. An unsuccessful abandon response
+ST72 must consume the same verdict before media mutation, returning `(False, False)`
+and leaving cleanup failed when confirmation fails; remove its unconditional rewrite
+of request flags. Already-terminal requests need no abandon or read. An unsuccessful abandon response
 still receives a status read; actual terminality governs cleanup safety.
 See [ADR 0390](../../adr/0390-confirm-abandon-before-cleanup.md).
 
@@ -29,7 +31,7 @@ See [ADR 0390](../../adr/0390-confirm-abandon-before-cleanup.md).
   the matching status read, including when abandon itself fails.
 - C2: unproved terminality fails cleanup, preserves resources, and names the request
   in a manual-recovery row; a terminal confirmation permits existing cleanup.
-- C3: offline arm tests exercise the three operation kinds and both shared arm groups,
+- C3: offline arm tests exercise the three operation kinds and actual ST41/ST72 callers (lpar-power/provision-boot),
   terminal/nonterminal, unreadable/missing/mismatched status, and mixed requests.
 
 ## Global constraints
