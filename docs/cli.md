@@ -240,7 +240,9 @@ For prepared media, supply `media.mode` as `prepared`, its allowlisted `url`, th
 `producer_result` object, and the matching `--mac`. Omit the built-media login user and keys.
 The [provision tool reference](tools/provision.md) describes the shared media
 and network fields. Both modes require a new owned disk. Boot mode controls power with
-an install. Omit `--power-on`. The install file is limited to 2 MiB. Recording the
+an install. Set `--boot` on the command line and omit `--power-on`. The CLI rejects
+unknown fields in the typed install objects. The prepared `producer_result`
+dictionary goes to the media binder for validation. The file is limited to 2 MiB. Recording the
 canonical request, including its other options, has a separate 64 KiB journal limit.
 
 The default `--boot immediate` starts the installer in the same operation. A deliberate

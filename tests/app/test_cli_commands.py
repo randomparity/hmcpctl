@@ -1820,6 +1820,29 @@ def test_provision_installer_file_refusals(monkeypatch, fake_hmc, tmp_path, data
     preview.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "field_path", [(), ("media",), ("network",), ("network", "routes", 0)]
+)
+def test_provision_installer_rejects_unknown_typed_fields(
+    monkeypatch, fake_hmc, tmp_path, field_path
+):
+    body, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, BUILT_INSTALL)
+    path = tmp_path / "install.json"
+    payload = json.loads(path.read_bytes())
+    typed_object = payload
+    for field in field_path:
+        typed_object = typed_object[field]
+    typed_object["boot"] = "deferred"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    refused = RUNNER.invoke(cli.app, args)
+
+    assert refused.exit_code == 2 and "Invalid --install file" in refused.stderr
+    preview.assert_not_awaited()
+    body.assert_not_called()
+
+
 def test_provision_installer_schema_and_journal_size_limits(
     monkeypatch, fake_hmc, tmp_path
 ):

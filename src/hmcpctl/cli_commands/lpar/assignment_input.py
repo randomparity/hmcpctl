@@ -34,7 +34,7 @@ def load_install(path: Path) -> LparInstall:
     if len(data) > _MAX_INSTALL_FILE_BYTES:
         usage_error("--install file exceeds 2 MiB")
     try:
-        return TypeAdapter(LparInstall).validate_json(data)
+        return TypeAdapter(LparInstall).validate_json(data, extra="forbid")
     except ValidationError:
         usage_error("Invalid --install file; supply a JSON object matching LparInstall")
 
