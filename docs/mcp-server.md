@@ -401,6 +401,12 @@ connections = ["<default>"]  # profile names, or "<default>" for the env HMC
 targets = "all-targets"      # or a table; see "Narrowing targets" below
 ```
 
+Starting with this policy prints one startup warning line to stderr:
+
+```text
+warning: access policy 'lab' withholds hmc_invoke_tool, so permitted specialists require direct calls by name; use hmc_search_tools to find them.
+```
+
 A grant must name at least one tool through `effects`, `tools`, or both, and
 must name at least one connection. `targets` is either the string
 `"all-targets"` or a table of target kind to selector strings — a bare array is
@@ -519,8 +525,9 @@ JSON-RPC channel, and nothing inside the process can detect that.
 
 | Condition | What it means |
 |-----------|---------------|
-| The served surface has no tools | The policy withholds everything reachable; nothing the server is asked to do will succeed. Suppresses the next line. |
+| The served surface has no tools | The policy withholds everything reachable; nothing the server is asked to do will succeed. Suppresses the permissions and gateway warning lines below. |
 | The policy withholds `hmc_effective_permissions` | The server cannot report its own permissions to a client. Any policy that neither grants the `read` effect class nor names the tool in a grant's `tools` causes this. |
+| The policy withholds `hmc_invoke_tool` | Permitted specialists require direct calls by name. If `hmc_search_tools` is also withheld, the same warning names both gateways and explains that clients must already know permitted specialist names. |
 | `--enable-arbitrary-command` was passed but the policy does not grant `hmc_run_command` | The flag and the ceiling compose conjunctively, so the escape hatch is not exposed. Name it in a grant's `tools` to allow it. |
 | A grant's `targets` table cannot bind some of the tools it reaches | One line per such grant, naming them. Those tools are registered and advertised, and every call to them is denied — a table cannot bound them, so only an `"all-targets"` grant reaches them. Watch for `hmc_effective_permissions` in the list: when it is there, the server cannot report its own permissions even though the policy grants the tool. |
 
