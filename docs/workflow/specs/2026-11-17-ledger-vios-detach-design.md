@@ -28,7 +28,8 @@ medium with this binding before starting a worker. A plan recording an already-u
 medium has no detach step. When the worker has yet to assign its guard, use the admitted UUIDs. For historical
 records without the admission effect, executable resume requires both a guarded partition
 and an applied plan recording the medium. A mismatch or missing original binding refuses
-execution. The operator can abandon and submit a fresh request.
+execution. When journal-only authorization succeeds, the operator can abandon and submit
+a fresh request. Conflicting local identities also prevent abandon.
 
 ## Execution and recovery
 
