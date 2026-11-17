@@ -241,7 +241,7 @@ For prepared media, supply `media.mode` as `prepared`, its allowlisted `url`, th
 The [provision tool reference](tools/provision.md) describes the shared media
 and network fields. Both modes require a new owned disk. Boot mode controls power with
 an install. Set `--boot` on the command line and omit `--power-on`. The CLI rejects
-unknown fields in the typed install objects. The prepared `producer_result`
+unknown or repeated fields in the typed install objects. The prepared `producer_result`
 dictionary goes to the media binder for validation. The file is limited to 2 MiB. Recording the
 canonical request, including its other options, has a separate 64 KiB journal limit.
 

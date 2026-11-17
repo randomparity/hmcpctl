@@ -1843,6 +1843,50 @@ def test_provision_installer_rejects_unknown_typed_fields(
     body.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("member", "earlier_value"),
+    [
+        ("media", '{"mode":"built","boot":"deferred"}'),
+        ("mode", '"prepared"'),
+        ("address", '"192.0.2.7/24"'),
+        ("gateway", '"192.0.2.1"'),
+    ],
+)
+def test_provision_installer_rejects_repeated_typed_members(
+    monkeypatch, fake_hmc, tmp_path, member, earlier_value
+):
+    factory, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, BUILT_INSTALL)
+    path = tmp_path / "install.json"
+    key = f'"{member}":'
+    data = path.read_text(encoding="utf-8")
+    assert data.count(key) == 1
+    path.write_text(data.replace(key, f"{key}{earlier_value},{key}"), encoding="utf-8")
+
+    refused = RUNNER.invoke(cli.app, args)
+
+    assert refused.exit_code == 2 and "repeated" in refused.stderr
+    preview.assert_not_awaited()
+    factory.assert_not_called()
+
+
+def test_provision_installer_preserves_open_producer_members(
+    monkeypatch, fake_hmc, tmp_path
+):
+    _, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, INSTALL, "--mac", MAC, "--dry-run")
+    path = tmp_path / "install.json"
+    data = path.read_text(encoding="utf-8")
+    path.write_text(
+        data.replace('"format":', '"format":"earlier","format":'), encoding="utf-8"
+    )
+
+    result = RUNNER.invoke(cli.app, args)
+
+    assert result.exit_code == 0, result.output
+    assert preview.await_args.args[2].install == INSTALL
+
+
 def test_provision_installer_interactive_json(monkeypatch, fake_hmc, tmp_path):
     _fake_provision(monkeypatch, _PROVISIONED, "ready_to_boot")
     args = _installer_args(tmp_path, BUILT_INSTALL, "--boot", "deferred", "--json")
