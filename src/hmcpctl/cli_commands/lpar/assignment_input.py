@@ -11,6 +11,8 @@ from typing import Any, TypeVar
 import typer
 from pydantic import TypeAdapter, ValidationError
 
+from hmcpctl.operations.lpar.provisioning.media import LparInstall
+
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
@@ -18,6 +20,23 @@ from ...documents.lpar_serial import SERIAL_INPUT_BYTES, VirtualSerialAdapter
 from ...documents.lpar_vscsi import VirtualScsiClientAdapter
 from ...operations.lpar.assignments import LparPcieAssignments
 from ..output import terminal_field, usage_error
+
+_MAX_INSTALL_FILE_BYTES = 2 * 1024 * 1024
+
+
+def load_install(path: Path) -> LparInstall:
+    """Read a bounded install object without exposing its path or contents."""
+    try:
+        with path.open("rb") as source:
+            data = source.read(_MAX_INSTALL_FILE_BYTES + 1)
+    except OSError:
+        usage_error("Cannot read --install file; check the path and file permissions")
+    if len(data) > _MAX_INSTALL_FILE_BYTES:
+        usage_error("--install file exceeds 2 MiB")
+    try:
+        return TypeAdapter(LparInstall).validate_json(data)
+    except ValidationError:
+        usage_error("Invalid --install file; supply a JSON object matching LparInstall")
 
 
 def load_pcie_assignments(path: Path | None) -> LparPcieAssignments:
