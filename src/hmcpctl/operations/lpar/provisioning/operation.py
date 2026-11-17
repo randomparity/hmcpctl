@@ -1337,9 +1337,21 @@ class _Run:
             raise EffectNotApplied(
                 f"LPAR {lpar_uuid} or its system has no name to apply by"
             )
-        await apply_lpar_profile_via_cli(
-            self.hmc.config, system_name, lpar_name, profile_name=name
-        )
+        try:
+            await apply_lpar_profile_via_cli(
+                self.hmc.config, system_name, lpar_name, profile_name=name
+            )
+        except HMCCLIError as exc:
+            if exc.remote_nonzero_completed:
+                exc.args = (
+                    (
+                        "HMC refused the saved-profile apply; resuming deliberately retries "
+                        "the same apply if the partition remains Not Activated with a "
+                        "different last-activated profile. Inspect the refusal before "
+                        f"resuming. {exc}"
+                    ),
+                )
+            raise
         problem = await _applied_problem(self.hmc, self.request, lpar_uuid, name)
         if problem is not None:
             raise HMCError(f"after the apply of {name}, LPAR {lpar_uuid}: {problem}")
