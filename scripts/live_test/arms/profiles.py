@@ -14,7 +14,7 @@ from hmcpctl.errors import HMCCLIError
 from hmcpctl.jobs import SUCCESSFUL_JOB_STATUSES
 from hmcpctl.ssh.commands import _parse_lshwres_output
 
-from ..observation import Assertion
+from ..observation import Assertion, CallFailure
 from ..results import field
 
 if TYPE_CHECKING:
@@ -282,8 +282,10 @@ async def _processor_pool_reads(client: Client, state: RunState) -> None:
     )
     # One observation for both gets: its id derives from (subtask, tool), and the
     # evidence emitter refuses a run whose observation ids repeat.
-    by_id_ok, by_id = await _default_pool_get(client, state, 0)
-    by_name_ok, by_name = await _default_pool_get(client, state, "DefaultPool")
+    by_id_status, by_id_ok, by_id = await _default_pool_get(client, state, 0)
+    by_name_status, by_name_ok, by_name = await _default_pool_get(
+        client, state, "DefaultPool"
+    )
     # Literal ids in the keyword keep them visible to the static scenario-id guard.
     state.record_verified(
         4,
@@ -293,7 +295,11 @@ async def _processor_pool_reads(client: Client, state: RunState) -> None:
         assertions=[
             Assertion("default-pool-by-id", by_id_ok),
             Assertion("default-pool-by-name", by_name_ok),
-            *([_READ_FAILED] if None in (by_id, by_name) else []),
+            *(
+                [_READ_FAILED]
+                if by_id_status != "PASS" or by_name_status != "PASS"
+                else []
+            ),
         ],
         cleanup="not-required",
         data={"by_id": by_id, "by_name": by_name},
@@ -302,8 +308,8 @@ async def _processor_pool_reads(client: Client, state: RunState) -> None:
 
 async def _default_pool_get(
     client: Client, state: RunState, selector: int | str
-) -> tuple[bool, object]:
-    """Get the default pool by *selector*; the data is None when the call failed."""
+) -> tuple[str, bool, object]:
+    """Get the default pool by *selector*, retaining failed-call data."""
     status, data = await state.call(
         client,
         "hmc_get_shared_processor_pool",
@@ -311,9 +317,11 @@ async def _default_pool_get(
         pool=selector,
     )
     if status != "PASS":
-        return False, None
+        failure_data = data.message if isinstance(data, CallFailure) else data
+        return status, False, failure_data
     pool = field(data, "pool")
-    return field(pool, "pool_id") == 0 and field(pool, "configured") is True, data
+    is_default_pool = field(pool, "pool_id") == 0 and field(pool, "configured") is True
+    return status, is_default_pool, data
 
 
 async def _score_reads(client: Client, state: RunState) -> None:

@@ -1813,10 +1813,15 @@ async def test_failed_pool_reads_record_a_failed_read_and_st4_continues(
 
 
 @pytest.mark.asyncio
-async def test_a_failed_pool_get_fails_the_one_get_observation(monkeypatch) -> None:
+@pytest.mark.parametrize("failed_selector", [0, "DefaultPool"])
+async def test_a_failed_pool_get_fails_the_one_get_observation(
+    monkeypatch, failed_selector
+) -> None:
     def get_pool(kwargs):
-        if kwargs["pool"] == 0:
-            return "FAIL", "lost"
+        if kwargs["pool"] == failed_selector:
+            return "FAIL", _failure(
+                "HSCL8012: default pool unavailable password=secret-value"
+            )
         return "PASS", {"pool": {"pool_id": 0, "configured": True}}
 
     _calls, scripted = _answer(
@@ -1831,7 +1836,20 @@ async def test_a_failed_pool_get_fails_the_one_get_observation(monkeypatch) -> N
     gets = [o for o in state.observations if o["operation"] == "processor_pool.get"]
     assert len(gets) == 1
     assert gets[0]["observation"]["result"] == "failed"
-    assert _held(gets[0]["observation"]) == {"default-pool-by-name"}
+    passing_selector = "DefaultPool" if failed_selector == 0 else 0
+    assert _held(gets[0]["observation"]) == {
+        "default-pool-by-id" if passing_selector == 0 else "default-pool-by-name"
+    }
+    row = next(
+        item
+        for item in state.results
+        if item["tool"] == "hmc_get_shared_processor_pool"
+    )
+    assert "read-succeeded" in row["note"]
+    failed_key = "by_id" if failed_selector == 0 else "by_name"
+    assert "HSCL8012: default pool unavailable" in row["data"][failed_key]
+    assert "password=<REDACTED-SECRET>" in row["data"][failed_key]
+    assert "secret-value" not in str(row["data"])
 
 
 def _st10_answers(
