@@ -38,8 +38,10 @@ after `r.main()`, before fixture containment. See [ADR 0385](../../adr/0385-real
   real supervisor reaps before inventory; containment cannot turn survivors into success.
 - Accepted failure classes: missing readiness/early worker exit fails within the existing
   readiness ceiling; pathological scheduling beyond fixture collection ceiling fails.
-- Covered elsewhere: worker limits #2000; CI group membership #1998; production diagnostic
-  and cleanup contracts ADR 0130/0208. No HMC, dependencies, or warning-policy changes.
+- Covered elsewhere: hosted worker-count/tracer measurements #2000; CI groups #1998;
+  production diagnostic/reap contracts ADR 0130/0208. Worker-cap changes are excluded;
+  none is owed or deferred by #1909/#2000. A future cap decision belongs to the maintainer
+  under a separate ADR. No HMC, dependencies, or warning-policy changes.
 
 ## Validation
 
