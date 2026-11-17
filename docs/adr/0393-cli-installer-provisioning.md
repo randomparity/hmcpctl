@@ -12,8 +12,8 @@ take several minutes to produce the reference code described in ADR 0328.
 
 ## Decision
 
-1. The CLI reads the shared install object from `--install PATH`. It rejects undeclared
-   fields in the typed objects before preview or submission. The prepared media
+1. The CLI reads the shared install object from `--install PATH`. It rejects undeclared or repeated
+   member names in typed objects before preview or submission. The prepared media
    `producer_result` dictionary passes through to the existing binder. Operators select
    the MAC, boot mode and continuation separately with `--mac`, `--boot` and
    `--continuation`. MCP retains its existing validation. A fresh writer-window

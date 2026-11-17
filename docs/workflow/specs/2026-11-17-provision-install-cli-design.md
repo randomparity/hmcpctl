@@ -12,10 +12,11 @@ operation engine. Verification is offline.
 Read `--install PATH` once on a new request, using a byte-bounded read and the shared
 `LparInstall` model. A 2 MiB source cap accommodates 16 maximum-length keys even as
 JSON-escaped supplementary characters and a full prepared producer result plus its
-wrapper. Reject unknown fields on the typed install, media and network objects before
-preview or journal admission. Pass the open prepared `producer_result` dictionary to
+wrapper. Reject unknown or repeated member names on the typed install, media, network
+and route objects before preview or journal admission. Pass the open prepared `producer_result` dictionary to
 the shared binder. Boot mode belongs on the command line. File and schema errors
-give short actionable guidance without exposing caller data. The independent 64 KiB limit on the
+give short actionable guidance without exposing caller data. A gateway diagnostic names
+the indexed field and its network requirement without printing the guest address. The independent 64 KiB limit on the
 canonical journal request applies at submission.
 Pass parsed values through the existing request validation and preflight. Prepared
 media needs `--mac`; built media gets its MAC from the created adapter. Existing
