@@ -28,8 +28,9 @@ normal CI interpreter. Record hosted timing samples in the PR without promising 
 ## Consequences
 
 The historical domain-and-unit name now includes two broad CLI integration suites.
-Files stay in place with the same node IDs and fixtures. Explicit missing suites fail
-collection. Future files keep their directory/default owner until a measured change.
+Files stay in place with the same node IDs and fixtures. Renamed suites and future files
+keep their directory/default owner until a measured change. Complementary file/directory
+exclusions avoid pytest normalizing explicit descendants away beneath a parent root.
 A smaller application workload can expose procedure or tooling as the pacer; shared
 runner variability and setup/build/cache differences limit two-before/one-after evidence.
 

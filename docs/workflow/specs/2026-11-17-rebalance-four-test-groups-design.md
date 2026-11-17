@@ -13,7 +13,9 @@ Keep `_group_arguments(group: str, root: Path = Path(".")) -> list[str]` as the 
 Move exactly `tests/app/test_cli_commands.py` and `tests/app/test_cli_e2e.py` from
 `application` to `domain-and-unit`: these are the broad direct-command and HTTPS CLI
 integration suites; feature-specific presentation suites remain with application tests.
-Use one literal tuple, explicit application ignores and explicit domain file arguments.
+Use one literal tuple and complementary exclusions: application ignores these two files;
+domain retains the broad tests root and ignores other immediate application children.
+This avoids overlapping pytest roots; a private domain-argument helper owns that complement.
 Keep the default catch-all, application units, procedure glob and tooling directory.
 No test files, node IDs, fixtures, entry points or public group names move on disk.
 The two existing callers (`just test-group` and normal CI) need no migration.
@@ -46,8 +48,9 @@ worker cap two and per-version configured combined coverage floor. No HMC access
   bounded existing subprocess supervision; truthful hosted timing evidence.
 - Accepted failure classes: hosted resource/cache/noise can prevent a speedup in one leg;
   this change promises measured reporting, not a runtime SLA or representative median.
-  Arbitrary renamed/deleted explicit suites fail pytest collection, which is preferable to
-  silently losing them. New nonmatching files follow their existing directory/default owner.
+  Renamed selected suites follow application/default ownership until the measured cut is
+  updated; the source-review and synthetic membership check hold the current literal cut.
+  New nonmatching files follow their existing directory/default owner.
 - Covered elsewhere: existing runner tests and CI-pipeline tests own supervisor, worker
   admission and four-artifact coverage rejection; unchanged CI owns cancellation guards.
 
@@ -64,12 +67,12 @@ worker cap two and per-version configured combined coverage floor. No HMC access
 ## Validation
 
 One coupled Cast task proves selection and collection together. Update the existing synthetic
-partition test with both selected CLI files and an unmatched future CLI file; assert exact
+partition test with both selected CLI files, an unmatched future CLI file and a nested application file; assert exact
 owners and disjoint union. First run must fail on the old application-only cut.
 Add a repository collection-union regression using five isolated `pytest --collect-only`
 subprocesses with coverage disabled and bounded timeouts. Reject empty/duplicate collections
 and report set differences. This test executes in tooling on each hosted version.
-Deliberately remove an ignore or domain inclusion and require the appropriate test to fail,
+Deliberately remove an application ignore or add the whole app directory to domain exclusions and require the appropriate test to fail,
 then restore. Retain existing unknown/empty-arm, subprocess and coverage failure-path tests.
 Run focused runner plus CI-pipeline tests and static/doc gates before committing. Commit the
 candidate before final `just verify` and pinned all-file prek; refresh SCM metadata as prescribed.
