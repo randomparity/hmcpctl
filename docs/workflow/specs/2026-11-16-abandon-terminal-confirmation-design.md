@@ -67,3 +67,11 @@ No live HMC run is needed or authorized.
 
 Use the plan's focused-test inventory and offline fake HMC. Run the affected arm
 module, static guardrails, `just verify`, and pinned prek. No test snapshots prose.
+
+The offline ST68 physical-route fixture replaces module-local timeout scheduling
+for its in-memory HTTP/SSH providers while retaining deadline calculations and
+physical admission/count/byte assertions. A deterministic loop-clock advance
+replays the full creation route; independent boundary cases preserve timeout
+selection, expiry cancellation and phase/grant clipping outside that fixture.
+This test-only repair addresses the observed CI deadline failure without changing
+production timeouts; the precise CI scheduling delay remains unestablished.
