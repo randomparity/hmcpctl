@@ -14,12 +14,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
-TOOL_PINS = {
-    "detect-secrets==1.5.0",
-    "prek==0.5.10",
-    "ruff==0.17.4",
-    "ty==0.0.99",
-    "zizmor==1.32.0",
+QUALITY_TOOLS = {
+    "detect-secrets",
+    "prek",
+    "ruff",
+    "ty",
+    "zizmor",
 }
 TY_INCLUDE = ["src/hmcpctl", "scripts"]
 RUFF_EXTEND_SELECT = {
@@ -105,31 +105,13 @@ SECRET_FILTERS = [
         "pattern": EVIDENCE_HEX_LINES,
     },
 ]
-ACTION_PINS = {
-    "actions/checkout": (
-        "3d3c42e5aac5ba805825da76410c181273ba90b1",  # pragma: allowlist secret
-        "v7.0.1",
-    ),
-    "astral-sh/setup-uv": (
-        "68559e99cc807c1eb7e9238fd43a15bba460eec2",  # pragma: allowlist secret
-        "v10.3.3",
-    ),
-    "extractions/setup-just": (
-        "53165ef7e734c5c07cb06b3c8e7b647c5aa16db3",  # pragma: allowlist secret
-        "v4",
-    ),
-    "actions/upload-artifact": (
-        "cf430e030ddbb5b0abf93d22962f4752f3646cd9",  # pragma: allowlist secret
-        "v7.0.2",
-    ),
-    "actions/download-artifact": (
-        "9000827ccba6bdab643e8b6fd33ac0654aef8333",  # pragma: allowlist secret
-        "v8.0.2",
-    ),
-    "docker/setup-qemu-action": (
-        "96fe6ef7f33517b61c61be40b68a1882f3264fb8",  # pragma: allowlist secret
-        "v4.2.0",
-    ),
+CI_ACTIONS = {
+    "actions/checkout",
+    "actions/download-artifact",
+    "actions/upload-artifact",
+    "astral-sh/setup-uv",
+    "docker/setup-qemu-action",
+    "extractions/setup-just",
 }
 # The gates this repository must not lose. Not derived on purpose: `static` and
 # .pre-commit-config.yaml agreeing with each other is silent when a gate is deleted
@@ -214,31 +196,48 @@ def _inactive_ppc64le_job(workflow: str) -> tuple[str, str]:
     return active_workflow, body
 
 
-SCORECARD_ACTION_PINS = {
-    "actions/checkout": (
-        "3d3c42e5aac5ba805825da76410c181273ba90b1",  # pragma: allowlist secret
-        "v7.0.1",
-    ),
-    "actions/upload-artifact": (
-        "cf430e030ddbb5b0abf93d22962f4752f3646cd9",  # pragma: allowlist secret
-        "v7.0.2",
-    ),
-    "github/codeql-action/upload-sarif": (
-        "33d7b85da1a04171e211befe2c739303b9a4c066",  # pragma: allowlist secret
-        "v4.39.3",
-    ),
-    "ossf/scorecard-action": (
-        "fa7117db83c52d787ae5a89f350999701505d78e",  # pragma: allowlist secret
-        "v2.5.0",
-    ),
+SCORECARD_ACTIONS = {
+    "actions/checkout",
+    "actions/upload-artifact",
+    "github/codeql-action/upload-sarif",
+    "ossf/scorecard-action",
 }
+
+
+def _assert_quality_tool_pins(requirements: list[str]) -> None:
+    by_name: dict[str, list[str]] = {}
+    for requirement in requirements:
+        name = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", requirement)
+        if name:
+            canonical = re.sub(r"[-_.]+", "-", name[0]).lower()
+            by_name.setdefault(canonical, []).append(requirement)
+    for tool in QUALITY_TOOLS:
+        pins = by_name.get(tool, [])
+        assert len(pins) == 1, (tool, pins)
+        assert re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.!+_-]*",
+            pins[0],
+        ), pins[0]
+
+
+def _assert_action_pins(workflow: str, expected_actions: set[str]) -> None:
+    lines = re.findall(r"^\s*(?:#\s*)?(?:-\s*)?uses:\s*(.*)$", workflow, re.MULTILINE)
+    names = set()
+    for line in lines:
+        pin = re.fullmatch(
+            r"(?P<name>[^\s@]+)@[0-9a-f]{40}  # v[0-9]+(?:\.[0-9]+\.[0-9]+)?",
+            line,
+        )
+        assert pin, line
+        names.add(pin["name"])
+    assert names == expected_actions
 
 
 def test_quality_tools_are_pinned_with_a_strict_type_boundary() -> None:
     with (ROOT / "pyproject.toml").open("rb") as file:
         project = tomllib.load(file)
 
-    assert TOOL_PINS <= set(project["dependency-groups"]["dev"])
+    _assert_quality_tool_pins(project["dependency-groups"]["dev"])
     assert project["tool"]["ty"]["src"]["include"] == TY_INCLUDE
     assert "rules" not in project["tool"]["ty"]
     ruff = project["tool"]["ruff"]
@@ -246,6 +245,76 @@ def test_quality_tools_are_pinned_with_a_strict_type_boundary() -> None:
     assert "ignore" not in ruff["lint"]
     assert set(ruff["lint"]["extend-select"]) == RUFF_EXTEND_SELECT
     assert set(ruff["lint"]["per-file-ignores"]) == RUFF_PER_FILE_IGNORE_MODULES
+
+
+def test_quality_tool_pin_versions_can_change() -> None:
+    _assert_quality_tool_pins([f"{tool}==999.0.0" for tool in QUALITY_TOOLS])
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [None, "ruff", "ruff>=1.0", "ruff==1.*", "ruff==", "ruff[extra]==1.0"],
+)
+def test_quality_tool_pins_reject_missing_or_malformed_requirements(
+    replacement,
+) -> None:
+    requirements = [f"{tool}==999.0.0" for tool in QUALITY_TOOLS - {"ruff"}]
+    if replacement is not None:
+        requirements.append(replacement)
+    with pytest.raises(AssertionError):
+        _assert_quality_tool_pins(requirements)
+
+
+@pytest.mark.parametrize("duplicate", ["ruff==1.0", "ruff>=1.0", "Ruff==1.0"])
+def test_quality_tool_pins_reject_duplicate_names(duplicate: str) -> None:
+    requirements = [f"{tool}==999.0.0" for tool in QUALITY_TOOLS]
+    with pytest.raises(AssertionError):
+        _assert_quality_tool_pins([*requirements, duplicate])
+
+
+@pytest.mark.parametrize("expected_actions", [CI_ACTIONS, SCORECARD_ACTIONS])
+@pytest.mark.parametrize("version", ["v999", "v999.1.2"])
+def test_action_pin_versions_and_shas_can_change(
+    expected_actions, version: str
+) -> None:
+    workflow = "\n".join(
+        f"        uses: {action}@{'a' * 40}  # {version}" for action in expected_actions
+    )
+    _assert_action_pins(workflow, expected_actions)
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "@v1  # v1",
+        "@abc123  # v1",
+        f"@{'g' * 40}  # v1",
+        f"@{'a' * 40}",
+        f"@{'a' * 40}  # 1.2.3",
+        f"@{'a' * 40}  # v1.2",
+        f"@{'a' * 40}  # v1.2.3 trailing",
+    ],
+)
+@pytest.mark.parametrize(
+    "prefix", ["        uses: ", "      - uses: ", "  #       uses: "]
+)
+def test_action_pins_reject_malformed_occurrences(suffix: str, prefix: str) -> None:
+    with pytest.raises(AssertionError):
+        _assert_action_pins(f"{prefix}required/action{suffix}", {"required/action"})
+
+
+@pytest.mark.parametrize("actions", [set(), {"required/action", "extra/action"}])
+def test_action_pins_reject_changed_name_sets(actions: set[str]) -> None:
+    workflow = "\n".join(f"uses: {action}@{'a' * 40}  # v1" for action in actions)
+    with pytest.raises(AssertionError):
+        _assert_action_pins(workflow, {"required/action"})
+
+
+def test_action_pins_check_each_repeated_occurrence() -> None:
+    valid = f"uses: required/action@{'a' * 40}  # v1"
+    _assert_action_pins(f"{valid}\n{valid}", {"required/action"})
+    with pytest.raises(AssertionError):
+        _assert_action_pins(f"{valid}\nuses: required/action@v1", {"required/action"})
 
 
 @pytest.fixture(scope="module")
@@ -656,10 +725,7 @@ def test_github_ci_uses_the_local_gates_with_least_privilege() -> None:
         r"^    timeout-minutes: (\d+)$", _job_body(workflow, "ci"), re.MULTILINE
     ) == ["30"]
     assert "timeout-minutes: 5" in workflow
-    expected_actions = {f"{action}@{sha}" for action, (sha, _) in ACTION_PINS.items()}
-    assert set(re.findall(r"uses:\s+([^\s#]+)", workflow)) == expected_actions
-    for action, (sha, version) in ACTION_PINS.items():
-        assert f"uses: {action}@{sha}  # {version}" in workflow
+    _assert_action_pins(workflow, CI_ACTIONS)
     assert "persist-credentials: false" in workflow
     assert workflow.count('version: "0.13.8"') == 7
     assert 'just-version: "1.58.0"' in workflow
@@ -1205,12 +1271,7 @@ def test_scorecard_workflow_is_bounded_and_uses_least_privilege() -> None:
 def test_scorecard_workflow_pins_actions_and_retains_results() -> None:
     workflow = (ROOT / ".github" / "workflows" / "scorecard.yml").read_text()
 
-    expected_actions = {
-        f"{action}@{sha}" for action, (sha, _) in SCORECARD_ACTION_PINS.items()
-    }
-    assert set(re.findall(r"uses:\s+([^\s#]+)", workflow)) == expected_actions
-    for action, (sha, version) in SCORECARD_ACTION_PINS.items():
-        assert f"uses: {action}@{sha}  # {version}" in workflow
+    _assert_action_pins(workflow, SCORECARD_ACTIONS)
     assert "persist-credentials: false" in workflow
     assert "results_file: results.sarif" in workflow
     assert "results_format: sarif" in workflow
