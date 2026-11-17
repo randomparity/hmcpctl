@@ -505,8 +505,9 @@ async def _teardown_media(
     Returns whether the medium is unmapped, and whether it is gone. A partition is
     never deleted while the medium is mapped: its server adapter would be stranded.
     """
-    await lpar_power._abandon(client, state, run)
-    run.requests = dict.fromkeys(run.requests, True)
+    if not await lpar_power._abandon(client, state, run):
+        run.clean = False
+        return False, False
     media = state.artifacts.provision_boot_media
     name, group = media.get("media_name"), media.get("vg_uuid")
     if not media or run.vios is None:
@@ -613,7 +614,8 @@ async def exercise_provision_boot(client: Client, state: RunState) -> None:
                 "run medium teardown",
                 "FAIL",
                 f"partition {run.p_name!r}, its volume and medium were kept: the medium "
-                "could not be shown unmapped. MANUAL RECOVERY REQUIRED: unmount it with "
+                "could not be shown unmapped. MANUAL RECOVERY REQUIRED: confirm recorded "
+                "operations are terminal before unmounting it with "
                 "hmc_unmount_optical_media, then run live_test_recovery.py for the "
                 "remaining commands.",
             )
