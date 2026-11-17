@@ -372,6 +372,14 @@ locally. Hosted CI no longer supplies native arm64 evidence (ADR 0210).
 Each version runs `UV_NO_SYNC=1 uv run --no-sync prek run --all-files` once
 and, starting at the same time (ADR 0383), four separate test groups:
 `domain-and-unit`, `application`, `procedure-arms` and `tooling`.
+[ADR 0387](../adr/0387-rebalance-four-test-groups.md) assigns the broad CLI integration
+suites `tests/app/test_cli_commands.py` and `tests/app/test_cli_e2e.py` to
+`domain-and-unit`. Other application children and the two application-unit files
+remain in `application`; live-test files and script tests retain their existing groups.
+The selector keeps a catch-all for other tests and complementary application exclusions.
+A paired-runner regression compares actual full-suite node IDs with the disjoint
+four-group union on each normal CI interpreter. The
+[timing evidence](test-group-rebalance-1998.md) records the measured basis and limits.
 `just test-group <group>` retains timings, JUnit and branch data; its success
 means combined coverage is still pending.
 The existing per-version `ci` verification checks require successful producers
