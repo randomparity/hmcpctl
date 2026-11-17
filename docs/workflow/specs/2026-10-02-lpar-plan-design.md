@@ -67,6 +67,10 @@ These are provision's inputs (H1 spec, `hmc_provision_lpar` row) minus `dry_run`
 disk name must be absent on the chosen VIOS. Without it, the named storage must already exist.
 `vg_uuid` without `vios_uuid` is an input error, because a volume group belongs to one VIOS.
 
+Each dedicated PCIe assignment must name the profile provision saves, `default_profile`
+(ADR 0318). A mismatch raises an input error identifying `assignments.dedicated.profile_name`.
+The error omits the rejected value.
+
 `LparInstall` holds the install fields:
 
 - `profile`: `ubuntu-26.04.1` or `rocky-9.8` (ADR 0194);

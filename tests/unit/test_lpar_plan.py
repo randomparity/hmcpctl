@@ -48,6 +48,7 @@ from hmcpctl.operations.lpar.provisioning.media import (
     LparInstall,
 )
 from hmcpctl.ssh.affinity import MinimumAffinityPolicy
+from hmcpctl.ssh.lpar import DEFAULT_PROFILE_NAME
 
 _KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPlanKeyMaterial user@host"
 _URL = "https://iso.example.test/secret-path/installer.iso"
@@ -603,7 +604,7 @@ _CHANGES: list[tuple[str, Any]] = [
         "dedicated assignment",
         lambda: _request(
             assignments=LparPcieAssignments(
-                dedicated=(DedicatedPcieAssignment("default", "21010001"),)
+                dedicated=(DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, "21010001"),)
             )
         ),
     ),
@@ -929,6 +930,27 @@ def test_explicit_plan_selects_targets_and_digest() -> None:
     assert plan.candidates[0].free_memory_mib == 65536
 
 
+def test_dedicated_profile_refused_before_plan_reads() -> None:
+    hmc = FakeHMC(World())
+    admit = Admit()
+    assignments = LparPcieAssignments(
+        dedicated=(
+            DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, "21010001"),
+            DedicatedPcieAssignment(_URL, "21010002"),
+        )
+    )
+
+    with pytest.raises(
+        ValueError, match=r"assignments\.dedicated\.profile_name"
+    ) as error:
+        _plan(hmc, _new_disk(assignments=assignments), admit)
+
+    assert DEFAULT_PROFILE_NAME in str(error.value)
+    assert _URL not in str(error.value)
+    assert hmc.calls == []
+    assert admit.calls == []
+
+
 def test_new_disk_plan_never_reads_storage_detail() -> None:
     hmc = FakeHMC(World())
     admit = Admit()
@@ -964,8 +986,8 @@ def test_install_plan_adds_media_changes_and_unverified() -> None:
                 minimum_affinity_policy=MinimumAffinityPolicy(50, "warn"),
                 assignments=LparPcieAssignments(
                     dedicated=(
-                        DedicatedPcieAssignment("default", "21010001"),
-                        DedicatedPcieAssignment("default", "21010002"),
+                        DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, "21010001"),
+                        DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, "21010002"),
                     )
                 ),
                 affinity_assessment=_assessment(),
@@ -1331,7 +1353,7 @@ def test_assignments_and_affinity_are_unverified() -> None:
     request = _new_disk(
         minimum_affinity_policy=MinimumAffinityPolicy(50, "warn"),
         assignments=LparPcieAssignments(
-            dedicated=(DedicatedPcieAssignment("default", "21010001"),)
+            dedicated=(DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, "21010001"),)
         ),
     )
     text = " ".join(_plan(FakeHMC(World()), request).unverified)
@@ -1430,7 +1452,8 @@ def test_resolution_transport_failure_stops_later_selectors() -> None:
 def test_intended_changes_collapse_assignments_into_one_bounded_change() -> None:
     assignments = LparPcieAssignments(
         dedicated=tuple(
-            DedicatedPcieAssignment("default", f"2101{i:04d}") for i in range(40)
+            DedicatedPcieAssignment(DEFAULT_PROFILE_NAME, f"2101{i:04d}")
+            for i in range(40)
         )
     )
     plan = _plan(FakeHMC(World()), _new_disk(assignments=assignments))
