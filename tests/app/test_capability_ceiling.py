@@ -884,6 +884,69 @@ def test_a_withheld_inspection_tool_is_warned():
     assert any("hmc_effective_permissions" in line and "test" in line for line in lines)
 
 
+@pytest.mark.parametrize("search", [False, True])
+@pytest.mark.parametrize("invoke", [False, True])
+def test_gateway_warning_matches_the_policy_ceiling(search, invoke):
+    tools = [PERMISSIONS_TOOL_NAME, "hmc_list_systems"]
+    if search:
+        tools.append("hmc_search_tools")
+    if invoke:
+        tools.append("hmc_invoke_tool")
+    policy = _policy(
+        [{"tools": tools, "connections": ["<default>"], "targets": "all-targets"}]
+    )
+    served_names = _names(create_mcp(policy))
+    assert served_names == set(tools)
+
+    lines = _warnings(len(served_names), policy)
+
+    if invoke:
+        assert lines == ()
+    else:
+        assert len(lines) == 1
+        assert "access policy 'test' withholds" in lines[0]
+        assert "hmc_invoke_tool" in lines[0]
+        assert "permitted specialist" in lines[0]
+        if search:
+            assert "withholds hmc_invoke_tool," in lines[0]
+            assert "direct calls by name" in lines[0]
+            assert "use hmc_search_tools to find them" in lines[0]
+        else:
+            assert "withholds hmc_search_tools and hmc_invoke_tool," in lines[0]
+            assert "already know permitted specialist names" in lines[0]
+
+
+def test_unrestricted_policy_has_no_startup_warnings():
+    policy = _legacy()
+
+    assert _warnings(len(_names(create_mcp(policy))), policy) == ()
+
+
+@pytest.mark.parametrize("entry_point", ["main_stdio", "main_http"])
+def test_read_only_gateway_warning_reaches_only_startup_stderr(
+    entry_point, monkeypatch, capsys
+):
+    import hmcpctl.server as server_app
+
+    policy = _policy(READ_ONLY_GRANT, name="lab")
+    monkeypatch.setattr(FastMCP, "run", lambda _self, **_kwargs: None)
+
+    getattr(server_app, entry_point)(policy)
+    assert audit_sink._sink().drain(audit_sink._DRAIN_TIMEOUT)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    warnings = [
+        line for line in captured.err.splitlines() if line.startswith("warning:")
+    ]
+    assert warnings == [
+        (
+            "warning: access policy 'lab' withholds hmc_invoke_tool, so permitted "
+            "specialists require direct calls by name; use hmc_search_tools to find them."
+        )
+    ]
+
+
 def test_an_authored_but_unselected_policy_file_is_warned():
     """R19, retired by ADR 0041: a file can no longer be authored-but-unselected.
 
