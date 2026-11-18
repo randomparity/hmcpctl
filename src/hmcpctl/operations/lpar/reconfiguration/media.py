@@ -2,15 +2,16 @@
 
 Both act only on what this partition's provision recorded in the operation ledger: the
 ``installer_media`` entry names the medium to unmap, the ``virtual_disk`` entry the root
-disk to boot. Planning reads the ledger and the HMC once and the plan records the result,
-so a replay never re-reads the ledger. Messages name partitions by UUID only.
+disk to boot. The worker executes the recorded plan. Detach replay compares its recorded
+identity with any remaining local provision evidence before returning the journal.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING, Any, TypedDict
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from hmcpctl.operations.lpar.provisioning.media import device_path
 from hmcpctl.operations.lpar.workflow_contract import (
@@ -20,6 +21,8 @@ from hmcpctl.operations.lpar.workflow_contract import (
 )
 from hmcpctl.operations.storage.optical import unmount_optical_media
 from hmcpctl.operations.storage.resources import storage_mapping
+from hmcpctl.resource_identity import is_uuid, resolve_vios_uuid
+from hmcpctl.ssh.vios_optical import require_media_name
 
 from ....client.core import HMCClient
 from ....errors import HMCError, HMCTLSFingerprintError, LparUpdateError
@@ -31,7 +34,7 @@ from ...logical.engine import (
     OperationContext,
     OperationFailed,
 )
-from ...logical.models import EffectRecord
+from ...logical.models import EffectRecord, OperationRecord
 from ..boot_order import read_lpar_boot_order, set_lpar_boot_order
 
 if TYPE_CHECKING:
@@ -75,36 +78,139 @@ def require_detachable(view: PartitionView, lpar_uuid: str) -> None:
         )
 
 
+class MissingProvisionEvidence(OperationFailed):
+    """No row exists for the partition or its resource."""
+
+
+@dataclass(frozen=True)
+class InstallerMedia:
+    system_uuid: str
+    lpar_uuid: str
+    vios_uuid: str
+    media_name: str
+
+    def __post_init__(self) -> None:
+        if not all(
+            isinstance(value, str) and is_uuid(value)
+            for value in (
+                self.system_uuid,
+                self.lpar_uuid,
+                self.vios_uuid,
+            )
+        ):
+            raise ValueError("invalid installer-media UUID")
+        require_media_name(self.media_name)
+
+    @classmethod
+    def from_ledger(cls, system_uuid: str, lpar_uuid: str) -> InstallerMedia:
+        media = provision_owned(system_uuid, lpar_uuid, MEDIA_LEDGER)
+        return cls(system_uuid, lpar_uuid, media["vios_uuid"], media["media_name"])
+
+    async def verify_vios(self, hmc: HMCClient) -> None:
+        """Require the recorded VIOS to be visible on the bound managed system."""
+        try:
+            await resolve_vios_uuid(
+                hmc, self.vios_uuid, system_name_or_uuid=self.system_uuid
+            )
+        except (HMCError, ValueError) as exc:
+            raise OperationFailed(
+                "cannot verify the installer-media VIOS on its managed system"
+            ) from exc
+
+    def effect(self) -> EffectRecord:
+        return EffectRecord(
+            "admitted_media",
+            "lpar.installer_media_binding",
+            f"lpar:{self.lpar_uuid}",
+            "applied",
+            asdict(self),
+        )
+
+    @property
+    def partition(self) -> tuple[str, str]:
+        return self.system_uuid, self.lpar_uuid
+
+    def check_plan(self, plan: ReconfigurationPlan) -> None:
+        media = plan.get("media")
+        if (plan["system_uuid"], plan["lpar_uuid"]) != self.partition or (
+            media is not None
+            and media != {"vios_uuid": self.vios_uuid, "media_name": self.media_name}
+        ):
+            raise OperationFailed(
+                "the reconfiguration plan differs from the authorized installer media"
+            )
+
+
+def recorded_media(
+    record: OperationRecord, *, plan_key: str, plan_kind: str
+) -> tuple[tuple[str, str] | None, InstallerMedia | None]:
+    """Reconcile the immutable admission effect, guard and applied historical plan."""
+    effects = {effect.key: effect for effect in record.effects}
+    admitted = effects.get("admitted_media")
+    binding = None
+    if admitted is not None:
+        binding = InstallerMedia(**(admitted.identity or {}))
+        if admitted != binding.effect():
+            raise OperationFailed("malformed recorded installer-media admission")
+    partition = binding.partition if binding is not None else None
+    if record.system_uuid is not None or record.partition_uuid is not None:
+        guard = record.system_uuid, record.partition_uuid
+        if not all(isinstance(value, str) and is_uuid(value) for value in guard):
+            raise OperationFailed("malformed recorded partition guard")
+        if partition is not None and partition != guard:
+            raise OperationFailed(
+                "the recorded guard differs from the authorized partition"
+            )
+        partition = cast(tuple[str, str], guard)
+    effect = effects.get(plan_key)
+    if effect is not None and effect.status == "applied":
+        plan = cast("ReconfigurationPlan", effect.identity or {})
+        if (
+            effect.kind != plan_kind
+            or record.partition_uuid is None
+            or (plan["system_uuid"], plan["lpar_uuid"]) != partition
+            or effect.target != f"lpar:{record.partition_uuid}"
+        ):
+            raise OperationFailed("the recorded plan differs from the partition guard")
+        media = plan.get("media")
+        if binding is None and media is not None:
+            binding = InstallerMedia(*partition, **media)
+        if binding is not None:
+            binding.check_plan(plan)
+    return partition, binding
+
+
 def provision_owned(system_uuid: str, lpar_uuid: str, kind: str) -> dict[str, Any]:
     """The *kind* identity this partition's provision recorded (ADR 0321 Decision 1)."""
     with store.read_session() as conn:
         if conn is None:
-            raise OperationFailed(
+            raise MissingProvisionEvidence(
                 f"no operation store exists, so no provision owns LPAR {lpar_uuid}"
             )
-        partitions = store.ledger_entries(conn, PARTITION_LEDGER, system_uuid)
-        entries = store.ledger_entries(conn, kind, system_uuid)
-    owners = {
-        op for op, part, _ in partitions if (part or "").lower() == lpar_uuid.lower()
-    }
-    if len(owners) != 1:
-        raise OperationFailed(
-            f"LPAR {lpar_uuid} has {len(owners)} provision records in the operation "
+        conn.execute("BEGIN")
+        owner_count, hits = store.owned_partition_ledger_entries(
+            conn, system_uuid, lpar_uuid, PARTITION_LEDGER, kind
+        )
+    if owner_count != 1:
+        error = OperationFailed if owner_count else MissingProvisionEvidence
+        count = "multiple" if owner_count else "0"
+        raise error(
+            f"LPAR {lpar_uuid} has {count} provision records in the operation "
             "ledger, not one; only a partition hmcpctl provisioned can use this field"
         )
-    (owner,) = owners
-    hits = [
-        identity
-        for op, part, identity in entries
-        if op == owner and (part or "").lower() == lpar_uuid.lower()
-    ]
-    usable = len(hits) == 1 and all(
-        isinstance(hits[0].get(field), str) and hits[0][field]
-        for field in _FIELDS[kind]
+    usable = (
+        len(hits) == 1
+        and isinstance(hits[0], dict)
+        and all(
+            isinstance(hits[0].get(field), str) and hits[0][field]
+            for field in _FIELDS[kind]
+        )
     )
     if not usable:
-        raise OperationFailed(
-            f"the provision of LPAR {lpar_uuid} recorded {len(hits)} {kind} ledger "
+        error = OperationFailed if hits else MissingProvisionEvidence
+        count = "multiple" if len(hits) > 1 else str(len(hits))
+        raise error(
+            f"the provision of LPAR {lpar_uuid} recorded {count} {kind} ledger "
             "entries, not one usable entry; nothing was written"
         )
     return {field: hits[0][field] for field in _FIELDS[kind]}
@@ -159,10 +265,21 @@ async def _pending(hmc: HMCClient, lpar_uuid: str, system_uuid: str) -> str | No
 
 
 async def plan_media(
-    hmc: HMCClient, system_uuid: str, lpar_uuid: str
+    hmc: HMCClient,
+    system_uuid: str,
+    lpar_uuid: str,
+    *,
+    authorized_media: InstallerMedia | None = None,
 ) -> tuple[MediaPlan | None, dict[str, Any] | None]:
     """The media to unmap and its change, or ``(None, None)`` when already unmapped."""
-    media = provision_owned(system_uuid, lpar_uuid, MEDIA_LEDGER)
+    media = (
+        provision_owned(system_uuid, lpar_uuid, MEDIA_LEDGER)
+        if authorized_media is None
+        else {
+            "vios_uuid": authorized_media.vios_uuid,
+            "media_name": authorized_media.media_name,
+        }
+    )
     try:
         found = await _media_paths(
             hmc, media["vios_uuid"], lpar_uuid, media["media_name"]

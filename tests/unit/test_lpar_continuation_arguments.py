@@ -53,9 +53,12 @@ def test_each_adapter_keeps_one_scoped_continuation_lookup(
 
     def read(agent, request, tool):
         calls.append((agent, request, tool))
+        if adapter is reconfigure and recorded is not None:
+            return "original-id", recorded
         return recorded
 
-    monkeypatch.setattr(adapter.engine, "recorded_arguments", read)
+    reader = "recorded_request" if adapter is reconfigure else "recorded_arguments"
+    monkeypatch.setattr(adapter.engine, reader, read)
     given = {"target": "supplied"}
     if recorded is None:
         with pytest.raises(OperationRefused, match="^not_found:"):
@@ -65,6 +68,9 @@ def test_each_adapter_keeps_one_scoped_continuation_lookup(
         if adapter is provision:
             result, exists = result
             assert exists is True
+        elif adapter is reconfigure:
+            result, operation_id = result
+            assert operation_id == "original-id"
         assert result == given
     assert calls == [("agent", "request", tool)]
 
@@ -91,7 +97,12 @@ def test_new_power_and_reconfiguration_keep_defaults_without_store_reads(
         pytest.fail("a new power/reconfiguration request must not read its record")
 
     monkeypatch.setattr(adapter.engine, "recorded_arguments", forbidden)
-    assert adapter._effective(given, "agent", "request", "none") == {
+    monkeypatch.setattr(adapter.engine, "recorded_request", forbidden)
+    result = adapter._effective(given, "agent", "request", "none")
+    if adapter is reconfigure:
+        result, operation_id = result
+        assert operation_id is None
+    assert result == {
         **defaults,
         **given,
     }

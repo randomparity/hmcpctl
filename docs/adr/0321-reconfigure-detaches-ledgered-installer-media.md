@@ -2,6 +2,9 @@
 
 ## Status
 
+> Decision 6’s all-targets requirement for installer-media detach is superseded by
+> [ADR 0392](0392-authorize-detach-on-the-provisioned-vios.md) (2026-11-17).
+
 Accepted (2026-11-03), issue #1844 (piece 1 of #1228). This record extends ADR 0314's
 `hmc_reconfigure_lpar` with the two patch fields that ADR 0191 Decision 7 assigns to reconfigure.
 It consumes the `installer_media` ledger entry that ADR 0319 (#1842) has provision write.

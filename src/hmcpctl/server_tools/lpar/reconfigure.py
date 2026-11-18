@@ -8,24 +8,33 @@ gates, so it is built by a factory, as ``hmc_power_lpar`` is.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any, Literal
 
 from fastmcp import FastMCP
 
+from ..._app import run_sync
+from ...authorization.access_policy import AccessPolicy
+from ...authorization.dispatch_scope import dispatch_authorizer
 from ...authorization.target_scope import TargetScopeError
 from ...config import build_config
+from ...errors import HMCError
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
+from ...operations.logical.holds import HoldRefused
 from ...operations.logical.models import OperationRecord
 from ...operations.logical.store import connection_label
 from ...operations.lpar.reconfiguration.core import (
-    RECONFIGURE_CLASSIFIERS,
     ReconfigurePatch,
     delegated_tools,
     disk_vios_uuids,
+    installer_media_admission,
+    media_classifiers,
     reconfigure_body,
 )
+from ...operations.lpar.reconfiguration.media import InstallerMedia
 from ...tool_registry import (
     Authorize,
     TargetSelector,
@@ -65,20 +74,80 @@ def _given(**values: Any) -> dict[str, Any]:
 
 def _effective(
     given: dict[str, Any], agent_id: str, request_id: str, continuation: str
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str | None]:
     """The arguments to authorize: the call's, over the record's on a continuation."""
     if continuation == "none":
         missing = [name for name in _REQUIRED if name not in given]
         if missing:
             raise ValueError(f"a new operation needs {', '.join(missing)}")
-        return {"allow_disruption": False, "exclusive_writer_window": False, **given}
-    recorded = engine.recorded_arguments(agent_id, request_id, RECONFIGURE_TOOL_NAME)
-    return continuation_arguments(recorded, given, request_id)
+        return {
+            "allow_disruption": False,
+            "exclusive_writer_window": False,
+            **given,
+        }, None
+    record = engine.recorded_request(agent_id, request_id, RECONFIGURE_TOOL_NAME)
+    operation_id, recorded = record if record is not None else (None, None)
+    return continuation_arguments(recorded, given, request_id), operation_id
+
+
+def _authorize_media(
+    policy: AccessPolicy,
+    security: Mapping[str, ToolSecurity],
+    request: OperationRequest,
+    continuation: str,
+    by_kind: Mapping[str, str],
+    profile: str | None,
+) -> tuple[InstallerMedia | None, engine.Admission]:
+    """Resolve inferred targets inside the specialist's connection-eligible gate."""
+    resolved: tuple[InstallerMedia | None, engine.Admission] | None = None
+
+    def targets(_name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        nonlocal resolved
+        try:
+            resolved = run_sync(
+                lambda: installer_media_admission(
+                    request, continuation, by_kind["managed_system"], by_kind["lpar"]
+                )
+            )
+        except (
+            HMCError,
+            HoldRefused,
+            engine.OperationFailed,
+            ValueError,
+            LookupError,
+            TypeError,
+            OSError,
+            sqlite3.Error,
+        ):
+            raise TargetScopeError from None
+        binding, _ = resolved
+        return {
+            **arguments,
+            "vios_name_or_uuid": None if binding is None else binding.vios_uuid,
+        }
+
+    try:
+        authorize_as(
+            security,
+            dispatch_authorizer(
+                policy, resolve_targets=targets, expected_connection=request.connection
+            ),
+            UNMOUNT_TOOL_NAME,
+            by_kind,
+            profile,
+        )
+    except TargetScopeError:
+        raise TargetScopeError(
+            f"{UNMOUNT_TOOL_NAME} cannot verify this request's installer-media target; "
+            "check the original request, connection and provision ledger"
+        ) from None
+    assert resolved is not None  # The dispatch gate resolved the specialist's targets.
+    return resolved
 
 
 def reconfigure_handler(
     tool_security: Mapping[str, ToolSecurity],
-    permits: Callable[[str], bool],
+    policy: AccessPolicy,
     authorize: Authorize,
 ) -> Callable[..., OperationRecord]:
     """The unwrapped ``hmc_reconfigure_lpar`` handler bound to the served gates."""
@@ -98,8 +167,9 @@ def reconfigure_handler(
         """Change an LPAR's processors, memory, name, boot, virtual disks or network
         adapters, or detach its installer media.
 
-        Durable (ADR 0190): the call returns within ``wait_seconds`` and the work
-        continues; poll ``hmc_operation_status`` with ``request_id``. Every change is
+        After authorization and admission, the call waits up to ``wait_seconds`` for
+        the worker. A new detach or executable resume first checks the target on the
+        HMC. Poll ``hmc_operation_status`` with ``request_id`` for ongoing work. Every change is
         planned before any write. Each change in ``result.changes`` is ``live`` (applied
         to the running partition by DLPAR and saved in its default profile),
         ``profile`` (the partition is not activated; its profile and current
@@ -139,8 +209,10 @@ def reconfigure_handler(
         pending boot order to its root disk only (``next_activation``: the next
         activation uses it) and needs ``hmc_set_lpar_boot_order``.
         ``installer_media: detach`` removes the mapping of the installer media provision
-        mounted, keeping the medium, and needs ``hmc_unmount_optical_media`` granted for
-        all targets and ``exclusive_writer_window=true``. Detach is refused unless the
+        mounted and keeps the medium. It needs ``exclusive_writer_window=true`` and one
+        ``hmc_unmount_optical_media`` grant covering the selected connection, original
+        system and LPAR selectors, and the provision-ledger VIOS UUID. An all-targets
+        grant also permits detach on its eligible connection. Detach is refused unless the
         partition is not activated or RMC is active: power it off, then detach. Media
         already detached or a boot order already set plans no change.
 
@@ -170,7 +242,7 @@ def reconfigure_handler(
                 memory_mib, installer_media, disks or networks.
             continuation: none, resume or abandon; a continuation needs only
                 request_id, and any other value given must match the operation's.
-            wait_seconds: Seconds to wait before returning, 0-600.
+            wait_seconds: Seconds to wait for the worker after admission, 0-600.
             profile: HMC connection profile.
         """
         given = _given(
@@ -182,7 +254,9 @@ def reconfigure_handler(
         )
         config = build_config(profile=profile)
         agent_id = config.agent_id or "hmcpctl"
-        effective = _effective(given, agent_id, request_id, continuation)
+        effective, original_operation_id = _effective(
+            given, agent_id, request_id, continuation
+        )
         model = ReconfigurePatch.model_validate(effective["patch"])
         if model.needs_window and effective["exclusive_writer_window"] is not True:
             raise PermissionError(
@@ -196,30 +270,6 @@ def reconfigure_handler(
             "lpar": effective["lpar_name_or_uuid"],
             "managed_system": effective["system_name_or_uuid"],
         }
-        for delegated in delegated_tools(model):
-            if not permits(delegated):
-                raise PermissionError(
-                    f"{delegated} is not permitted by this server's access policy; "
-                    f"{RECONFIGURE_TOOL_NAME} needs it for this patch (ADR 0189)"
-                )
-            for vios in disk_vios_uuids(model, delegated) or (None,):
-                try:
-                    authorize_as(
-                        tool_security,
-                        authorize,
-                        delegated,
-                        by_kind if vios is None else {**by_kind, "vios": vios},
-                        profile,
-                    )
-                except TargetScopeError as exc:
-                    if delegated != UNMOUNT_TOOL_NAME:
-                        raise
-                    # The generic denial asks for a vios argument this tool does not take.
-                    raise TargetScopeError(
-                        f"installer_media needs {UNMOUNT_TOOL_NAME} granted for all "
-                        "targets: the VIOS is known only from the operation ledger, after "
-                        "this check (ADR 0321 Decision 6)"
-                    ) from exc
         request = OperationRequest(
             RECONFIGURE_TOOL_NAME,
             agent_id,
@@ -227,20 +277,58 @@ def reconfigure_handler(
             config.host,
             request_id,
             effective if continuation == "none" else given,
+            original_operation_id=original_operation_id,
         )
-        body = reconfigure_body(
-            model,
-            effective["allow_disruption"],
-            effective["system_name_or_uuid"],
-            effective["lpar_name_or_uuid"],
+        specialist_gate = (
+            authorize
+            if model.installer_media is None
+            else dispatch_authorizer(policy, expected_connection=request.connection)
         )
-        return engine.submit(
-            request,
-            body,
-            classifiers=RECONFIGURE_CLASSIFIERS,
-            continuation=continuation,
-            wait_seconds=wait_seconds,
-        )
+        for delegated in delegated_tools(model):
+            if not policy.permits_tool(delegated):
+                raise PermissionError(
+                    f"{delegated} is not permitted by this server's access policy; "
+                    f"{RECONFIGURE_TOOL_NAME} needs it for this patch (ADR 0189)"
+                )
+            if delegated == UNMOUNT_TOOL_NAME:
+                continue
+            for vios in disk_vios_uuids(model, delegated) or (None,):
+                authorize_as(
+                    tool_security,
+                    specialist_gate,
+                    delegated,
+                    by_kind if vios is None else {**by_kind, "vios": vios},
+                    profile,
+                )
+
+        def submit_authorized(candidate: OperationRequest) -> OperationRecord:
+            binding = admission = None
+            if model.installer_media is not None:
+                binding, admission = _authorize_media(
+                    policy, tool_security, candidate, continuation, by_kind, profile
+                )
+            body = reconfigure_body(
+                model,
+                effective["allow_disruption"],
+                effective["system_name_or_uuid"],
+                effective["lpar_name_or_uuid"],
+                authorized_media=binding,
+            )
+            return engine.submit(
+                candidate,
+                body,
+                classifiers=media_classifiers(binding),
+                admission=admission,
+                continuation=continuation,
+                wait_seconds=wait_seconds,
+            )
+
+        try:
+            return submit_authorized(request)
+        except engine.ConcurrentAdmission as peer:
+            return submit_authorized(
+                replace(request, original_operation_id=peer.operation_id)
+            )
 
     return hmc_reconfigure_lpar
 
@@ -249,13 +337,13 @@ def register_reconfigure_tool(
     mcp: FastMCP,
     tool_security: Mapping[str, ToolSecurity],
     *,
-    permits: Callable[[str], bool],
+    policy: AccessPolicy,
     authorize: Authorize,
 ) -> None:
     """Register ``hmc_reconfigure_lpar`` on *mcp* when the ceiling admits it."""
-    if not permits(RECONFIGURE_TOOL_NAME):
+    if not policy.permits_tool(RECONFIGURE_TOOL_NAME):
         return
-    handler = reconfigure_handler(tool_security, permits, authorize)
+    handler = reconfigure_handler(tool_security, policy, authorize)
     validate_security(RECONFIGURE_SECURITY, handler)
     mcp.tool(
         authorized(RECONFIGURE_TOOL_NAME, RECONFIGURE_SECURITY, handler, authorize),
