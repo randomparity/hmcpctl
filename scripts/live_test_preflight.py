@@ -1172,7 +1172,7 @@ _ARM_TEMPLATE_FIELDS = {
     "sriov": ("lp3_name", "sriov_profile_name"),
     "storage": _STORAGE_FIELDS,
     "vmedia": (*_STORAGE_FIELDS, "iso_path", "iso_media_name", "iso_advertised_host"),
-    "vmedia-media-change": _STORAGE_FIELDS,
+    "vmedia-media-change": (*_STORAGE_FIELDS, "iso_media_name"),
     "vg-if-match": ("lp3_name",),  # ST0 captures this partition's baseline.
     "vios-backup": ("lp3_name",),
     "partition-profiles": ("protected_lpar_names",),

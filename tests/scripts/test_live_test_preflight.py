@@ -1819,3 +1819,27 @@ def test_unused_dedicated_leg_allows_its_template_prefix(
     _credentials(monkeypatch)
     monkeypatch.setenv("HMC_AUTHORIZE_POWER_OPERATIONS", str(power).lower())
     assert preflight.main(["--group", *selection, "--skip-hardware"]) == 0
+
+
+def test_media_change_checks_teardown_media_name_before_hardware(
+    workspace, monkeypatch, capsys
+):
+    template = live_config.LiveTestConfig()
+    settings = {
+        "LIVE_TEST_ISO_MEDIA_NAME": template.iso_media_name,
+        "LIVE_TEST_ISO_PATH": template.iso_path,
+        "LIVE_TEST_ISO_ADVERTISED_HOST": template.iso_advertised_host,
+    }
+    (workspace / ".env").write_text(_env_text(**settings))
+    _credentials(monkeypatch)
+    monkeypatch.setattr(
+        preflight, "_probe_environment", lambda *_: pytest.fail("envelope probe")
+    )
+    assert preflight.main(["--group", "vmedia-media-change"]) == 1
+    assert set(re.findall(r"LIVE_TEST_[A-Z_]+", capsys.readouterr().out)) == {
+        "LIVE_TEST_ISO_MEDIA_NAME"
+    }
+
+    settings["LIVE_TEST_ISO_MEDIA_NAME"] = "lab.iso"
+    (workspace / ".env").write_text(_env_text(**settings))
+    assert preflight.main(["--group", "vmedia-media-change", "--skip-hardware"]) == 0
