@@ -2171,6 +2171,53 @@ def test_enums_are_derived_from_the_captured_schema() -> None:
     assert enums["elements"] == {"DesignatedBootMode": "BootMode.Enum"}
 
 
+def test_schema_enums_resolve_conflicts_independently_of_record_order() -> None:
+    extra = """<xsd:element name="DesignatedBootMode" type="xsd:string"/>
+      <xsd:element name="Child" type="BootMode.Enum"/>
+      <xsd:element name="Local" type="self:BootMode.Enum"/>
+      <xsd:element name="Foreign" type="other:BootMode.Enum"/>
+      <xsd:annotation><xsd:appinfo>
+        <xsd:element name="Example" type="BootMode.Enum"/>
+      </xsd:appinfo></xsd:annotation>
+      <xsd:element name="Parent"><xsd:complexType><xsd:sequence>
+        <xsd:element name="Nested"><xsd:complexType><xsd:simpleContent>
+          <xsd:extension base="BootMode.Enum"/>
+        </xsd:simpleContent></xsd:complexType></xsd:element>
+      </xsd:sequence></xsd:complexType></xsd:element>"""
+    wrapper = (
+        '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"'
+        ' xmlns:self="urn:synthetic:local" xmlns:other="urn:synthetic:other"'
+        ' targetNamespace="urn:synthetic:local">'
+    )
+    a = _rest("/schema/A.xsd", ENUMS_XSD)
+    b = _rest("/schema/B.xsd", wrapper + extra + "</xsd:schema>")
+    expected = export.derive_enums([a, b], "vX")
+    assert expected["elements"] == {"Child": "BootMode.Enum", "Nested": "BootMode.Enum"}
+    assert export.derive_enums([b, a], "vX") == expected
+
+    conflicting = _rest("/schema/C.xsd", ENUMS_XSD.replace('"Normal"', '"Changed"'))
+    result = export.derive_enums([a, b, conflicting], "vX")
+    assert "BootMode.Enum" not in result["types"]
+    assert not result["elements"]
+    assert result == export.derive_enums([conflicting, b, a], "vX")
+
+
+def test_schema_enums_keep_equivalent_declarations_and_skip_empty_200() -> None:
+    a = _rest("/schema/A.xsd", ENUMS_XSD)
+    b = _rest(
+        "/schema/B.xsd",
+        ENUMS_XSD.replace('"Normal"', '"swap"')
+        .replace('"Unknown"', '"Normal"')
+        .replace('"swap"', '"Unknown"'),
+    )
+    empty = _rest("/schema/Empty.xsd", "")
+    forward = export.derive_enums([a, b, empty], "vX")
+    assert set(forward["types"]["BootMode.Enum"]) == {"Normal", "Unknown"}
+    assert forward == export.derive_enums([empty, b, a], "vX")
+    with pytest.raises(ValueError, match="no .*enum types"):
+        export.derive_enums([empty], "vX")
+
+
 @pytest.mark.parametrize("body", ["<root>ordinary</root>", ENUMS_XSD])
 def test_xml_validation_accepts_ordinary_documents(body: str) -> None:
     assert export._parses(body)

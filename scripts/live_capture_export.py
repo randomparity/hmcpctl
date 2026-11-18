@@ -30,9 +30,10 @@ import re
 import shlex
 import sys
 import urllib.parse
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
+from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
@@ -1498,42 +1499,82 @@ def build_vocabulary(
 _XSD = "{http://www.w3.org/2001/XMLSchema}"
 
 
-def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, Any]:
-    """Enum types from the captured `Enumerations.xsd`, bindings from any captured XSD."""
-    types: dict[str, list[str]] = {}
-    elements: dict[str, str] = {}
+def _schema_roots(
+    corpus: Sequence[dict[str, Any]], *, indexed: bool
+) -> Iterator[Element]:
     for index, record in enumerate(corpus, 1):
-        body = record.get("body") or ""
         if (
             record.get("kind") != "rest"
             or record.get("status") != 200
             or not _is_schema(record)
         ):
             continue
+        body = record.get("body") or b""
+        if not body:
+            continue
         try:
-            root = ET.fromstring(body.encode("utf-8"))
-        except (ET.ParseError, DefusedXmlException):
-            raise ExportError(f"schema record {index} is not safe, valid XML") from None
-        for simple in root.iter(f"{_XSD}simpleType"):
-            name = simple.get("name") or ""
-            if name.endswith(".Enum"):
-                types[name] = [
-                    e.get("value") or "" for e in simple.iter(f"{_XSD}enumeration")
-                ]
-        for element in root.iter(f"{_XSD}element"):
-            name = element.get("name")
-            bound = element.get("type") or next(
-                (ext.get("base") for ext in element.iter(f"{_XSD}extension")), None
+            root = ET.fromstring(
+                body.encode("utf-8") if isinstance(body, str) else body, forbid_dtd=True
             )
-            if name and bound and bound.endswith(".Enum"):
-                elements[name] = bound
-    if not types:
-        raise ValueError("no Enumerations.xsd record with enum types in the corpus")
-    return {
-        "firmware": firmware,
-        "types": dict(sorted(types.items())),
-        "elements": dict(sorted(elements.items())),
+        except (ET.ParseError, DefusedXmlException, LookupError, ValueError):
+            raise ExportError(f"schema record {index} is not safe, valid XML") from None
+        if root.tag == f"{_XSD}schema":
+            yield root
+        elif indexed:
+            raise ExportError(f"schema record {index} does not contain an XSD schema")
+
+
+def _element_bindings(root: Element) -> Iterator[tuple[str, str]]:
+    nodes = [root]
+    while nodes:
+        node = nodes.pop()
+        if not node.tag.startswith(_XSD) or node.tag == f"{_XSD}annotation":
+            continue
+        nodes.extend(node)
+        if node.tag == f"{_XSD}element" and (name := node.get("name")):
+            extension = node.find(
+                f"{_XSD}complexType/{_XSD}simpleContent/{_XSD}extension"
+            )
+            yield (
+                name,
+                node.get("type")
+                or (extension.get("base", "") if extension is not None else ""),
+            )
+
+
+def derive_enums(
+    corpus: Sequence[dict[str, Any]], firmware: str, *, indexed: bool = False
+) -> dict[str, Any]:
+    """Collect declarations before resolving names used by the flat vocabulary."""
+    definitions: dict[str, set[tuple[str, ...]]] = collections.defaultdict(set)
+    targets: dict[str, set[str]] = collections.defaultdict(set)
+    for root in _schema_roots(corpus, indexed=indexed):
+        for simple in root.findall(f"{_XSD}simpleType"):
+            name = simple.get("name", "")
+            if name.endswith(".Enum"):
+                values = tuple(
+                    value
+                    for e in simple.findall(f"{_XSD}restriction/{_XSD}enumeration")
+                    if (value := e.get("value")) is not None
+                )
+                definitions[name].add(values)
+        for element, target in _element_bindings(root):
+            targets[element].add(target)
+    types = {
+        name: list(min(variants))
+        for name, variants in sorted(definitions.items())
+        if () not in variants and len({frozenset(values) for values in variants}) == 1
     }
+    if not types:
+        raise ValueError(
+            "no Enumerations.xsd record with unambiguous enum types in the corpus"
+        )
+    elements = {
+        name: target
+        for name, candidates in sorted(targets.items())
+        if len(candidates) == 1 and (target := next(iter(candidates))) in types
+    }
+    return {"firmware": firmware, "types": types, "elements": elements}
 
 
 # --- entry point -------------------------------------------------------------
