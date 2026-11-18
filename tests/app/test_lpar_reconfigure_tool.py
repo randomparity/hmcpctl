@@ -390,6 +390,36 @@ def test_journal_only_refuses_conflict_and_uses_remaining_local_evidence(
     assert media.mounted == [MEDIA]
 
 
+def test_scoped_historical_plan_supplies_identity_for_replay_and_resume(media):
+    _provisioned()
+    app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
+    mixed = {**DETACH, "patch": {"name": "web2", "installer_media": "detach"}}
+    media.unmount_error = HMCError("synthetic unavailable medium", 500)
+    first = _call(app, mixed)
+    assert first["state"] == "paused" and first["partition_uuid"] == LPAR
+    with store.session() as conn, store.write_transaction(conn):
+        effects = store.load_effects(conn, first["operation_id"])
+        assert effects["plan"].status == "applied"
+        conn.execute(
+            "DELETE FROM effects WHERE operation_id=? AND key='admitted_media'",
+            (first["operation_id"],),
+        )
+
+    _replace_ledger_media("different.iso")
+    with pytest.raises(ToolError, match="check the original request"):
+        _call(app, {"continuation": "resume"})
+    _replace_ledger_media(None)
+    assert _call(app, mixed)["operation_id"] == first["operation_id"]
+    assert media.mounted == [MEDIA]
+    _replace_ledger_media(MEDIA)
+    media.unmount_error = None
+    done = _call(app, {"continuation": "resume"})
+    assert (
+        done["operation_id"] == first["operation_id"] and done["outcome"] == "completed"
+    )
+    assert media.mounted == []
+
+
 def test_historical_journal_with_no_evidence_requires_all_targets(media, monkeypatch):
     _provisioned()
     scoped = _app(_grant(TOOL), _grant(UNMOUNT, targets=_targets()))
