@@ -2,8 +2,8 @@
 
 Both act only on what this partition's provision recorded in the operation ledger: the
 ``installer_media`` entry names the medium to unmap, the ``virtual_disk`` entry the root
-disk to boot. Planning reads the ledger and the HMC once and the plan records the result,
-so a replay never re-reads the ledger. Messages name partitions by UUID only.
+disk to boot. The worker executes the recorded plan. Detach replay compares its recorded
+identity with any remaining local provision evidence before returning the journal.
 """
 
 from __future__ import annotations
