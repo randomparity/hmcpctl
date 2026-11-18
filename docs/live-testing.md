@@ -31,6 +31,13 @@ processing units, `LIVE_TEST_SCRATCH_CREATE_DESIRED_PROCS` and
 the create sends them explicitly, and the HMC refuses too few units per
 virtual processor.
 
+For media-serving selections, the runner’s in-process MCP application downloads
+the ISO, then uploads the file to the HMC. Set both `LIVE_TEST_ISO_BIND_HOST`
+and `LIVE_TEST_ISO_ADVERTISED_HOST` to `127.0.0.1` to keep the HTTP transfer
+on the runner. To use another interface, bind to its specific local IPv4 address
+or a hostname resolving to it, and advertise a host the downloader can reach.
+Preflight and listener startup both refuse wildcard binds.
+
 round2's provisioning subtasks (13 and 14) need two settings a fresh lab cannot
 supply from its own partitions:
 
@@ -923,8 +930,8 @@ powers a partition on and puts a guest on the network.
   ISO's own SHA-256 and size. The launcher's network comes from that result, so its address
   must be one the operator assigned and whose usual owner stays powered off: the arm SKIPs
   unless `LIVE_TEST_LPAR_NAME` reads Not Activated. The launcher embeds that network, and the
-  runner's ISO server listens on `LIVE_TEST_ISO_BIND_HOST` (default all interfaces). Bind it to
-  the interface the HMC reaches, so other hosts cannot download the launcher during the window.
+  runner serves it on the specific local address selected by `LIVE_TEST_ISO_BIND_HOST`.
+  Hosts that can reach this address can download the launcher during the window.
 - **Run.** The partition gets 6,656 MiB, the configured MAC and the producer's network, and
   boots that ISO. After the provision call it reads the VIOS's `os_version`, the HMC's `date`
   between two runner UTC reads, then up to 100 reference codes and the partition state every

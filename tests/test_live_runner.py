@@ -10405,3 +10405,65 @@ def test_live_config_accepts_assignable_sriov_capacity(tmp_path, value) -> None:
     config = live_config.LiveTestConfig.from_env_file(config_path)
 
     assert config.sriov_capacity_percent == float(value)
+
+
+def test_iso_bind_cli_rejects_before_bootstrap(monkeypatch, tmp_path, capsys):
+    started = _startup_gate(monkeypatch, tmp_path)
+    config = dataclasses.replace(live_config.LiveTestConfig(), iso_bind_host="0.0.0.0")
+    monkeypatch.setattr(live_config.LiveTestConfig, "from_env_file", lambda: config)
+    monkeypatch.setattr(
+        runner, "_bootstrap_config", lambda: pytest.fail("bootstrapped")
+    )
+    assert runner._run_from_arguments(["--group", "vmedia"]) == 1
+    assert "LIVE_TEST_ISO_BIND_HOST" in capsys.readouterr().out
+    assert not started
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subtask", [18, 20, 72, None])
+async def test_iso_bind_direct_selection_rejects_before_client(
+    tmp_path, monkeypatch, capsys, subtask
+):
+    config = dataclasses.replace(live_config.LiveTestConfig(), iso_bind_host="0.0.0.0")
+    monkeypatch.setattr(runner, "served_client", lambda: pytest.fail("opened client"))
+    results = tmp_path / "results.json"
+    assert (
+        await runner.main(
+            subtask, str(results), config=config, hmc_config=_live_hmc_config()
+        )
+        == 1
+    )
+    assert "LIVE_TEST_ISO_BIND_HOST" in capsys.readouterr().out
+    assert not results.exists()
+
+
+def test_iso_bind_historical_restore_preserves_exact_configuration(tmp_path):
+    config = dataclasses.replace(live_config.LiveTestConfig(), iso_bind_host="0.0.0.0")
+    hmc = _live_hmc_config()
+    artifacts = live_artifacts.LiveTestArtifacts(system_uuid="system-uuid")
+    document = _result_document(config, hmc, artifacts)
+    path = tmp_path / "previous.json"
+    path.write_text(json.dumps(document))
+    assert (
+        live_config.decode_saved_config(json.loads(path.read_text())["config"])
+        == config
+    )
+    matching = runner.RunState(config=config)
+    assert runner._restore_artifacts_from_results(matching, hmc, str(path))
+    assert matching.artifacts == artifacts
+    specific = runner.RunState(
+        config=dataclasses.replace(config, iso_bind_host="127.0.0.1")
+    )
+    assert not runner._restore_artifacts_from_results(specific, hmc, str(path))
+    assert specific.artifacts == live_artifacts.LiveTestArtifacts()
+
+
+def test_iso_bind_example_and_default_use_a_specific_address():
+    config = live_config.LiveTestConfig.from_env_file(
+        Path(__file__).parents[1] / ".env.example"
+    )
+    assert (
+        config.iso_bind_host
+        == live_config.LiveTestConfig().iso_bind_host
+        == "127.0.0.1"
+    )

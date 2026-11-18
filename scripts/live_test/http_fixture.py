@@ -36,7 +36,7 @@ class IsoHttpServer:
 
     def start(self, config: LiveTestConfig) -> None:
         """Start serving the configured ISO, and nothing beside it, once per invocation."""
-        _allow_iso_host(config)
+        bind_address = config.iso_bind_address()
         if self._server is not None:
             return
         handler = functools.partial(
@@ -45,9 +45,7 @@ class IsoHttpServer:
         )
         startup_decided = threading.Event()
         serve_allowed = False
-        server = http.server.HTTPServer(
-            (config.iso_bind_host, config.iso_http_port), handler
-        )
+        server = http.server.HTTPServer((bind_address, config.iso_http_port), handler)
 
         def serve() -> None:
             startup_decided.wait()
@@ -56,6 +54,7 @@ class IsoHttpServer:
 
         try:
             threading.Thread(target=serve, daemon=True).start()
+            _allow_iso_host(config)
         except BaseException:
             # A native worker may start after Thread.start is interrupted.
             startup_decided.set()

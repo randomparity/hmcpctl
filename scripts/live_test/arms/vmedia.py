@@ -531,7 +531,7 @@ def _start_iso_server(state: RunState, subtask: int) -> str | None:
     config = state.config
     try:
         state.iso_http_server.start(config)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         state.record(
             subtask,
             "iso_http_server",

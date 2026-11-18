@@ -1183,10 +1183,14 @@ async def _probe_provision_vlan(system_name: str, vlan_id: int) -> str:
     return f"{vlan_id} has a virtual network"
 
 
-def _check_configuration() -> tuple[live_config.LiveTestConfig | None, str]:
+def _check_configuration(
+    group: str | None,
+) -> tuple[live_config.LiveTestConfig | None, str]:
     """Run the runner's own `.env` validator and report its verdict."""
     try:
-        return live_config.LiveTestConfig.from_env_file(), ""
+        config = live_config.LiveTestConfig.from_env_file()
+        runner.validate_iso_bind_selection(config, None, group)
+        return config, ""
     except ValueError as exc:
         return None, str(exc)
 
@@ -1352,7 +1356,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.detach_probe and args.group != "lpar-power":
         parser.error("--detach-probe requires --group lpar-power")
 
-    config, config_error = _check_configuration()
+    config, config_error = _check_configuration(args.group)
     credentials_ok, present = _check_credentials()
     verdicts = arm_verdicts(config, args.group) if config is not None else ()
     if args.detach_probe and config is not None:
