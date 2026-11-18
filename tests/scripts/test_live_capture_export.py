@@ -2420,6 +2420,45 @@ def test_schema_enums_omit_qualified_declaration_names_and_complex_type_conflict
     assert not result["elements"]
 
 
+def test_schema_bindings_respect_the_default_namespace_at_the_type_reference() -> None:
+    xsd = "http://www.w3.org/2001/XMLSchema"
+    primary = "urn:synthetic:primary"
+    foreign = "urn:synthetic:other"
+    x = f'<xs:schema xmlns:xs="{xsd}" targetNamespace="{primary}" xmlns="{primary}">'
+    definition = """<xs:simpleType name="Mode.Enum"><xs:restriction base="xs:string">
+      <xs:enumeration value="On"/></xs:restriction></xs:simpleType>"""
+    a = _rest("/schema/A.xsd", x + definition + "</xs:schema>")
+    same = '<xs:element name="Match" type="Mode.Enum"/>'
+    other = f'<xs:element name="Wrong" xmlns="{foreign}" type="Mode.Enum"/>'
+    nested = f"""<xs:element name="Nested"><xs:complexType><xs:simpleContent>
+      <xs:extension xmlns="{foreign}" base="Mode.Enum"/>
+      </xs:simpleContent></xs:complexType></xs:element>"""
+    b = _rest("/schema/B.xsd", x + same + other + nested + "</xs:schema>")
+    c = _rest(
+        "/schema/C.xsd",
+        x.replace(primary, foreign) + same.replace("Match", "Other") + "</xs:schema>",
+    )
+    assert export.derive_enums([a, b, c], "vX")["elements"] == {"Match": "Mode.Enum"}
+
+
+def test_namespaceless_catalog_only_supplies_shared_uom_vocabulary() -> None:
+    catalog = "/rest/api/web/schema/inc/Enumerations.xsd"
+    uom = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
+    schema = f'''<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+        xmlns="{uom}" targetNamespace="{uom}">
+        <xsd:element name="UomMode" type="BootMode.Enum"/>
+        <xsd:element name="OtherMode" xmlns="urn:other" type="BootMode.Enum"/>
+        </xsd:schema>'''
+    source = _rest("/schema/Object.xsd", schema)
+    ordinary = export.derive_enums(
+        [_rest("/schema/Unrelated.xsd", ENUMS_XSD), source], "vX"
+    )
+    assert "UomMode" not in ordinary["elements"]
+    declared = export.derive_enums([_rest(catalog, ENUMS_XSD), source], "vX")
+    assert declared["elements"]["UomMode"] == "BootMode.Enum"
+    assert "OtherMode" not in declared["elements"]
+
+
 def test_schema_enums_keep_equivalent_declarations_and_skip_empty_200() -> None:
     a = _rest("/schema/A.xsd", ENUMS_XSD)
     b = _rest(

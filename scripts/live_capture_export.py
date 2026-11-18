@@ -34,12 +34,15 @@ import sys
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import ExitStack
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
+
+from hmcpctl.documents.common import UOM_NS
 
 UUID = re.compile(
     r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
@@ -1503,11 +1506,36 @@ def build_vocabulary(
 # --- schema enums ------------------------------------------------------------
 
 _XSD = "{http://www.w3.org/2001/XMLSchema}"
+_ENUM_CATALOG = "/rest/api/web/schema/inc/Enumerations.xsd"
+
+
+def _read_schema_xml(body: bytes) -> tuple[Element, dict[Element, str]]:
+    """Keep the in-scope default namespace of each unprefixed QName attribute."""
+    reader = ET.iterparse(
+        BytesIO(body), events=("start-ns", "start", "end"), forbid_dtd=True
+    )
+    namespaces = [""]
+    pending_default = None
+    references: dict[Element, str] = {}
+    for event, item in reader:
+        if event == "start-ns":
+            prefix, uri = item
+            if not prefix:
+                pending_default = uri
+        elif event == "start":
+            default = namespaces[-1] if pending_default is None else pending_default
+            namespaces.append(default)
+            pending_default = None
+            if item.get("type") or item.get("base"):
+                references[item] = default
+        else:
+            namespaces.pop()
+    return reader.root, references
 
 
 def _schema_roots(
     corpus: Sequence[dict[str, Any]], *, indexed: bool
-) -> Iterator[Element]:
+) -> Iterator[tuple[str, Element, dict[Element, str]]]:
     for index, record in enumerate(corpus, 1):
         if (
             record.get("kind") != "rest"
@@ -1519,18 +1547,20 @@ def _schema_roots(
         if not body:
             continue
         try:
-            root = ET.fromstring(
-                body.encode("utf-8") if isinstance(body, str) else body, forbid_dtd=True
+            root, references = _read_schema_xml(
+                body.encode("utf-8") if isinstance(body, str) else body
             )
         except (ET.ParseError, DefusedXmlException, LookupError, ValueError):
             raise ExportError(f"schema record {index} is not safe, valid XML") from None
         if root.tag == f"{_XSD}schema":
-            yield root
+            yield record["path"], root, references
         elif indexed:
             raise ExportError(f"schema record {index} does not contain an XSD schema")
 
 
-def _element_bindings(root: Element) -> Iterator[tuple[str, str]]:
+def _element_bindings(
+    root: Element, references: dict[Element, str]
+) -> Iterator[tuple[str, str, str]]:
     nodes = [root]
     while nodes:
         node = nodes.pop()
@@ -1541,11 +1571,12 @@ def _element_bindings(root: Element) -> Iterator[tuple[str, str]]:
             extension = node.find(
                 f"{_XSD}complexType/{_XSD}simpleContent/{_XSD}extension"
             )
-            yield (
-                name,
-                node.get("type")
-                or (extension.get("base", "") if extension is not None else ""),
-            )
+            if target := node.get("type"):
+                yield name, target, references[node]
+            elif extension is not None and (target := extension.get("base")):
+                yield name, target, references[extension]
+            else:
+                yield name, "", ""
 
 
 def derive_enums(
@@ -1553,8 +1584,10 @@ def derive_enums(
 ) -> dict[str, Any]:
     """Collect declarations before resolving names used by the flat vocabulary."""
     definitions: dict[str, set[tuple[str, ...]]] = collections.defaultdict(set)
-    targets: dict[str, set[str]] = collections.defaultdict(set)
-    for root in _schema_roots(corpus, indexed=indexed):
+    owners: dict[str, set[str]] = collections.defaultdict(set)
+    targets: dict[str, set[tuple[str, str]]] = collections.defaultdict(set)
+    for path, root, references in _schema_roots(corpus, indexed=indexed):
+        namespace = root.get("targetNamespace", "")
         for declaration in root:
             name = declaration.get("name", "")
             if ":" in name or not name.endswith(".Enum"):
@@ -1568,8 +1601,13 @@ def derive_enums(
                     if (value := e.get("value")) is not None
                 )
                 definitions[name].add(values)
-        for element, target in _element_bindings(root):
-            targets[element].add(target)
+                owners[name].add(namespace)
+                # The capture sweep's canonical shared enum catalog supplies UOM
+                # vocabulary even though that catalog omits targetNamespace.
+                if path == _ENUM_CATALOG and not namespace:
+                    owners[name].add(UOM_NS)
+        for element, target, reference_ns in _element_bindings(root, references):
+            targets[element].add((target, reference_ns))
     types = {
         name: list(min(variants))
         for name, variants in sorted(definitions.items())
@@ -1579,11 +1617,13 @@ def derive_enums(
         raise ValueError(
             "no Enumerations.xsd record with unambiguous enum types in the corpus"
         )
-    elements = {
-        name: target
-        for name, candidates in sorted(targets.items())
-        if len(candidates) == 1 and (target := next(iter(candidates))) in types
-    }
+    elements = {}
+    for name, candidates in sorted(targets.items()):
+        if len(candidates) != 1:
+            continue
+        target, reference_ns = next(iter(candidates))
+        if target in types and reference_ns in owners[target]:
+            elements[name] = target
     return {"firmware": firmware, "types": types, "elements": elements}
 
 
