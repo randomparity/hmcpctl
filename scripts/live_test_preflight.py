@@ -231,14 +231,21 @@ def _vios_backup_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _same_system_dedicated_config(
+    config: live_config.LiveTestConfig,
+) -> dedicated_pcie._DedicatedConfig | None:
+    arm = dedicated_pcie._dedicated_config(config)
+    return arm if arm is not None and arm.system_name == config.system_name else None
+
+
 def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the one partition the lpar-config arm (#1345) creates and deletes again."""
-    arm = dedicated_pcie._dedicated_config(config)
+    arm = _same_system_dedicated_config(config)
     dedicated = (
         f"scratch profile {arm.profile_name}: dedicated slot {arm.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}; "
         "requires unowned/no-profile baseline; assign through hmc_modify_lpar and restore "
         "before SMS, then compare all profiles and slot ownership"
-        if arm is not None and arm.system_name == config.system_name
+        if arm is not None
         else "dedicated assignment unavailable: requires dedicated settings for this same system"
     )
     return ArmVerdict(
@@ -1148,6 +1155,7 @@ def arm_verdicts(
 
 # The common target is the managed system. These groups additionally consume
 # operator identifiers through their arms or their selected baseline subtasks.
+_DEDICATED_FIELDS = ("dedicated_pcie_system_name", "dedicated_pcie_lpar_prefix")
 _MOVE_FIELDS = ("lp3_name", "scratch_name", "protected_lpar_names")
 _STORAGE_FIELDS = ("lp3_name", "protected_lpar_names", "vdisk_volume_group_name")
 _NATIVE_BOOT_FIELDS = ("lp3_name", "vdisk_volume_group_name", "iso_advertised_host")
@@ -1181,18 +1189,39 @@ _ARM_TEMPLATE_FIELDS = {
 }
 
 
+def _selected_template_fields(
+    config: live_config.LiveTestConfig, group: str, *, detach_probe: bool
+) -> tuple[str, ...]:
+    if group in {"dedicated", "bare-cec"}:
+        return _DEDICATED_FIELDS
+    fields = ("system_name", *_ARM_TEMPLATE_FIELDS.get(group, ()))
+    full_power_provision = (
+        group == "lpar-power"
+        and not detach_probe
+        and config.partition_profile_writer_window
+        and bare_cec._power_operations_authorized()
+    )
+    if (
+        group == "lpar-config" or full_power_provision
+    ) and _same_system_dedicated_config(config):
+        return (*fields, *_DEDICATED_FIELDS)
+    return fields
+
+
 def _template_refusals(
-    config: live_config.LiveTestConfig, verdicts: tuple[ArmVerdict, ...]
+    config: live_config.LiveTestConfig,
+    verdicts: tuple[ArmVerdict, ...],
+    *,
+    detach_probe: bool,
 ) -> list[str]:
     matches = config.fictional_template_keys()
     refusals = []
     for verdict in verdicts:
         if not verdict.runnable or verdict.group == "users":
             continue
-        if verdict.group in {"dedicated", "bare-cec"}:
-            fields = ("dedicated_pcie_system_name", "dedicated_pcie_lpar_prefix")
-        else:
-            fields = ("system_name", *_ARM_TEMPLATE_FIELDS.get(verdict.group, ()))
+        fields = _selected_template_fields(
+            config, verdict.group, detach_probe=detach_probe
+        )
         keys = sorted(matches[field] for field in fields if field in matches)
         if keys:
             refusals.append(f"{verdict.group}: {', '.join(keys)}")
@@ -1428,7 +1457,9 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
 
-    if config is not None and (refusals := _template_refusals(config, verdicts)):
+    if config is not None and (
+        refusals := _template_refusals(config, verdicts, detach_probe=args.detach_probe)
+    ):
         print("preflight refused: replace fictional template values in .env")
         for refusal in refusals:
             print(f"  {refusal}")

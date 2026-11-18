@@ -1757,3 +1757,65 @@ def test_dedicated_refusal_uses_effective_identifiers(
         "LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME",
         "LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX",
     }
+
+
+@pytest.mark.parametrize("group", ["lpar-config", "lpar-power"])
+@pytest.mark.parametrize(
+    "system,prefix,expected",
+    [
+        ("sys-R1", "example-lt-609-pcie", {"LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX"}),
+        (
+            "example-lt-609-system",
+            "live-pcie-",
+            {"LIVE_TEST_SYSTEM_NAME", "LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME"},
+        ),
+    ],
+)
+def test_same_system_dedicated_leg_refuses_its_template_keys_before_hardware(
+    workspace, monkeypatch, capsys, group, system, prefix, expected
+):
+    (workspace / ".env").write_text(
+        _env_text(
+            LIVE_TEST_SYSTEM_NAME=system,
+            LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME=f'" {system} "',
+            LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX=prefix,
+            LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW="true"
+            if group == "lpar-power"
+            else "false",
+        )
+    )
+    _credentials(monkeypatch)
+    monkeypatch.setenv("HMC_AUTHORIZE_POWER_OPERATIONS", "true")
+    monkeypatch.setattr(
+        preflight, "_probe_environment", lambda *_: pytest.fail("envelope probe")
+    )
+
+    assert preflight.main(["--group", group]) == 1
+    assert set(re.findall(r"LIVE_TEST_[A-Z_]+", capsys.readouterr().out)) == expected
+
+
+@pytest.mark.parametrize(
+    "selection,dedicated_system,window,power",
+    [
+        (["lpar-config"], "other-system", True, True),
+        (["lpar-power"], "other-system", True, True),
+        (["lpar-config"], "", True, True),
+        (["lpar-power"], "", True, True),
+        (["lpar-power"], "sys-R1", False, True),
+        (["lpar-power"], "sys-R1", True, False),
+        (["lpar-power", "--detach-probe"], "sys-R1", True, True),
+    ],
+)
+def test_unused_dedicated_leg_allows_its_template_prefix(
+    workspace, monkeypatch, selection, dedicated_system, window, power
+):
+    (workspace / ".env").write_text(
+        _env_text(
+            LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME=dedicated_system,
+            LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX="example-lt-609-pcie",
+            LIVE_TEST_PARTITION_PROFILE_WRITER_WINDOW=str(window).lower(),
+        )
+    )
+    _credentials(monkeypatch)
+    monkeypatch.setenv("HMC_AUTHORIZE_POWER_OPERATIONS", str(power).lower())
+    assert preflight.main(["--group", *selection, "--skip-hardware"]) == 0
