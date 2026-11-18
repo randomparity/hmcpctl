@@ -79,11 +79,16 @@ class MediaHMC:
     def __init__(self, fake: FakeHMC):
         self.fake = fake
         self.mounted = [MEDIA]
+        self.vios = [VIOS]
         self.disk_mappings = [_vscsi(2, {"VirtualDisk": {"DiskName": DISK}})]
         self.pending: str | None = None
         self.unmount_error: Exception | None = None
         self.boot_error: Exception | None = None
         self.list_error: Exception | None = None
+
+    async def list_vios(self, system):
+        assert system == SYS
+        return [{"UUID": value} for value in self.vios]
 
     async def list_optical_mappings(self, vios, lpar):
         assert (vios, lpar) == (VIOS, LPAR)
@@ -120,6 +125,7 @@ class MediaHMC:
 @pytest.fixture
 def media(hmc, monkeypatch):
     fake = MediaHMC(hmc)
+    hmc.list_vios = fake.list_vios
     hmc.list_optical_mappings = fake.list_optical_mappings
     hmc.list_storage_mappings = fake.list_storage_mappings
     monkeypatch.setattr(reconfigure_media, "read_lpar_boot_order", fake.read_boot)

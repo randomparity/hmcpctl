@@ -401,6 +401,25 @@ def test_journal_only_refuses_conflict_and_uses_remaining_local_evidence(
     assert media.mounted == [MEDIA]
 
 
+def test_detach_resume_checks_live_vios_before_mixed_changes(media, monkeypatch):
+    _provisioned()
+    app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
+    mixed = {**DETACH, "patch": {"name": "web2", "installer_media": "detach"}}
+
+    async def pause_after_plan(*_args):
+        raise RuntimeError("synthetic interruption after planning")
+
+    with monkeypatch.context() as paused:
+        paused.setattr(core, "_apply", pause_after_plan)
+        first = _call(app, mixed)
+    assert first["state"] == "paused" and media.fake.name == "web1"
+    media.vios.clear()
+    with pytest.raises(ToolError, match="check the original request"):
+        _call(app, {"continuation": "resume"})
+    assert media.fake.name == "web1" and media.mounted == [MEDIA]
+    assert "unmount" not in media.fake.calls
+
+
 def test_scoped_historical_plan_supplies_identity_for_replay_and_resume(media):
     _provisioned()
     app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))

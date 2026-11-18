@@ -21,7 +21,7 @@ from hmcpctl.operations.lpar.workflow_contract import (
 )
 from hmcpctl.operations.storage.optical import unmount_optical_media
 from hmcpctl.operations.storage.resources import storage_mapping
-from hmcpctl.resource_identity import is_uuid
+from hmcpctl.resource_identity import is_uuid, resolve_vios_uuid
 from hmcpctl.ssh.vios_optical import require_media_name
 
 from ....client.core import HMCClient
@@ -105,6 +105,17 @@ class InstallerMedia:
     def from_ledger(cls, system_uuid: str, lpar_uuid: str) -> InstallerMedia:
         media = provision_owned(system_uuid, lpar_uuid, MEDIA_LEDGER)
         return cls(system_uuid, lpar_uuid, media["vios_uuid"], media["media_name"])
+
+    async def verify_vios(self, hmc: HMCClient) -> None:
+        """Require the recorded VIOS to be visible on the bound managed system."""
+        try:
+            await resolve_vios_uuid(
+                hmc, self.vios_uuid, system_name_or_uuid=self.system_uuid
+            )
+        except (HMCError, ValueError) as exc:
+            raise OperationFailed(
+                "cannot verify the installer-media VIOS on its managed system"
+            ) from exc
 
     def effect(self) -> EffectRecord:
         return EffectRecord(

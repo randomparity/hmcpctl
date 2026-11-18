@@ -1633,7 +1633,8 @@ async def installer_media_admission(
             raise OperationFailed("the operation no longer exists")
         async with open_client(request.connection, request.host) as hmc:
             partition = await _resolve(hmc, system, lpar)
-        binding = InstallerMedia.from_ledger(*partition)
+            binding = InstallerMedia.from_ledger(*partition)
+            await binding.verify_vios(hmc)
         return binding, engine.Admission(None, initial_effect=binding.effect())
 
     partition, original = recorded_media(record, plan_key=PLAN_KEY, plan_kind=PLAN_KIND)
@@ -1661,6 +1662,7 @@ async def installer_media_admission(
                 raise OperationFailed(
                     "the recorded partition no longer resolves on this HMC"
                 )
+            await current.verify_vios(hmc)
     return current, admission
 
 
@@ -1699,6 +1701,8 @@ def media_classifiers(
                 raise OperationFailed(
                     "the open effect differs from the authorized plan"
                 )
+            async with open_client(ctx.connection, ctx.host) as hmc:
+                await binding.verify_vios(hmc)
             return await classifier(ctx, effect)
 
         return classify
@@ -1722,6 +1726,8 @@ def reconfigure_body(
     async def body(ctx: OperationContext) -> BodyResult:
         recorded = ctx.recorded(PLAN_KEY)
         async with open_client(ctx.connection, ctx.host) as hmc:
+            if authorized_media is not None:
+                await authorized_media.verify_vios(hmc)
             if recorded is not None and recorded.status == "applied":
                 plan = cast(ReconfigurationPlan, dict(recorded.identity or {}))
             else:
