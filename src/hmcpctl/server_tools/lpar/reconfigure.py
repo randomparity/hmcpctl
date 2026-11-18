@@ -163,8 +163,9 @@ def reconfigure_handler(
         """Change an LPAR's processors, memory, name, boot, virtual disks or network
         adapters, or detach its installer media.
 
-        Durable (ADR 0190): the call returns within ``wait_seconds`` and the work
-        continues; poll ``hmc_operation_status`` with ``request_id``. Every change is
+        After authorization and admission, the call waits up to ``wait_seconds`` for
+        the worker. A new detach or executable resume first checks the target on the
+        HMC. Poll ``hmc_operation_status`` with ``request_id`` for ongoing work. Every change is
         planned before any write. Each change in ``result.changes`` is ``live`` (applied
         to the running partition by DLPAR and saved in its default profile),
         ``profile`` (the partition is not activated; its profile and current
@@ -237,7 +238,7 @@ def reconfigure_handler(
                 memory_mib, installer_media, disks or networks.
             continuation: none, resume or abandon; a continuation needs only
                 request_id, and any other value given must match the operation's.
-            wait_seconds: Seconds to wait before returning, 0-600.
+            wait_seconds: Seconds to wait for the worker after admission, 0-600.
             profile: HMC connection profile.
         """
         given = _given(

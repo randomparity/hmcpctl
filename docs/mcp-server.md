@@ -106,8 +106,9 @@ They take one partition through its life:
 | Find and call any other permitted tool | `hmc_search_tools`, `hmc_invoke_tool` | `read`, `destructive` |
 
 Provision, reconfigure, power and decommission are durable operations keyed by the caller's
-`request_id`: each call returns within `wait_seconds` while the work continues, a repeat returns
-the same operation, and `continuation` resumes or abandons a paused one
+`request_id`. After authorization and admission, each call waits up to `wait_seconds` for its worker.
+Work can continue after the call returns. Repeating the request returns the same operation, and
+`continuation` resumes or abandons a paused one
 ([Logical operation state](#logical-operation-state)). Each logical tool runs its steps as the
 specialist tools it names, so the policy must permit those too. The sections below and
 [External-management holds](#external-management-holds) describe each tool; the
@@ -254,7 +255,8 @@ write resumes by reading the profile back; an interrupted DLPAR write always nee
 
 `boot` and `installer_media` act on a partition `hmc_provision_lpar` created:
 `boot: root_disk` sets its next boot to its root disk (`hmc_set_lpar_boot_order`), and
-`installer_media: detach` removes the installer media mapping and keeps the medium
+For a new installer-media detach or executable resume, authorization checks the target on the
+HMC before the worker wait begins. `installer_media: detach` removes the installer media mapping and keeps the medium
 in its repository. One `hmc_unmount_optical_media` grant must cover the connection,
 the original system and LPAR selector strings, and the VIOS UUID recorded by provision.
 An all-targets grant on that connection also works. New operations record the physical
