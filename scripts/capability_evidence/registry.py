@@ -29,6 +29,7 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
     reconfigure, decommission, inspect, handoff."""
     from fastmcp import FastMCP
 
+    from hmcpctl.authorization.access_policy import AccessPolicy
     from hmcpctl.server_tools.catalog import TOOL_SECURITY
     from hmcpctl.server_tools.gateway import gateway_handlers
     from hmcpctl.server_tools.inventory.logical import (
@@ -59,7 +60,6 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
         (PLAN_TOOL_NAME, plan_handler),
         (POWER_TOOL_NAME, power_handler),
         (PROVISION_TOOL_NAME, provision_handler),
-        (RECONFIGURE_TOOL_NAME, reconfigure_handler),
         (DECOMMISSION_TOOL_NAME, decommission_handler),
         (INSPECT_TOOL_NAME, inspect_handler),
         (HANDOFF_TOOL_NAME, handoff_handler),
@@ -68,6 +68,11 @@ def _bound_handlers() -> dict[str, Callable[..., object]]:
         handlers[name] = factory(
             TOOL_SECURITY, lambda _name: False, lambda *_args: None
         )
+    handlers[RECONFIGURE_TOOL_NAME] = reconfigure_handler(
+        TOOL_SECURITY,
+        AccessPolicy("inventory", "inventory", (), frozenset()),
+        lambda *_args: None,
+    )
     return handlers
 
 

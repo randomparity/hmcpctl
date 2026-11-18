@@ -204,6 +204,59 @@ imported before the installed package, in a process that holds profile passwords
 control, use `python -P -m hmcpctl` or set `PYTHONSAFEPATH=1`
 ([ADR 0128](adr/0128-l5-module-entry-point-launch.md)).
 
+### Provision with installer media
+
+Pass a JSON file containing the `LparInstall` object to `lpars provision --install`.
+For example, the following built-media request stages the installer and leaves the
+partition powered off. Replace the SSH public key with your own.
+
+```json
+{
+  "profile": "ubuntu-26.04.1",
+  "network": {
+    "address": "192.0.2.10/24",
+    "routes": [{"destination": "0.0.0.0/0", "gateway": "192.0.2.1"}]
+  },
+  "media": {"mode": "built"},
+  "ssh_authorized_keys": ["ssh-ed25519 REPLACE_WITH_YOUR_PUBLIC_KEY"],
+  "login_user": "admin"
+}
+```
+
+Coordinate writers to the selected VolumeGroup for the entire operation. Creating the
+owned disk writes the whole group and can lose concurrent changes. Separately,
+`--exclusive-writer-window` attests that you control writers to the partition's profiles.
+
+```bash
+hmcpctl lpars provision --request-id install-1 --system sys1 --name web01 \
+  --vlan 100 --vios-uuid "$VIOS_UUID" --storage-name web01-root \
+  --vg-uuid "$VG_UUID" --capacity-mib 32768 --exclusive-writer-window \
+  --install install.json --boot deferred
+hmcpctl lpars provision --request-id install-1 --continuation boot --exclusive-writer-window
+```
+
+Built media uses the operator-configured builder and the newly created adapter's MAC.
+For prepared media, supply `media.mode` as `prepared`, its allowlisted `url`, the producer's
+`producer_result` object, and the matching `--mac`. Omit the built-media login user and keys.
+The [provision tool reference](tools/provision.md) describes the shared media
+and network fields. Both modes require a new owned disk. Boot mode controls power with
+an install. Set `--boot` on the command line and omit `--power-on`. The CLI rejects
+unknown or repeated fields in the typed install objects. The prepared `producer_result`
+dictionary goes to the media binder for validation. The file is limited to 2 MiB. Recording the
+canonical request, including its other options, has a separate 64 KiB journal limit.
+
+The default `--boot immediate` starts the installer in the same operation. A deliberate
+deferred pause exits zero with `ready_to_boot`; attach your console before continuing.
+Boot and resume require a fresh profile writer-window assertion. A continuation can
+use the recorded request without the original file. Explicit request values must match
+the journal. If the initial request omitted `--boot`, omit it on continuation too.
+Restating `--boot immediate` conflicts with an absent recorded field, even though
+its effective value was immediate. Dry-run applies only to a new invocation. The CLI waits for the worker,
+which spends up to 600 seconds from its start looking for boot evidence, including
+time spent staging. `boot_started` exits zero when firmware hands control to the boot
+image. Guest installation and readiness remain unverified. A failed or
+`needs_attention` outcome exits nonzero. Use `--json` for the recorded state and steps.
+
 ### End-to-end: give an LPAR a bootable disk
 
 For the complete ISO provisioning and optical-boot lifecycle, see the [LPAR ISO installation recipe](recipes/lpar-iso-install.md).

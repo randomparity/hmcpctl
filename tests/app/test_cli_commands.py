@@ -29,8 +29,10 @@ import pytest
 import typer
 from click import unstyle
 from conftest import live_fixture
+from lpar.test_provision_install import BUILT_INSTALL, GROUP, INSTALL, MAC, SYSTEM, VIOS
 from pydantic import TypeAdapter
 from rendered_output import collapse_whitespace
+from test_primary_catalog_scenarios import Boot, BootHMC
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -1697,6 +1699,404 @@ def test_lpars_provision_resumes_a_paused_operation(monkeypatch, fake_hmc):
     )
     assert resumed.exit_code == 0, resumed.output
     assert "terminal/configured" in resumed.stdout
+
+
+def _installer_args(tmp_path, install, *options):
+    path = tmp_path / "install.json"
+    path.write_text(json.dumps(asdict(install)), encoding="utf-8")
+    return [
+        *_PROVISION_ARGS,
+        "--request-id",
+        "installer",
+        "--install",
+        str(path),
+        "--capacity-mib",
+        "1024",
+        "--vg-uuid",
+        VG_UUID,
+        *options,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("install", "options"), [(BUILT_INSTALL, []), (INSTALL, ["--mac", MAC])]
+)
+def test_provision_installer_boot_from_record(
+    monkeypatch, fake_hmc, tmp_path, install, options
+):
+    factory, preview = _fake_provision(monkeypatch, _PROVISIONED, "ready_to_boot")
+    args = _installer_args(tmp_path, install, "--boot", "deferred", *options)
+    first = RUNNER.invoke(cli.app, args)
+    assert first.exit_code == 0, first.output
+    assert "ready_to_boot" in first.stdout and "powered off" in first.stdout
+    request = factory.call_args.args[1]
+    assert request.install == install and request.power_on is False
+    assert request.adapters.mac == (MAC if install == INSTALL else None)
+    preview.assert_awaited_once()
+    (tmp_path / "install.json").unlink()
+    cont = ["lpars", "provision", "--request-id", "installer", "--continuation", "boot"]
+    missing = RUNNER.invoke(cli.app, cont)
+    assert missing.exit_code == 2 and "--exclusive-writer-window" in missing.output
+    for mismatch in (
+        ["--name", "other"],
+        ["--boot", "immediate"],
+        ["--mac", "wrong"],
+        ["--vlan", "200"],
+        ["--storage-name", "other"],
+        ["--mem", "8192"],
+        ["--power-on"],
+    ):
+        bad = RUNNER.invoke(cli.app, [*cont, "--exclusive-writer-window", *mismatch])
+        assert bad.exit_code != 0 and "different" in bad.output, bad.output
+    dry = RUNNER.invoke(cli.app, [*cont, "--dry-run"])
+    assert dry.exit_code == 2 and "dry-run" in dry.output
+    factory, preview = _fake_provision(monkeypatch, _PROVISIONED, "boot_started")
+    boot = RUNNER.invoke(
+        cli.app,
+        [
+            *cont,
+            "--exclusive-writer-window",
+            "--vlan",
+            "100",
+            "--mem",
+            "4096",
+            "--storage-name",
+            "rootvg",
+            "--json",
+        ],
+    )
+    assert boot.exit_code == 0, boot.output
+    assert json.loads(boot.stdout)["operation"]["outcome"] == "boot_started"
+    assert factory.call_args.args[1] == request
+    assert factory.call_args.kwargs["wait_seconds"] == engine.MAX_WAIT_SECONDS
+    preview.assert_not_awaited()
+    replay = RUNNER.invoke(cli.app, [*cont, "--exclusive-writer-window"])
+    assert replay.exit_code == 0, replay.output
+    assert "firmware" in replay.stdout.lower() and "boot_started" in replay.stdout
+
+
+@pytest.mark.parametrize(
+    ("install", "options", "message"),
+    [
+        (INSTALL, [], "adapters.mac"),
+        (BUILT_INSTALL, ["--mac", MAC], "adapters.mac"),
+        (BUILT_INSTALL, ["--power-on"], "power_on"),
+        (BUILT_INSTALL, ["--boot", "later"], "--boot"),
+    ],
+)
+def test_provision_installer_refuses_before_preview(
+    monkeypatch, fake_hmc, tmp_path, install, options, message
+):
+    body, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    result = RUNNER.invoke(cli.app, _installer_args(tmp_path, install, *options))
+    assert result.exit_code == 2 and message in result.output, result.output
+    body.assert_not_called()
+    preview.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        b"private_token",
+        b'{"media":"private_token"}',
+        b" " * (2 * 1024 * 1024 + 1),
+    ],
+)
+def test_provision_installer_file_refusals(monkeypatch, fake_hmc, tmp_path, data):
+    body, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    path = tmp_path / "sensitive-path"
+    if data is not None:
+        path.write_bytes(data)
+    result = RUNNER.invoke(
+        cli.app, [*_PROVISION_ARGS, "--request-id", "file", "--install", str(path)]
+    )
+    assert result.exit_code == 2 and "--install" in result.output
+    assert "No such option" not in result.output
+    assert (
+        "private_token" not in result.output and "sensitive-path" not in result.output
+    )
+    body.assert_not_called()
+    preview.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "field_path", [(), ("media",), ("network",), ("network", "routes", 0)]
+)
+def test_provision_installer_rejects_unknown_typed_fields(
+    monkeypatch, fake_hmc, tmp_path, field_path
+):
+    body, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, BUILT_INSTALL)
+    path = tmp_path / "install.json"
+    payload = json.loads(path.read_bytes())
+    typed_object = payload
+    for field in field_path:
+        typed_object = typed_object[field]
+    typed_object["boot"] = "deferred"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    refused = RUNNER.invoke(cli.app, args)
+
+    assert refused.exit_code == 2 and "Invalid --install file" in refused.stderr
+    preview.assert_not_awaited()
+    body.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("member", "earlier_value"),
+    [
+        ("media", '{"mode":"built","boot":"deferred"}'),
+        ("mode", '"prepared"'),
+        ("address", '"192.0.2.7/24"'),
+        ("gateway", '"192.0.2.1"'),
+    ],
+)
+def test_provision_installer_rejects_repeated_typed_members(
+    monkeypatch, fake_hmc, tmp_path, member, earlier_value
+):
+    factory, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, BUILT_INSTALL)
+    path = tmp_path / "install.json"
+    key = f'"{member}":'
+    data = path.read_text(encoding="utf-8")
+    assert data.count(key) == 1
+    path.write_text(data.replace(key, f"{key}{earlier_value},{key}"), encoding="utf-8")
+
+    refused = RUNNER.invoke(cli.app, args)
+
+    assert refused.exit_code == 2 and "repeated" in refused.stderr
+    preview.assert_not_awaited()
+    factory.assert_not_called()
+
+
+def test_provision_installer_preserves_open_producer_members(
+    monkeypatch, fake_hmc, tmp_path
+):
+    _, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, INSTALL, "--mac", MAC, "--dry-run")
+    path = tmp_path / "install.json"
+    data = path.read_text(encoding="utf-8")
+    path.write_text(
+        data.replace('"format":', '"format":"earlier","format":'), encoding="utf-8"
+    )
+
+    result = RUNNER.invoke(cli.app, args)
+
+    assert result.exit_code == 0, result.output
+    assert preview.await_args.args[2].install == INSTALL
+
+
+def test_provision_installer_gateway_diagnostic_omits_address(
+    monkeypatch, fake_hmc, tmp_path
+):
+    factory, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, BUILT_INSTALL)
+    path = tmp_path / "install.json"
+    payload = json.loads(path.read_bytes())
+    network = payload["network"]
+    network["routes"][0]["gateway"] = "198.51.100.1"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    refused = RUNNER.invoke(cli.app, args)
+
+    assert refused.exit_code == 2
+    assert network["address"] not in refused.stderr
+    assert "install.network.routes[0].gateway" in refused.stderr
+    assert "install.network.address" in refused.stderr
+    preview.assert_not_awaited()
+    factory.assert_not_called()
+
+
+def test_provision_installer_interactive_json(monkeypatch, fake_hmc, tmp_path):
+    _fake_provision(monkeypatch, _PROVISIONED, "ready_to_boot")
+    args = _installer_args(tmp_path, BUILT_INSTALL, "--boot", "deferred", "--json")
+    args.remove("--yes")
+
+    confirmed = RUNNER.invoke(cli.app, args, input="y\n")
+
+    assert confirmed.exit_code == 0, confirmed.output
+    assert json.loads(confirmed.stdout)["operation"]["outcome"] == "ready_to_boot"
+    assert "Provision LPAR" in confirmed.stderr
+
+
+def test_provision_installer_replays_omitted_boot(monkeypatch, fake_hmc, tmp_path):
+    _fake_provision(monkeypatch, _PROVISIONED, "needs_attention")
+    paused = RUNNER.invoke(cli.app, _installer_args(tmp_path, BUILT_INSTALL))
+    assert paused.exit_code == 1 and "needs_attention" in paused.stdout
+    cont = [
+        "lpars",
+        "provision",
+        "--request-id",
+        "installer",
+        "--continuation",
+        "resume",
+        "--exclusive-writer-window",
+    ]
+
+    conflict = RUNNER.invoke(cli.app, [*cont, "--boot", "immediate"])
+    assert conflict.exit_code == 1 and "different boot" in conflict.output
+    _fake_provision(monkeypatch, _PROVISIONED, "boot_started")
+    resumed = RUNNER.invoke(cli.app, cont)
+    assert resumed.exit_code == 0 and "boot_started" in resumed.stdout, resumed.output
+
+
+def test_provision_installer_schema_and_journal_size_limits(
+    monkeypatch, fake_hmc, tmp_path
+):
+    body, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, BUILT_INSTALL)
+    path = tmp_path / "install.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["ssh_authorized_keys"] = ["𐍈" * 8192] * 16
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    result = RUNNER.invoke(cli.app, [*args, "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert preview.call_args.args[2].boot == "immediate"
+    refused = RUNNER.invoke(cli.app, args)
+    assert refused.exit_code == 1 and "request_too_large" in refused.output
+    body.assert_called_once()
+
+
+def test_provision_installer_boot_workflow(monkeypatch, creation_mock, tmp_path):
+    """Run the CLI, journal, and real worker against scripted HMC responses."""
+    hmc = BootHMC()
+    writes = Boot(hmc, monkeypatch, creation_mock)
+    monkeypatch.setattr(cli_lpar_provision, "HMCClient", lambda _cfg: hmc)
+    monkeypatch.setattr(cli_runtime, "HMCClient", lambda _cfg: hmc)
+    monkeypatch.setattr(cli_lpar_provision, "preview_provision", AsyncMock())
+    path = tmp_path / "install.json"
+    path.write_text(json.dumps(asdict(INSTALL)), encoding="utf-8")
+    common = [
+        "lpars",
+        "provision",
+        "--request-id",
+        "cli-boot",
+        "--exclusive-writer-window",
+        "--json",
+    ]
+    stage = RUNNER.invoke(
+        cli.app,
+        [
+            *common,
+            "--system",
+            SYSTEM,
+            "--name",
+            "lpar-a",
+            "--vlan",
+            "100",
+            "--vios-uuid",
+            VIOS,
+            "--storage-name",
+            "lv-a",
+            "--vg-uuid",
+            GROUP,
+            "--capacity-mib",
+            "1024",
+            "--install",
+            str(path),
+            "--mac",
+            MAC,
+            "--boot",
+            "deferred",
+            "--yes",
+        ],
+    )
+    assert stage.exit_code == 0, stage.output
+    assert json.loads(stage.stdout)["operation"]["outcome"] == "ready_to_boot"
+    assert "power_on" not in writes.calls
+    for _ in range(2):
+        result = RUNNER.invoke(cli.app, [*common, "--continuation", "boot"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["operation"]["outcome"] == "boot_started"
+    assert writes.calls.count("power_on") == 1
+
+
+def test_provision_installer_matches_explicit_file_on_continuation(
+    monkeypatch, fake_hmc, tmp_path
+):
+    _, preview = _fake_provision(monkeypatch, _PROVISIONED, "ready_to_boot")
+    args = _installer_args(tmp_path, INSTALL, "--boot", "deferred", "--mac", MAC)
+    path = tmp_path / "install.json"
+    contents = path.read_bytes()
+    path.write_bytes(b" " * 65536 + contents)
+    first = RUNNER.invoke(cli.app, args)
+    assert first.exit_code == 0, first.output
+    factory, _ = _fake_provision(monkeypatch, _PROVISIONED, "boot_started")
+    cont = [
+        "lpars",
+        "provision",
+        "--request-id",
+        "installer",
+        "--continuation",
+        "boot",
+        "--exclusive-writer-window",
+        "--install",
+        str(path),
+    ]
+    path.write_text(json.dumps(asdict(BUILT_INSTALL)), encoding="utf-8")
+    conflict = RUNNER.invoke(cli.app, cont)
+    assert conflict.exit_code == 1 and "different install" in conflict.output
+    path.write_bytes(contents)
+    boot = RUNNER.invoke(cli.app, cont)
+    assert boot.exit_code == 0, boot.output
+    assert factory.call_args.args[1].install == INSTALL
+    preview.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (["--mac", MAC], "adapters.mac"),
+        (["--boot", "deferred"], "deferred applies only"),
+    ],
+)
+def test_provision_installer_options_require_install(
+    monkeypatch, fake_hmc, options, message
+):
+    body, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    result = RUNNER.invoke(
+        cli.app, [*_PROVISION_ARGS, "--request-id", "options", *options]
+    )
+    assert result.exit_code == 2 and message in result.output, result.output
+    body.assert_not_called()
+    preview.assert_not_awaited()
+
+
+def test_provision_installer_redacts_unbound_producer(monkeypatch, fake_hmc, tmp_path):
+    body, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    args = _installer_args(tmp_path, INSTALL, "--mac", MAC)
+    path = tmp_path / "install.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["media"]["producer_result"]["private_token"] = "private_value"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    refusal = RUNNER.invoke(cli.app, args)
+    assert refusal.exit_code == 2 and "producer result" in refusal.output
+    assert (
+        "private_token" not in refusal.output and "private_value" not in refusal.output
+    )
+    body.assert_not_called()
+    preview.assert_not_awaited()
+
+
+def test_provision_historical_noninstall_digest(monkeypatch, fake_hmc):
+    _, preview = _fake_provision(monkeypatch, _PROVISIONED)
+    submitted = Mock(wraps=engine.submit)
+    monkeypatch.setattr(engine, "submit", submitted)
+    args = [*_PROVISION_ARGS, "--request-id", "legacy", "--json"]
+    first = RUNNER.invoke(cli.app, args)
+    assert first.exit_code == 0, first.output
+    _, digest = engine.canonical_request(submitted.call_args.args[0])
+    # Captured at 157663607 with these options, before the CLI accepted --install.
+    expected = "dc85f0f644ea7dd159a421945041f69e6d972763ebb4ea1d5276ed869ae786f9"  # pragma: allowlist secret
+    assert digest == expected
+    repeated = RUNNER.invoke(cli.app, args)
+    assert repeated.exit_code == 0, repeated.output
+    assert (
+        json.loads(repeated.stdout)["operation"]
+        == json.loads(first.stdout)["operation"]
+    )
+    preview.assert_awaited_once()
 
 
 def test_lpars_provision_reports_an_unusable_store_without_a_traceback(

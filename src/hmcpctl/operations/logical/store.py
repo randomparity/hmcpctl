@@ -861,6 +861,32 @@ def ledger_entries(
     ]
 
 
+def owned_partition_ledger_entries(
+    conn: sqlite3.Connection,
+    system_uuid: str,
+    partition_uuid: str,
+    owner_kind: str,
+    resource_kind: str,
+) -> tuple[int, list[dict[str, Any]]]:
+    """Resolve one partition owner and read up to two of its matching resource entries.
+
+    The caller holds a read transaction. Two candidates establish ambiguity for either lookup.
+    """
+    owners = conn.execute(
+        "SELECT DISTINCT operation_id FROM ledger WHERE kind = ? AND system_uuid = ?"
+        " AND partition_uuid = ? COLLATE NOCASE LIMIT 2",
+        (owner_kind, system_uuid, partition_uuid),
+    ).fetchall()
+    if len(owners) != 1:
+        return len(owners), []
+    rows = conn.execute(
+        "SELECT identity_json FROM ledger WHERE operation_id = ? AND kind = ? AND system_uuid = ?"
+        " AND partition_uuid = ? COLLATE NOCASE LIMIT 2",
+        (owners[0]["operation_id"], resource_kind, system_uuid, partition_uuid),
+    )
+    return 1, [json.loads(row["identity_json"]) for row in rows]
+
+
 def ledgered_elsewhere(
     kind: str, system_uuid: str, match: Mapping[str, Any], *, exclude_operation_id: str
 ) -> bool:

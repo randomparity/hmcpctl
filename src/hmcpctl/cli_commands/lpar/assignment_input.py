@@ -11,6 +11,8 @@ from typing import Any, TypeVar
 import typer
 from pydantic import TypeAdapter, ValidationError
 
+from hmcpctl.operations.lpar.provisioning.media import LparInstall
+
 from ...documents.lpar_creation_memory import LparCreationMemory
 from ...documents.lpar_io import LparPhysicalIO
 from ...documents.lpar_security_policy import LparSecurityPolicy
@@ -18,6 +20,41 @@ from ...documents.lpar_serial import SERIAL_INPUT_BYTES, VirtualSerialAdapter
 from ...documents.lpar_vscsi import VirtualScsiClientAdapter
 from ...operations.lpar.assignments import LparPcieAssignments
 from ..output import terminal_field, usage_error
+
+_MAX_INSTALL_FILE_BYTES = 2 * 1024 * 1024
+
+
+def _unique_install_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        usage_error("Invalid --install file: repeated member name in a typed object")
+    return fields
+
+
+def load_install(path: Path) -> LparInstall:
+    """Read a bounded install object without exposing its path or contents."""
+    try:
+        with path.open("rb") as source:
+            data = source.read(_MAX_INSTALL_FILE_BYTES + 1)
+    except OSError:
+        usage_error("Cannot read --install file; check the path and file permissions")
+    if len(data) > _MAX_INSTALL_FILE_BYTES:
+        usage_error("--install file exceeds 2 MiB")
+    try:
+        install = TypeAdapter(LparInstall).validate_json(data, extra="forbid")
+    except ValidationError:
+        usage_error("Invalid --install file; supply a JSON object matching LparInstall")
+
+    # Pydantic bounds JSON nesting and validates the shape, but collapses duplicate keys.
+    # Examine the original members of the typed objects only; the binder owns producer_result.
+    fields = _unique_install_fields(
+        json.loads(data, object_pairs_hook=list, parse_int=str)
+    )
+    _unique_install_fields(fields["media"])
+    network = _unique_install_fields(fields["network"])
+    for route in network["routes"]:
+        _unique_install_fields(route)
+    return install
 
 
 def load_pcie_assignments(path: Path | None) -> LparPcieAssignments:

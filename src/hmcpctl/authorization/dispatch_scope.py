@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from hmcpctl.audit import records as audit
-from hmcpctl.authorization.access_policy import AccessPolicy
+from hmcpctl.authorization.access_policy import DEFAULT_CONNECTION_TOKEN, AccessPolicy
 from hmcpctl.authorization.connection_scope import (
     ConnectionScopeError,
     connection_denial,
@@ -75,6 +75,7 @@ def _audit_view(
 def dispatch_authorizer(
     policy: AccessPolicy,
     *,
+    expected_connection: str | None = None,
     resolve_targets: Callable[[str, Mapping[str, Any]], Mapping[str, Any] | None]
     | None = None,
 ) -> Authorize:
@@ -145,6 +146,19 @@ def dispatch_authorizer(
             except ConnectionScopeError:
                 record("deny", "configuration-unreadable", None, None)
                 raise
+        if (
+            expected_connection is not None
+            and (connection or DEFAULT_CONNECTION_TOKEN) != expected_connection
+        ):
+            record(
+                "deny",
+                "connection-not-granted",
+                audit.resolved_connection(connection),
+                None,
+            )
+            raise ConnectionScopeError(
+                f"{name}: the selected HMC connection changed; retry the call"
+            )
         extracted = selected_targets(security, arguments)
         resolved, audited = _audit_view(
             connection, extracted, scoped=argument is not None
