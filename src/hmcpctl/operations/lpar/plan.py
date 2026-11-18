@@ -17,7 +17,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
 
-from hmcpctl.operations.lpar.provisioning.core import check_vlan_exists
+from hmcpctl.operations.lpar.provisioning.core import (
+    check_vlan_exists,
+    validate_provision_assignments,
+)
 from hmcpctl.operations.lpar.provisioning.media import (
     Boot,
     LparInstall,
@@ -43,7 +46,7 @@ from ...documents.storage import STORAGE_KINDS, StorageKind, validate_virtual_di
 from ...errors import HMCError, HMCTLSFingerprintError, HMCTransportError
 from ...resource_identity import is_uuid, summary_matching
 from ...ssh.affinity import MinimumAffinityPolicy, validate_minimum_affinity_policy
-from ...ssh.lpar import validate_caller_token
+from ...ssh.lpar import DEFAULT_PROFILE_NAME, validate_caller_token
 from ...xmlutil import leaf_text
 from ..affinity.rest import ProvisionAffinityAssessment, validate_affinity_request
 from ..inventory.capacity import system_capacity
@@ -259,6 +262,12 @@ def check_request(request: PlanRequest) -> PlanRequest:
         raise ValueError("boot: must be immediate or deferred")
     _check_install(request)
     check_mac(request.adapters.mac, request.install)
+    try:
+        validate_provision_assignments(request.assignments)
+    except ValueError:
+        raise ValueError(
+            f"assignments.dedicated.profile_name: must be {DEFAULT_PROFILE_NAME!r}"
+        ) from None
     return request
 
 
@@ -1075,6 +1084,7 @@ def _intended_changes(
         )
     steps.append(("map_storage", vios, f"map {storage.kind} {storage.storage_name!r}"))
     counts = _assignment_counts(request.assignments)
+    dedicated = counts.pop("dedicated")
     if any(counts.values()):
         detail = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
         steps.append(("assign_pcie", system, f"apply {detail}, in order"))
@@ -1090,6 +1100,10 @@ def _intended_changes(
     steps.append(
         ("write_profile", system, "write and read back the partition profile (#637)")
     )
+    if dedicated:
+        steps.append(
+            ("assign_pcie", system, f"apply {dedicated} dedicated to the saved profile")
+        )
     if request.install is not None:
         steps.extend(
             [
