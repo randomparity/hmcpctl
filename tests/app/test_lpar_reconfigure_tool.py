@@ -351,6 +351,17 @@ def test_scoped_detach_resumes_after_its_original_lpar_name_has_changed(
     assert media.fake.calls.count("unmount") == 2  # One refused attempt and one detach.
 
 
+def test_unmount_target_denial_does_not_disclose_resolution_status(media):
+    app = _app(_grant(TOOL), _grant(UNMOUNT, targets=_targets("unmatched")))
+    with pytest.raises(ToolError, match=UNMOUNT) as missing:
+        _call(app, DETACH)
+    _provisioned()
+    with pytest.raises(ToolError, match=UNMOUNT) as denied:
+        _call(app, DETACH)
+    assert str(denied.value) == str(missing.value)
+    assert media.mounted == [MEDIA]
+
+
 def test_crash_before_guard_resumes_only_the_admitted_medium(media, monkeypatch):
     _provisioned()
     app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))

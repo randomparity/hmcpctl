@@ -118,25 +118,28 @@ def _authorize_media(
             OSError,
             sqlite3.Error,
         ):
-            raise TargetScopeError(
-                f"{UNMOUNT_TOOL_NAME} cannot verify this request's installer-media target; "
-                "check the original request, connection and provision ledger"
-            ) from None
+            raise TargetScopeError from None
         binding, _ = resolved
         return {
             **arguments,
             "vios_name_or_uuid": None if binding is None else binding.vios_uuid,
         }
 
-    authorize_as(
-        security,
-        dispatch_authorizer(
-            policy, resolve_targets=targets, expected_connection=request.connection
-        ),
-        UNMOUNT_TOOL_NAME,
-        by_kind,
-        profile,
-    )
+    try:
+        authorize_as(
+            security,
+            dispatch_authorizer(
+                policy, resolve_targets=targets, expected_connection=request.connection
+            ),
+            UNMOUNT_TOOL_NAME,
+            by_kind,
+            profile,
+        )
+    except TargetScopeError:
+        raise TargetScopeError(
+            f"{UNMOUNT_TOOL_NAME} cannot verify this request's installer-media target; "
+            "check the original request, connection and provision ledger"
+        ) from None
     assert resolved is not None  # The dispatch gate resolved the specialist's targets.
     return resolved
 
