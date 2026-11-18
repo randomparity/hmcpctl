@@ -8,6 +8,7 @@ working directory.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -28,7 +29,19 @@ def _env_text(**overrides: str) -> str:
     fails for the wrong reason. Building from `_CONFIG_FIELDS` also means a new
     setting cannot silently leave these tests testing a rejected file.
     """
-    defaults = live_config.LiveTestConfig()
+    defaults = live_config.LiveTestConfig(
+        system_name="sys-R1",
+        lp3_name="guest-R1",
+        scratch_name="scratch-R1",
+        dry_run_lpar_name="dry-guest",
+        dry_run_storage_name="dry-disk",
+        vdisk_volume_group_name="labvg",
+        protected_lpar_names=("keep-R1",),
+        sriov_profile_name="labprofile",
+        iso_path="/media/lab.iso",
+        iso_media_name="lab.iso",
+        iso_advertised_host="127.0.0.1",
+    )
     values = {}
     for key, field in live_config.LiveTestConfig._CONFIG_FIELDS.items():
         value = getattr(defaults, field)
@@ -132,10 +145,8 @@ def test_each_rejection_the_runner_makes_is_a_non_zero_exit(
     assert str(runner_error.value) in output
 
 
-def test_a_configuration_the_runner_accepts_is_never_rejected_here(
-    workspace, monkeypatch
-):
-    """The other direction of Validation 3: no verdict preflight invents alone."""
+def test_a_configured_operator_fixture_passes_preflight(workspace, monkeypatch):
+    """An operator fixture with real identifiers passes the additional preflight gate."""
     (workspace / ".env").write_text(_env_text(**_DEDICATED), encoding="utf-8")
     _credentials(monkeypatch)
 
@@ -688,7 +699,7 @@ def test_the_provision_vlan_is_reported_under_round2(
     assert preflight.main(group) == 0
 
     output = capsys.readouterr().out
-    assert probed == [(live_config.LiveTestConfig().system_name, 42)]
+    assert probed == [("sys-R1", 42)]
     round2 = output.index("  round2 ")
     assert output.index("    provision VLAN: 42 has a virtual network") > round2
 
@@ -835,13 +846,15 @@ def test_lpar_config_discloses_configured_dedicated_slot():
     assert any("21010020" in target for target in verdict.mutates)
 
 
-def test_system_profiles_preflight(monkeypatch):
+def test_system_profiles_preflight(monkeypatch, capsys):
     import json
+    from dataclasses import replace
     from unittest.mock import AsyncMock
 
     from live_test.arms import system_profiles
 
     config = live_config.LiveTestConfig(
+        system_name="sys-R1",
         system_profile_members_json=json.dumps(
             [
                 {"partition": "a", "profile": "base"},
@@ -858,6 +871,13 @@ def test_system_profiles_preflight(monkeypatch):
     probe.assert_awaited_once()
     probe.side_effect = ValueError("drift")
     assert preflight.main(["--group", "system-profiles"]) == 2
+
+    capsys.readouterr()
+    probe.reset_mock()
+    config = replace(config, system_name=live_config.LiveTestConfig.system_name)
+    assert preflight.main(["--group", "system-profiles"]) == 1
+    assert "LIVE_TEST_SYSTEM_NAME" in capsys.readouterr().out
+    probe.assert_not_awaited()
 
 
 def test_settings_group_preflight_routes_only_registered_arm(workspace, monkeypatch):
@@ -1164,7 +1184,9 @@ def test_vios_source_preflight_rejects_effect_assertions(monkeypatch, flag):
 
 
 def test_statistics_preflight_requires_existing_fixture(monkeypatch, capsys):
-    config = live_config.LiveTestConfig(system_name="sys-R1", lp3_name="guest-R1")
+    config = live_config.LiveTestConfig(
+        system_name="sys-R1", lp3_name="guest-R1", protected_lpar_names=("keep-R1",)
+    )
     monkeypatch.setattr(preflight, "_check_configuration", lambda _group: (config, ""))
     monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
     assert preflight.main(["--group", "lpar-memory-statistics", "--skip-hardware"]) == 0
@@ -1378,6 +1400,7 @@ def test_paging_preflight_requires_expected_provider_and_window(monkeypatch, cap
     config = live_config.LiveTestConfig(
         system_name="sys-R1",
         lp3_name="guest-R1",
+        protected_lpar_names=("keep-R1",),
         paging_expected_current_vios="paging-R1",
         paging_writer_window=True,
     )
@@ -1456,9 +1479,13 @@ def test_vnic_creation_preflight_refuses_bypass(monkeypatch, extra):
     route.assert_not_called()
 
 
-def test_a_native_boot_arm_names_its_medium_window_and_partition(tmp_path):
+@pytest.mark.parametrize("group", provision_boot.NATIVE_GROUPS)
+def test_a_native_boot_arm_names_its_medium_window_and_partition(
+    tmp_path, monkeypatch, capsys, group
+):
     import json
 
+    distro, release = provision_boot.NATIVE_GROUPS[group]
     iso = tmp_path / "launcher.iso"
     iso.write_bytes(b"launcher")
     result = tmp_path / "result.json"
@@ -1467,8 +1494,8 @@ def test_a_native_boot_arm_names_its_medium_window_and_partition(tmp_path):
         json.dumps(
             {
                 "format": "iso-chain-media-v1",
-                "distribution": "ubuntu",
-                "release": "26.04.1",
+                "distribution": distro,
+                "release": release,
                 "architecture": "ppc64le",
                 "mac": "02:00:00:00:00:a1",
                 "network": {"address": "192.0.2.20/24"},
@@ -1480,18 +1507,34 @@ def test_a_native_boot_arm_names_its_medium_window_and_partition(tmp_path):
     config = live_config.LiveTestConfig(
         system_name="sys-A",
         native_boot_mac="02:00:00:00:00:a1",
-        native_ubuntu_iso_path=str(iso),
-        native_ubuntu_media_result=str(result),
+        **{
+            f"native_{distro}_iso_path": str(iso),
+            f"native_{distro}_media_result": str(result),
+        },
     )
 
-    verdict = preflight._ARM_VERDICTS["native-ubuntu-boot-started"](config)
-    refused = preflight._ARM_VERDICTS["native-rocky-boot-started"](config)
+    verdict = preflight._ARM_VERDICTS[group](config)
+    other = next(key for key in provision_boot.NATIVE_GROUPS if key != group)
+    refused = preflight._ARM_VERDICTS[other](config)
 
     assert verdict.runnable
     text = " ".join(verdict.mutates)
-    assert str(iso) in text and "ubuntu 26.04.1" in text and "900 s" in text
+    assert str(iso) in text and f"{distro} {release}" in text and "900 s" in text
     assert not refused.runnable
-    assert "LIVE_TEST_NATIVE_ROCKY_ISO_PATH" in refused.reason
+    assert (
+        f"LIVE_TEST_NATIVE_{provision_boot.NATIVE_GROUPS[other][0].upper()}_ISO_PATH"
+        in refused.reason
+    )
+
+    monkeypatch.setattr(preflight, "_check_configuration", lambda group: (config, ""))
+    monkeypatch.setattr(preflight, "_check_credentials", lambda: (True, {}))
+    assert preflight.main(["--group", verdict.group, "--skip-hardware"]) == 1
+    keys = set(re.findall(r"LIVE_TEST_[A-Z_]+", capsys.readouterr().out))
+    assert keys == {
+        "LIVE_TEST_LPAR_NAME",
+        "LIVE_TEST_VDISK_VOLUME_GROUP_NAME",
+        "LIVE_TEST_ISO_ADVERTISED_HOST",
+    }
 
 
 def test_the_logical_workflow_verdict_names_what_it_creates_and_deletes(monkeypatch):
@@ -1608,3 +1651,87 @@ def test_iso_bind_does_not_gate_a_nonserving_selection(workspace, monkeypatch):
     (workspace / ".env").write_text(_env_text(LIVE_TEST_ISO_BIND_HOST="0.0.0.0"))
     _credentials(monkeypatch)
     assert preflight.main(["--group", "vmedia-media-change", "--skip-hardware"]) == 0
+
+
+@pytest.mark.parametrize(
+    "selection,fields",
+    [
+        (
+            ["--group", "round2"],
+            "SYSTEM_NAME LPAR_NAME SCRATCH_LPAR_NAME DRY_RUN_LPAR_NAME DRY_RUN_STORAGE_NAME VDISK_VOLUME_GROUP_NAME",
+        ),
+        (
+            ["--group", "lpar-power", "--detach-probe"],
+            "SYSTEM_NAME VDISK_VOLUME_GROUP_NAME",
+        ),
+        (
+            ["--group", "provision-boot"],
+            "SYSTEM_NAME VDISK_VOLUME_GROUP_NAME ISO_PATH ISO_ADVERTISED_HOST",
+        ),
+        (["--group", "sriov"], "SYSTEM_NAME LPAR_NAME SRIOV_PROFILE_NAME"),
+        (
+            ["--group", "vmedia"],
+            "SYSTEM_NAME LPAR_NAME PROTECTED_LPAR_NAMES VDISK_VOLUME_GROUP_NAME ISO_PATH ISO_MEDIA_NAME ISO_ADVERTISED_HOST",
+        ),
+        (
+            [],
+            "SYSTEM_NAME LPAR_NAME SCRATCH_LPAR_NAME DRY_RUN_LPAR_NAME DRY_RUN_STORAGE_NAME VDISK_VOLUME_GROUP_NAME SRIOV_PROFILE_NAME PROTECTED_LPAR_NAMES ISO_PATH ISO_MEDIA_NAME ISO_ADVERTISED_HOST",
+        ),
+    ],
+)
+def test_sample_refusal_names_all_selected_keys_before_hardware(
+    selection, fields, workspace, monkeypatch, capsys
+):
+    (workspace / ".env").write_bytes(
+        (SCRIPTS_ROOT.parent / ".env.example").read_bytes()
+    )
+    _credentials(monkeypatch)
+    monkeypatch.setattr(
+        preflight, "_probe_environment", lambda *_: pytest.fail("envelope probe")
+    )
+    monkeypatch.setattr(
+        preflight, "_probe_provision_vlan", lambda *_: pytest.fail("VLAN probe")
+    )
+
+    assert preflight.main(selection) == 1
+    output = capsys.readouterr().out
+    assert "template" in output
+    assert set(re.findall(r"LIVE_TEST_[A-Z_]+", output)) == {
+        f"LIVE_TEST_{field}" for field in fields.split()
+    }
+
+
+def test_template_checks_are_field_exact_and_handle_mixed_protected_names(
+    workspace, monkeypatch, capsys
+):
+    defaults = live_config.LiveTestConfig()
+    (workspace / ".env").write_text(
+        _env_text(
+            LIVE_TEST_SYSTEM_NAME=defaults.system_name + "-east",
+            LIVE_TEST_LPAR_NAME=defaults.scratch_name,
+            LIVE_TEST_PROTECTED_LPAR_NAMES="real," + defaults.protected_lpar_names[1],
+        )
+    )
+    _credentials(monkeypatch)
+    assert preflight.main(["--group", "storage", "--skip-hardware"]) == 1
+    assert set(re.findall(r"LIVE_TEST_[A-Z_]+", capsys.readouterr().out)) == {
+        "LIVE_TEST_PROTECTED_LPAR_NAMES"
+    }
+
+
+def test_optional_dedicated_template_is_refused_only_when_admitted(
+    workspace, monkeypatch, capsys
+):
+    _credentials(monkeypatch)
+    path = workspace / ".env"
+    settings = {"LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME": "example-lt-609-system"}
+    path.write_text(_env_text(**settings))
+    assert preflight.main(["--group", "dedicated", "--skip-hardware"]) == 0
+    assert "SKIP" in capsys.readouterr().out
+    settings["LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX"] = "example-lt-609-pcie"
+    path.write_text(_env_text(**settings))
+    assert preflight.main(["--group", "dedicated", "--skip-hardware"]) == 1
+    assert set(re.findall(r"LIVE_TEST_[A-Z_]+", capsys.readouterr().out)) == {
+        "LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME",
+        "LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX",
+    }

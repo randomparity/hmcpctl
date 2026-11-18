@@ -234,6 +234,20 @@ class LiveTestConfig:
         {"LIVE_TEST_TEST_USER_NAME", "LIVE_TEST_NETWORK_TEST_LPAR_NAME"}
     )
 
+    def fictional_template_keys(self) -> dict[str, str]:
+        """Map fields still holding their fictional examples to operator-facing keys."""
+        keys = self._CONFIG_FIELDS | self._OPTIONAL_CONFIG_FIELDS
+        return {
+            field: key
+            for key, field in keys.items()
+            if field in _TEMPLATE_NAMES
+            and _TEMPLATE_NAMES[field].intersection(
+                self.protected_lpar_names
+                if field == "protected_lpar_names"
+                else (getattr(self, field),)
+            )
+        }
+
     @classmethod
     def from_env_file(cls, path: Path | None = None) -> LiveTestConfig:
         """Load required live-test identifiers from one authoritative local file."""
@@ -270,6 +284,25 @@ class LiveTestConfig:
         parsed = convert_values(values, cls._CONFIG_FIELDS, cls._OPTIONAL_CONFIG_FIELDS)
         validate_values(parsed, cls._CONFIG_FIELDS)
         return cls(**parsed)
+
+
+# Only fictional identifiers are reserved. Numeric resource settings and the
+# loopback listener in the template are also valid operator choices.
+_TEMPLATE_NAMES = {
+    "system_name": {LiveTestConfig.system_name},
+    "lp3_name": {LiveTestConfig.lp3_name},
+    "scratch_name": {LiveTestConfig.scratch_name},
+    "dry_run_lpar_name": {LiveTestConfig.dry_run_lpar_name},
+    "dry_run_storage_name": {LiveTestConfig.dry_run_storage_name},
+    "vdisk_volume_group_name": {LiveTestConfig.vdisk_volume_group_name},
+    "protected_lpar_names": set(LiveTestConfig.protected_lpar_names),
+    "sriov_profile_name": {LiveTestConfig.sriov_profile_name},
+    "iso_path": {LiveTestConfig.iso_path},
+    "iso_media_name": {LiveTestConfig.iso_media_name},
+    "iso_advertised_host": {LiveTestConfig.iso_advertised_host},
+    "dedicated_pcie_system_name": {LiveTestConfig.system_name},
+    "dedicated_pcie_lpar_prefix": {"example-lt-609-pcie"},
+}
 
 
 def hmc_identity(config: HMCConfig) -> dict[str, str | int | bool]:

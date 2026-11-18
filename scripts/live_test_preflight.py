@@ -12,8 +12,8 @@ Usage:
     uv run --no-sync python scripts/live_test_preflight.py [--group NAME]
     uv run --no-sync python scripts/live_test_preflight.py --skip-hardware
 
-Exit 0 means the runner would start. Non-zero means it would not, for a reason
-named in the output.
+Exit 0 means preflight admitted the selection. A nonzero exit names the
+refusal, including fictional template values in a runnable arm’s inputs.
 
 **Configuration is blocking; hardware is advisory.** An unreachable HMC or an
 out-of-envelope managed system is reported as a predicted SKIP and does not
@@ -1146,6 +1146,59 @@ def arm_verdicts(
     )
 
 
+# The common target is the managed system. These groups additionally consume
+# operator identifiers through their arms or their selected baseline subtasks.
+_MOVE_FIELDS = ("lp3_name", "scratch_name", "protected_lpar_names")
+_STORAGE_FIELDS = ("lp3_name", "protected_lpar_names", "vdisk_volume_group_name")
+_NATIVE_BOOT_FIELDS = ("lp3_name", "vdisk_volume_group_name", "iso_advertised_host")
+_ARM_TEMPLATE_FIELDS = {
+    "round2": (
+        "lp3_name",
+        "scratch_name",
+        "dry_run_lpar_name",
+        "dry_run_storage_name",
+        "vdisk_volume_group_name",
+    ),
+    "profiles": ("lp3_name",),
+    "network": ("lp3_name",),
+    "sriov": ("lp3_name", "sriov_profile_name"),
+    "storage": _STORAGE_FIELDS,
+    "vmedia": (*_STORAGE_FIELDS, "iso_path", "iso_media_name", "iso_advertised_host"),
+    "vmedia-media-change": _STORAGE_FIELDS,
+    "vg-if-match": ("lp3_name",),  # ST0 captures this partition's baseline.
+    "vios-backup": ("lp3_name",),
+    "partition-profiles": ("protected_lpar_names",),
+    "lpar-memory-move": _MOVE_FIELDS,
+    "lpar-processor-move": _MOVE_FIELDS,
+    "lpar-memory-statistics": ("lp3_name", "protected_lpar_names"),
+    "lpar-accelerator-qos": ("lp3_name", "protected_lpar_names"),
+    "lpar-paging-switchover": ("lp3_name", "protected_lpar_names"),
+    "lpar-reconfigure": ("vdisk_volume_group_name",),
+    "lpar-power": ("vdisk_volume_group_name",),
+    logical_workflow.GROUP: ("vdisk_volume_group_name",),
+    "provision-boot": ("vdisk_volume_group_name", "iso_path", "iso_advertised_host"),
+    **dict.fromkeys(provision_boot.NATIVE_GROUPS, _NATIVE_BOOT_FIELDS),
+}
+
+
+def _template_refusals(
+    config: live_config.LiveTestConfig, verdicts: tuple[ArmVerdict, ...]
+) -> list[str]:
+    matches = config.fictional_template_keys()
+    refusals = []
+    for verdict in verdicts:
+        if not verdict.runnable or verdict.group == "users":
+            continue
+        if verdict.group in {"dedicated", "bare-cec"}:
+            fields = ("dedicated_pcie_system_name", "dedicated_pcie_lpar_prefix")
+        else:
+            fields = ("system_name", *_ARM_TEMPLATE_FIELDS.get(verdict.group, ()))
+        keys = sorted(matches[field] for field in fields if field in matches)
+        if keys:
+            refusals.append(f"{verdict.group}: {', '.join(keys)}")
+    return refusals
+
+
 async def _probe_environment(system_name: str) -> str:
     """Report the ADR 0053 envelope for one managed system, as a display string.
 
@@ -1374,6 +1427,12 @@ def main(argv: list[str] | None = None) -> int:
                 config.system_name,
             ),
         )
+
+    if config is not None and (refusals := _template_refusals(config, verdicts)):
+        print("preflight refused: replace fictional template values in .env")
+        for refusal in refusals:
+            print(f"  {refusal}")
+        return 1
 
     if args.group in _NATIVE_PREFLIGHTS:
         errors, refusal, configuration_only, failure_prefix, success = (
