@@ -1555,12 +1555,16 @@ def derive_enums(
     definitions: dict[str, set[tuple[str, ...]]] = collections.defaultdict(set)
     targets: dict[str, set[str]] = collections.defaultdict(set)
     for root in _schema_roots(corpus, indexed=indexed):
-        for simple in root.findall(f"{_XSD}simpleType"):
-            name = simple.get("name", "")
-            if name.endswith(".Enum"):
+        for declaration in root:
+            name = declaration.get("name", "")
+            if ":" in name or not name.endswith(".Enum"):
+                continue
+            if declaration.tag == f"{_XSD}complexType":
+                definitions[name].add(())
+            elif declaration.tag == f"{_XSD}simpleType":
                 values = tuple(
                     value
-                    for e in simple.findall(f"{_XSD}restriction/{_XSD}enumeration")
+                    for e in declaration.findall(f"{_XSD}restriction/{_XSD}enumeration")
                     if (value := e.get("value")) is not None
                 )
                 definitions[name].add(values)

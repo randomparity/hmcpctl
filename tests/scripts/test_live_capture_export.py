@@ -2404,6 +2404,22 @@ def test_schema_enums_resolve_conflicts_independently_of_record_order() -> None:
     assert result == export.derive_enums([conflicting, b, a], "vX")
 
 
+def test_schema_enums_omit_qualified_declaration_names_and_complex_type_conflicts() -> (
+    None
+):
+    extra = """
+      <xsd:complexType name="BootMode.Enum"/>
+      <xsd:simpleType name="other:Mode.Enum"><xsd:restriction base="xsd:string">
+        <xsd:enumeration value="Example"/>
+      </xsd:restriction></xsd:simpleType>
+      <xsd:element name="Foreign" type="other:Mode.Enum"/>
+    """
+    conflicting = ENUMS_XSD.replace("</xsd:schema>", extra + "</xsd:schema>")
+    result = export.derive_enums([_rest("/schema/Types.xsd", conflicting)], "vX")
+    assert set(result["types"]) == {"LogicalPartitionState.Enum"}
+    assert not result["elements"]
+
+
 def test_schema_enums_keep_equivalent_declarations_and_skip_empty_200() -> None:
     a = _rest("/schema/A.xsd", ENUMS_XSD)
     b = _rest(
