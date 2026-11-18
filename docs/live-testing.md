@@ -1349,6 +1349,34 @@ sweep refuses one inside a git work tree), and never commit or paste it.
    reason that cites #1202. A test value that is deliberately not an HMC answer
    is not allowlisted: end its line with `# live-vocabulary: allow <reason>`.
 
+### Reproducing indexed V9R2 SP953 schema evidence
+
+Use the retained, extracted private capture with `index.json`, `summary.json`
+and `schemas/` at its root. Check the private archive against the capture
+maintainer's SHA-256 receipt before using its extracted files. Keep the
+directory outside Git. Set `capture` below to that directory. The command
+checks every indexed route, member, byte count and SHA-256 before publication.
+
+```sh
+capture=/path/to/private/extracted-capture
+uv run --no-sync python scripts/live_capture_export.py enums "$capture" \
+  --firmware V9R2SP953 --out tests/fixtures/live/vocabulary/enums-v9r2-sp953.json
+just live-vocabulary
+```
+
+Use the repeatable `--private REGEX` option for site-specific names and review
+the diff before publication. A matching private pattern rejects the output.
+The fixture identifies build `2211040014` and records one source digest per
+nonempty XSD. Eighteen indexed HTTP 200 responses had zero bytes. Three
+element names had conflicting schema bindings. The fixture includes only
+the unambiguous bindings. Its 138 enum types and 93 bindings are schema
+evidence. Runtime support and transitive schema closure need separate evidence.
+
+`just setup` also links the ignored, optional `docs/refs/` API reference
+from the main checkout when available. The exporter reads the capture
+directory supplied on the command line. CI exercises it with synthetic
+captures and checks the committed sanitized fixture.
+
 ### Adding a capture to an existing pair
 
 A committed vocabulary is derived output, so a new capture of a pair that already
