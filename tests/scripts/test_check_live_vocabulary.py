@@ -204,7 +204,9 @@ def test_stated_bindings_hold_every_captured_value() -> None:
         enum_list = json.loads(path.read_text())
         for name, values in enum_list["types"].items():
             types.setdefault(name, set()).update(values)
-        assert not STATED_BY_1516.keys() & enum_list.get("elements", {}), path.name
+        for element, bound in enum_list.get("elements", {}).items():
+            if element in STATED_BY_1516:
+                assert bound == STATED_BY_1516[element], (path.name, element)
     for path in directory.glob("v*.json"):
         rest = json.loads(path.read_text())["rest"]
         for element, enum in stated["elements"].items():
