@@ -9,6 +9,7 @@ tokenized, and an SSH key comment leaking a host.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import re
@@ -2169,6 +2170,207 @@ def test_enums_are_derived_from_the_captured_schema() -> None:
     enums = export.derive_enums(_corpus(), "vX")
     assert enums["types"]["BootMode.Enum"] == ["Normal", "Unknown"]
     assert enums["elements"] == {"DesignatedBootMode": "BootMode.Enum"}
+
+
+def _indexed_capture(root: Path, schema: str = ENUMS_XSD) -> list[dict[str, Any]]:
+    (root / "schemas/inc").mkdir(parents=True)
+    (root / "summary.json").write_text(
+        json.dumps({"release": "V9R2SP953", "build": "2211040014"})
+    )
+    rows = []
+    for name, body in (("inc/Enums.xsd", schema.encode()), ("Empty.xsd", b"")):
+        relative = "schemas/" + name
+        (root / relative).write_bytes(body)
+        rows.append(
+            {
+                "path": "/rest/api/web/schema/" + name,
+                "relative_file": relative,
+                "status": 200,
+                "bytes": len(body),
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "source_pass": "synthetic-private-metadata",
+            }
+        )
+    (root / "index.json").write_text(json.dumps(rows))
+    return rows
+
+
+def _indexed_cli(root: Path, out: Path, *options: str) -> int:
+    return export.main(
+        ["enums", str(root), "--firmware", "V9R2SP953", "--out", str(out), *options]
+    )
+
+
+def test_indexed_capture_records_verified_schema_sources_only(tmp_path: Path) -> None:
+    rows = _indexed_capture(tmp_path)
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out, "--private", "synthetic-private") == 0
+    first = out.read_bytes()
+    assert json.loads(first) == {
+        **export.derive_enums([_rest("/schema/Enums.xsd", ENUMS_XSD)], "V9R2SP953"),
+        "build": "2211040014",
+        "sources": {rows[0]["path"]: rows[0]["sha256"]},
+    }
+    (tmp_path / "index.json").write_text(json.dumps(list(reversed(rows))))
+    assert _indexed_cli(tmp_path, out) == 0
+    assert out.read_bytes() == first
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("path", "/rest/api/web/schema/../private.xsd"),
+        ("path", "/unexpected/Private.xsd"),
+        ("relative_file", "schemas/Empty.xsd"),
+        ("status", 404),
+        ("bytes", -1),
+        ("bytes", True),
+        ("bytes", 1),
+        ("sha256", "0" * 64),
+    ],
+)
+def test_indexed_capture_rejects_invalid_row(
+    tmp_path: Path, key: str, value: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    rows[0][key] = value
+    (tmp_path / "index.json").write_text(json.dumps(rows))
+    out = tmp_path / "result.json"
+    out.write_text("previous")
+    assert _indexed_cli(tmp_path, out) == 1
+    assert out.read_text() == "previous"
+    assert "record 1" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("filename", "contents"),
+    [
+        ("summary.json", "{}"),
+        ("summary.json", '["private-note"]'),
+        ("summary.json", '{"release":"V9R2SP952","build":"2211040014"}'),
+        ("summary.json", '{"release":"V9R2SP953","build":"private-note"}'),
+        ("index.json", "{}"),
+        ("index.json", "[null]"),
+        (
+            "summary.json",
+            '{"release":"wrong","release":"V9R2SP953","build":"2211040014"}',
+        ),
+        ("index.json", "["),
+    ],
+)
+def test_indexed_capture_rejects_invalid_metadata(
+    tmp_path: Path, filename: str, contents: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _indexed_capture(tmp_path)
+    (tmp_path / filename).write_text(contents)
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert err and "private-note" not in err and str(tmp_path) not in err
+
+
+def test_indexed_capture_checks_duplicate_routes_and_empty_hashes(
+    tmp_path: Path,
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    out = tmp_path / "result.json"
+    for invalid in ([*rows, rows[0]], [rows[0], {**rows[1], "sha256": "0" * 64}]):
+        (tmp_path / "index.json").write_text(json.dumps(invalid))
+        assert _indexed_cli(tmp_path, out) == 1
+        assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "member", ["schemas/inc", "schemas/inc/Enums.xsd", "index.json", "summary.json"]
+)
+def test_indexed_capture_rejects_linked_members(tmp_path: Path, member: str) -> None:
+    root = tmp_path / "capture"
+    _indexed_capture(root)
+    path = root / member
+    external = tmp_path / "external"
+    path.rename(external)
+    path.symlink_to(external, target_is_directory=external.is_dir())
+    out = tmp_path / "result.json"
+    assert _indexed_cli(root, out) == 1
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "body", [" ", "<schema", "<unrelated/>", "<!DOCTYPE schema><schema/>"]
+)
+def test_indexed_capture_rejects_nonempty_invalid_schema(
+    tmp_path: Path, body: str
+) -> None:
+    _indexed_capture(tmp_path, body)
+    out = tmp_path / "result.json"
+    out.write_text("previous")
+    assert _indexed_cli(tmp_path, out) == 1
+    assert out.read_text() == "previous"
+
+
+@pytest.mark.parametrize(
+    ("literal", "pattern"),
+    [("synthetic&quot;marker", 'synthetic"marker'), ("198.51.100.37", "absent")],
+)
+def test_indexed_capture_privacy_checks_decoded_and_serialized_output(
+    tmp_path: Path, literal: str, pattern: str
+) -> None:
+    _indexed_capture(tmp_path, ENUMS_XSD.replace('"Normal"', f'"{literal}"'))
+    out = tmp_path / "result.json"
+    out.write_text("previous")
+    assert _indexed_cli(tmp_path, out, "--private", pattern) == 1
+    assert out.read_text() == "previous"
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [
+        ("_ROW_LIMIT", "bounded list"),
+        ("_TOTAL_LIMIT", "byte limit"),
+        ("_MEMBER_LIMIT", "byte limit"),
+    ],
+)
+def test_indexed_capture_enforces_size_bounds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    limit: str,
+    expected: str,
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    if limit == "_TOTAL_LIMIT":
+        second = "schemas/inc/Second.xsd"
+        (tmp_path / second).write_bytes(
+            (tmp_path / rows[0]["relative_file"]).read_bytes()
+        )
+        rows.append(
+            {
+                **rows[0],
+                "relative_file": second,
+                "path": "/rest/api/web/schema/inc/Second.xsd",
+            }
+        )
+        (tmp_path / "index.json").write_text(json.dumps(rows))
+        ceiling = rows[0]["bytes"]
+    else:
+        ceiling = 1
+    monkeypatch.setattr(export, limit, ceiling)
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out) == 1
+    assert expected in capsys.readouterr().err and not out.exists()
+
+
+def test_indexed_capture_requires_regular_member(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    member = tmp_path / rows[0]["relative_file"]
+    member.rename(tmp_path / "saved")
+    member.mkdir()
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out) == 1
+    assert "regular file" in capsys.readouterr().err and not out.exists()
 
 
 def test_schema_enums_resolve_conflicts_independently_of_record_order() -> None:
