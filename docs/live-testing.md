@@ -57,8 +57,12 @@ uv run --no-sync python scripts/live_test_preflight.py --group dedicated
 `--no-sync` is required on every command in this document. A bare `uv run`
 prunes the `app` extra and the runner stops importing.
 
-Preflight calls the same validators the runner gates on, so its configuration
-verdict is the runner's. Exit 0 means the runner would start.
+Preflight runs the runner's configuration checks, then checks the inputs of
+each selected runnable arm for fictional sample identifiers. Before any HMC
+probe, it lists the groups and environment variables to replace in `.env` and
+exits nonzero if any still match their template values. This also applies to
+`--skip-hardware`. Disabled opt-in arms keep their SKIP verdict. Exit 0 means
+the selection passed preflight.
 
 It also prints what each arm will touch:
 

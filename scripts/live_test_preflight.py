@@ -12,8 +12,8 @@ Usage:
     uv run --no-sync python scripts/live_test_preflight.py [--group NAME]
     uv run --no-sync python scripts/live_test_preflight.py --skip-hardware
 
-Exit 0 means the runner would start. Non-zero means it would not, for a reason
-named in the output.
+Exit 0 means preflight admitted the selection. A nonzero exit names the
+refusal, including fictional template values in a runnable arm’s inputs.
 
 **Configuration is blocking; hardware is advisory.** An unreachable HMC or an
 out-of-envelope managed system is reported as a predicted SKIP and does not
@@ -231,14 +231,21 @@ def _vios_backup_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     )
 
 
+def _same_system_dedicated_config(
+    config: live_config.LiveTestConfig,
+) -> dedicated_pcie._DedicatedConfig | None:
+    arm = dedicated_pcie._dedicated_config(config)
+    return arm if arm is not None and arm.system_name == config.system_name else None
+
+
 def _lpar_config_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name the one partition the lpar-config arm (#1345) creates and deletes again."""
-    arm = dedicated_pcie._dedicated_config(config)
+    arm = _same_system_dedicated_config(config)
     dedicated = (
         f"scratch profile {arm.profile_name}: dedicated slot {arm.drc_index or dedicated_pcie.AUTO_SELECTED_SLOT}; "
         "requires unowned/no-profile baseline; assign through hmc_modify_lpar and restore "
         "before SMS, then compare all profiles and slot ownership"
-        if arm is not None and arm.system_name == config.system_name
+        if arm is not None
         else "dedicated assignment unavailable: requires dedicated settings for this same system"
     )
     return ArmVerdict(
@@ -477,7 +484,13 @@ def _logical_workflow_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
 def _native_boot_verdict(group: str, config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what one native boot-started arm (#1850) creates, boots and reads."""
     distro, release = provision_boot.NATIVE_GROUPS[group]
-    media = provision_boot.native_media(config, group)
+    try:
+        media = provision_boot.native_media(config, group)
+    except OSError as exc:
+        media = (
+            f"LIVE_TEST_NATIVE_{distro.upper()}_ISO_PATH must name a readable ISO "
+            f"({type(exc).__name__})"
+        )
     if isinstance(media, str):
         return ArmVerdict(group, False, media, (), config.system_name)
     return ArmVerdict(
@@ -1146,6 +1159,81 @@ def arm_verdicts(
     )
 
 
+# The common target is the managed system. These groups additionally consume
+# operator identifiers through their arms or their selected baseline subtasks.
+_DEDICATED_FIELDS = ("dedicated_pcie_system_name", "dedicated_pcie_lpar_prefix")
+_MOVE_FIELDS = ("lp3_name", "scratch_name", "protected_lpar_names")
+_STORAGE_FIELDS = ("lp3_name", "protected_lpar_names", "vdisk_volume_group_name")
+_NATIVE_BOOT_FIELDS = ("lp3_name", "vdisk_volume_group_name", "iso_advertised_host")
+_ARM_TEMPLATE_FIELDS = {
+    "round2": (
+        "lp3_name",
+        "scratch_name",
+        "dry_run_lpar_name",
+        "dry_run_storage_name",
+        "vdisk_volume_group_name",
+    ),
+    "profiles": ("lp3_name",),
+    "network": ("lp3_name",),
+    "sriov": ("lp3_name", "sriov_profile_name"),
+    "storage": _STORAGE_FIELDS,
+    "vmedia": (*_STORAGE_FIELDS, "iso_path", "iso_media_name", "iso_advertised_host"),
+    "vmedia-media-change": (*_STORAGE_FIELDS, "iso_media_name"),
+    "vg-if-match": ("lp3_name",),  # ST0 captures this partition's baseline.
+    "vios-backup": ("lp3_name",),
+    "partition-profiles": ("protected_lpar_names",),
+    "lpar-memory-move": _MOVE_FIELDS,
+    "lpar-processor-move": _MOVE_FIELDS,
+    "lpar-memory-statistics": ("lp3_name", "protected_lpar_names"),
+    "lpar-accelerator-qos": ("lp3_name", "protected_lpar_names"),
+    "lpar-paging-switchover": ("lp3_name", "protected_lpar_names"),
+    "lpar-reconfigure": ("vdisk_volume_group_name",),
+    "lpar-power": ("vdisk_volume_group_name",),
+    logical_workflow.GROUP: ("vdisk_volume_group_name",),
+    "provision-boot": ("vdisk_volume_group_name", "iso_path", "iso_advertised_host"),
+    **dict.fromkeys(provision_boot.NATIVE_GROUPS, _NATIVE_BOOT_FIELDS),
+}
+
+
+def _selected_template_fields(
+    config: live_config.LiveTestConfig, group: str, *, detach_probe: bool
+) -> tuple[str, ...]:
+    if group in {"dedicated", "bare-cec"}:
+        return _DEDICATED_FIELDS
+    fields = ("system_name", *_ARM_TEMPLATE_FIELDS.get(group, ()))
+    full_power_provision = (
+        group == "lpar-power"
+        and not detach_probe
+        and config.partition_profile_writer_window
+        and bare_cec._power_operations_authorized()
+    )
+    if (
+        group == "lpar-config" or full_power_provision
+    ) and _same_system_dedicated_config(config):
+        return (*fields, *_DEDICATED_FIELDS)
+    return fields
+
+
+def _template_refusals(
+    config: live_config.LiveTestConfig,
+    verdicts: tuple[ArmVerdict, ...],
+    *,
+    detach_probe: bool,
+) -> list[str]:
+    matches = config.fictional_template_keys()
+    refusals = []
+    for verdict in verdicts:
+        if not verdict.runnable or verdict.group == "users":
+            continue
+        fields = _selected_template_fields(
+            config, verdict.group, detach_probe=detach_probe
+        )
+        keys = sorted(matches[field] for field in fields if field in matches)
+        if keys:
+            refusals.append(f"{verdict.group}: {', '.join(keys)}")
+    return refusals
+
+
 async def _probe_environment(system_name: str) -> str:
     """Report the ADR 0053 envelope for one managed system, as a display string.
 
@@ -1374,6 +1462,14 @@ def main(argv: list[str] | None = None) -> int:
                 config.system_name,
             ),
         )
+
+    if config is not None and (
+        refusals := _template_refusals(config, verdicts, detach_probe=args.detach_probe)
+    ):
+        print("preflight refused: replace fictional template values in .env")
+        for refusal in refusals:
+            print(f"  {refusal}")
+        return 1
 
     if args.group in _NATIVE_PREFLIGHTS:
         errors, refusal, configuration_only, failure_prefix, success = (
