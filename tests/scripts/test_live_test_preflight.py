@@ -1735,3 +1735,25 @@ def test_optional_dedicated_template_is_refused_only_when_admitted(
         "LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME",
         "LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX",
     }
+
+
+@pytest.mark.parametrize("group", ["dedicated", "bare-cec"])
+def test_dedicated_refusal_uses_effective_identifiers(
+    workspace, monkeypatch, capsys, group
+):
+    (workspace / ".env").write_text(
+        _env_text(
+            LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME='" example-lt-609-system "',
+            LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX='" example-lt-609-pcie "',
+        )
+    )
+    _credentials(monkeypatch)
+    monkeypatch.setenv("HMC_AUTHORIZE_POWER_OPERATIONS", "true")
+    monkeypatch.setattr(
+        preflight, "_probe_environment", lambda *_: pytest.fail("envelope probe")
+    )
+    assert preflight.main(["--group", group]) == 1
+    assert set(re.findall(r"LIVE_TEST_[A-Z_]+", capsys.readouterr().out)) == {
+        "LIVE_TEST_DEDICATED_PCIE_SYSTEM_NAME",
+        "LIVE_TEST_DEDICATED_PCIE_LPAR_PREFIX",
+    }

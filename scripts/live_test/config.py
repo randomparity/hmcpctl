@@ -236,17 +236,21 @@ class LiveTestConfig:
 
     def fictional_template_keys(self) -> dict[str, str]:
         """Map fields still holding their fictional examples to operator-facing keys."""
-        keys = self._CONFIG_FIELDS | self._OPTIONAL_CONFIG_FIELDS
-        return {
-            field: key
-            for key, field in keys.items()
-            if field in _TEMPLATE_NAMES
-            and _TEMPLATE_NAMES[field].intersection(
-                self.protected_lpar_names
-                if field == "protected_lpar_names"
-                else (getattr(self, field),)
-            )
+        # The dedicated PCIe selector strips its two identifiers even when the
+        # operator quotes spaces inside a value. Compare its effective targets.
+        names = {
+            "dedicated_pcie_system_name": (self.dedicated_pcie_system_name.strip(),),
+            "dedicated_pcie_lpar_prefix": (self.dedicated_pcie_lpar_prefix.strip(),),
+            "protected_lpar_names": self.protected_lpar_names,
         }
+        keys = self._CONFIG_FIELDS | self._OPTIONAL_CONFIG_FIELDS
+        matches = {}
+        for key, field in keys.items():
+            if field in _TEMPLATE_NAMES:
+                values = names.get(field, (getattr(self, field),))
+                if _TEMPLATE_NAMES[field].intersection(values):
+                    matches[field] = key
+        return matches
 
     @classmethod
     def from_env_file(cls, path: Path | None = None) -> LiveTestConfig:
