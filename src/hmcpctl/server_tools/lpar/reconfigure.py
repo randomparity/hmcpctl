@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any, Literal
 
 from fastmcp import FastMCP
@@ -299,26 +300,35 @@ def reconfigure_handler(
                     by_kind if vios is None else {**by_kind, "vios": vios},
                     profile,
                 )
-        binding = admission = None
-        if model.installer_media is not None:
-            binding, admission = _authorize_media(
-                policy, tool_security, request, continuation, by_kind, profile
+
+        def submit_authorized(candidate: OperationRequest) -> OperationRecord:
+            binding = admission = None
+            if model.installer_media is not None:
+                binding, admission = _authorize_media(
+                    policy, tool_security, candidate, continuation, by_kind, profile
+                )
+            body = reconfigure_body(
+                model,
+                effective["allow_disruption"],
+                effective["system_name_or_uuid"],
+                effective["lpar_name_or_uuid"],
+                authorized_media=binding,
             )
-        body = reconfigure_body(
-            model,
-            effective["allow_disruption"],
-            effective["system_name_or_uuid"],
-            effective["lpar_name_or_uuid"],
-            authorized_media=binding,
-        )
-        return engine.submit(
-            request,
-            body,
-            classifiers=media_classifiers(binding),
-            admission=admission,
-            continuation=continuation,
-            wait_seconds=wait_seconds,
-        )
+            return engine.submit(
+                candidate,
+                body,
+                classifiers=media_classifiers(binding),
+                admission=admission,
+                continuation=continuation,
+                wait_seconds=wait_seconds,
+            )
+
+        try:
+            return submit_authorized(request)
+        except engine.ConcurrentAdmission as peer:
+            return submit_authorized(
+                replace(request, original_operation_id=peer.operation_id)
+            )
 
     return hmc_reconfigure_lpar
 

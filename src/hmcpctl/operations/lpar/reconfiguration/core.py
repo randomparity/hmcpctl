@@ -1629,7 +1629,7 @@ async def installer_media_admission(
     """Resolve executable detach, or authorize a strictly journal-only existing call."""
     record = engine.admission_record(request, continuation)
     if record is None:
-        if continuation != "none":
+        if continuation != "none" or request.original_operation_id is not None:
             raise OperationFailed("the operation no longer exists")
         async with open_client(request.connection, request.host) as hmc:
             partition = await _resolve(hmc, system, lpar)

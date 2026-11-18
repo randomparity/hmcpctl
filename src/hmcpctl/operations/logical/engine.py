@@ -175,6 +175,16 @@ def admission_record(
         return store.read_record(conn, row["operation_id"])
 
 
+class ConcurrentAdmission(OperationRefused):
+    """A peer admitted a request after authority resolution observed an empty slot."""
+
+    def __init__(self, operation_id: str):
+        super().__init__(
+            "request_conflict", "the operation changed during admission; retry the call"
+        )
+        self.operation_id = operation_id
+
+
 @dataclass(frozen=True)
 class Admission:
     """The operation observed when resolving authority and what it admitted."""
@@ -185,6 +195,12 @@ class Admission:
 
     def check_record(self, row: sqlite3.Row | None) -> None:
         actual = None if row is None else row["operation_id"]
+        if (
+            self.operation_id is None
+            and self.initial_effect is not None
+            and actual is not None
+        ):
+            raise ConcurrentAdmission(actual)
         if actual != self.operation_id or (self.journal_only and actual is None):
             raise OperationRefused(
                 "request_conflict",

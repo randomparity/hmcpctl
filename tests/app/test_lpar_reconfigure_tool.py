@@ -401,6 +401,23 @@ def test_journal_only_refuses_conflict_and_uses_remaining_local_evidence(
     assert media.mounted == [MEDIA]
 
 
+def test_overlapping_identical_detach_returns_the_first_operation(media, monkeypatch):
+    _provisioned()
+    app = _app(_grant(TOOL), _grant(UNMOUNT, targets=_targets()))
+    submit = engine.submit
+    winner = []
+
+    def overlap(request, *args, **kwargs):
+        if not winner:
+            winner.append(submit(request, *args, **kwargs))
+        return submit(request, *args, **kwargs)
+
+    monkeypatch.setattr(engine, "submit", overlap)
+    record = _call(app, DETACH)
+    assert record["operation_id"] == winner[0].operation_id
+    assert record["outcome"] == "completed" and media.fake.calls.count("unmount") == 1
+
+
 def test_detach_resume_checks_live_vios_before_mixed_changes(media, monkeypatch):
     _provisioned()
     app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
