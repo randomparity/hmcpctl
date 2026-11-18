@@ -253,11 +253,11 @@ needs `hmc_modify_lpar` and `hmc_rename_lpar`; `memory_mib` needs `hmc_dlpar_mem
 `processors` `hmc_dlpar_proc`, each with `hmc_update_partition_profile`. An interrupted profile
 write resumes by reading the profile back; an interrupted DLPAR write always needs attention.
 
-`boot` and `installer_media` act on a partition `hmc_provision_lpar` created:
-`boot: root_disk` sets its next boot to its root disk (`hmc_set_lpar_boot_order`), and
-For a new installer-media detach or executable resume, authorization checks the target on the
-HMC before the worker wait begins. `installer_media: detach` removes the installer media mapping and keeps the medium
-in its repository. One `hmc_unmount_optical_media` grant must cover the connection,
+`boot` and `installer_media` act on a partition `hmc_provision_lpar` created.
+`boot: root_disk` sets its next boot to its root disk (`hmc_set_lpar_boot_order`).
+`installer_media: detach` removes the installer media mapping and keeps the medium in its
+repository. For a new detach or executable resume, authorization checks the target on the
+HMC before the worker wait begins. One `hmc_unmount_optical_media` grant must cover the connection,
 the original system and LPAR selector strings, and the VIOS UUID recorded by provision.
 An all-targets grant on that connection also works. New operations record the physical
 target and medium at admission. An executable resume compares the original binding with
