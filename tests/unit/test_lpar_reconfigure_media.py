@@ -145,6 +145,20 @@ def test_provision_owned_returns_the_recorded_identity():
     }
 
 
+def test_provision_owned_reads_only_the_requested_partitions_resources():
+    _provisioned()
+    with store.session() as conn, store.write_transaction(conn):
+        conn.execute("UPDATE ledger SET partition_uuid = upper(partition_uuid)")
+        conn.execute(
+            "INSERT INTO ledger SELECT operation_id, 'other-media', kind, system_uuid, "
+            "'other-partition', 'unreadable', created_at FROM ledger WHERE key='installer_media'"
+        )
+    assert reconfigure_media.provision_owned(SYS, LPAR, "installer_media") == {
+        "vios_uuid": VIOS,
+        "media_name": MEDIA,
+    }
+
+
 def test_provision_owned_refuses_without_a_store():
     with pytest.raises(OperationFailed, match="no operation store"):
         reconfigure_media.provision_owned(SYS, LPAR, "installer_media")

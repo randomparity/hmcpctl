@@ -177,31 +177,29 @@ def provision_owned(system_uuid: str, lpar_uuid: str, kind: str) -> dict[str, An
                 f"no operation store exists, so no provision owns LPAR {lpar_uuid}"
             )
         conn.execute("BEGIN")
-        partitions = store.ledger_entries(conn, PARTITION_LEDGER, system_uuid)
-        entries = store.ledger_entries(conn, kind, system_uuid)
-    owners = {
-        op for op, part, _ in partitions if (part or "").lower() == lpar_uuid.lower()
-    }
-    if len(owners) != 1:
-        error = OperationFailed if owners else MissingProvisionEvidence
+        owner_count, hits = store.owned_partition_ledger_entries(
+            conn, system_uuid, lpar_uuid, PARTITION_LEDGER, kind
+        )
+    if owner_count != 1:
+        error = OperationFailed if owner_count else MissingProvisionEvidence
+        count = "multiple" if owner_count else "0"
         raise error(
-            f"LPAR {lpar_uuid} has {len(owners)} provision records in the operation "
+            f"LPAR {lpar_uuid} has {count} provision records in the operation "
             "ledger, not one; only a partition hmcpctl provisioned can use this field"
         )
-    (owner,) = owners
-    hits = [
-        identity
-        for op, part, identity in entries
-        if op == owner and (part or "").lower() == lpar_uuid.lower()
-    ]
-    usable = len(hits) == 1 and all(
-        isinstance(hits[0].get(field), str) and hits[0][field]
-        for field in _FIELDS[kind]
+    usable = (
+        len(hits) == 1
+        and isinstance(hits[0], dict)
+        and all(
+            isinstance(hits[0].get(field), str) and hits[0][field]
+            for field in _FIELDS[kind]
+        )
     )
     if not usable:
         error = OperationFailed if hits else MissingProvisionEvidence
+        count = "multiple" if len(hits) > 1 else str(len(hits))
         raise error(
-            f"the provision of LPAR {lpar_uuid} recorded {len(hits)} {kind} ledger "
+            f"the provision of LPAR {lpar_uuid} recorded {count} {kind} ledger "
             "entries, not one usable entry; nothing was written"
         )
     return {field: hits[0][field] for field in _FIELDS[kind]}
