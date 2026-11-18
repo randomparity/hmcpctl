@@ -21,6 +21,7 @@ from unit.test_lpar_reconfigure_media import (
 from unit.test_lpar_reconfigure_media import media as media  # noqa: PLC0414 - fixture
 
 from hmcpctl.authorization.access_policy import compile_access_policy
+from hmcpctl.errors import HMCError
 from hmcpctl.operations.logical import engine, holds, store
 from hmcpctl.operations.lpar.reconfiguration import core
 from hmcpctl.resource_identity import guard_partition
@@ -322,6 +323,32 @@ def test_continuation_binds_the_record_used_to_authorize_its_patch(
     with store.read_session() as conn:
         assert conn is not None
         assert store.read_record(conn, first["operation_id"]).outcome == "completed"
+
+
+def test_scoped_detach_resumes_after_its_original_lpar_name_has_changed(
+    media, monkeypatch
+):
+    _provisioned()
+    app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
+    mixed = {**DETACH, "patch": {"name": "web2", "installer_media": "detach"}}
+    media.unmount_error = HMCError("synthetic unavailable medium", 500)
+    first = _call(app, mixed)
+    assert (
+        first["state"] == "paused"
+        and media.fake.name == "web2"
+        and media.mounted == [MEDIA]
+    )
+
+    async def resolve_current(_hmc, lpar, **_kwargs):
+        assert lpar == LPAR
+        return LPAR
+
+    monkeypatch.setattr(core, "resolve_and_authorize_lpar_mutation", resolve_current)
+    media.unmount_error = None
+    done = _call(app, {"continuation": "resume"})
+    assert done["outcome"] == "completed" and media.mounted == []
+    assert media.fake.calls.count("the partition name") == 1
+    assert media.fake.calls.count("unmount") == 2  # One refused attempt and one detach.
 
 
 def test_crash_before_guard_resumes_only_the_admitted_medium(media, monkeypatch):
