@@ -520,8 +520,8 @@ def test_stale_profile_fails_without_writing(hmc, monkeypatch):
 def test_state_changed_since_plan_fails_before_first_write(hmc, monkeypatch):
     real = reconfigure._make_plan
 
-    async def then_activate(*args):
-        plan = await real(*args)
+    async def then_activate(*args, **kwargs):
+        plan = await real(*args, **kwargs)
         hmc.rmc = "inactive"
         return plan
 
@@ -689,8 +689,8 @@ def test_resume_preserves_plans_recorded_before_later_legs(
     make_plan, resolve = reconfigure._make_plan, reconfigure._resolve
     calls = 0
 
-    async def older_plan(*args):
-        plan = await make_plan(*args)
+    async def older_plan(*args, **kwargs):
+        plan = await make_plan(*args, **kwargs)
         for key in later_keys:
             plan.pop(key)
         return plan
