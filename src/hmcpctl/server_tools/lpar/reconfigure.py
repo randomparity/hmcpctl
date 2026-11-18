@@ -72,15 +72,20 @@ def _given(**values: Any) -> dict[str, Any]:
 
 def _effective(
     given: dict[str, Any], agent_id: str, request_id: str, continuation: str
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str | None]:
     """The arguments to authorize: the call's, over the record's on a continuation."""
     if continuation == "none":
         missing = [name for name in _REQUIRED if name not in given]
         if missing:
             raise ValueError(f"a new operation needs {', '.join(missing)}")
-        return {"allow_disruption": False, "exclusive_writer_window": False, **given}
-    recorded = engine.recorded_arguments(agent_id, request_id, RECONFIGURE_TOOL_NAME)
-    return continuation_arguments(recorded, given, request_id)
+        return {
+            "allow_disruption": False,
+            "exclusive_writer_window": False,
+            **given,
+        }, None
+    record = engine.recorded_request(agent_id, request_id, RECONFIGURE_TOOL_NAME)
+    operation_id, recorded = record if record is not None else (None, None)
+    return continuation_arguments(recorded, given, request_id), operation_id
 
 
 def _authorize_media(
@@ -242,7 +247,9 @@ def reconfigure_handler(
         )
         config = build_config(profile=profile)
         agent_id = config.agent_id or "hmcpctl"
-        effective = _effective(given, agent_id, request_id, continuation)
+        effective, original_operation_id = _effective(
+            given, agent_id, request_id, continuation
+        )
         model = ReconfigurePatch.model_validate(effective["patch"])
         if model.needs_window and effective["exclusive_writer_window"] is not True:
             raise PermissionError(
@@ -263,6 +270,7 @@ def reconfigure_handler(
             config.host,
             request_id,
             effective if continuation == "none" else given,
+            original_operation_id=original_operation_id,
         )
         specialist_gate = (
             authorize

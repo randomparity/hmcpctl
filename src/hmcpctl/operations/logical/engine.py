@@ -74,6 +74,7 @@ class OperationRequest:
     host: str
     request_id: str
     arguments: Mapping[str, Any]
+    original_operation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,12 +127,20 @@ def recorded_arguments(
     A continuation re-authorizes as a fresh call (ADR 0190 Decision 6), so a tool needs
     the recorded targets before ``submit``. Reading never creates the store.
     """
+    recorded = recorded_request(agent_id, request_id, tool)
+    return None if recorded is None else recorded[1]
+
+
+def recorded_request(
+    agent_id: str, request_id: str, tool: str
+) -> tuple[str, Mapping[str, Any]] | None:
+    """Return the immutable operation ID and authorization arguments from the same row."""
     store.validate_request_id(request_id)
     with store.read_session() as conn:
         row = None if conn is None else store.find_operation(conn, agent_id, request_id)
     if row is None or row["tool"] != tool:
         return None
-    return json.loads(row["request_json"])["arguments"]
+    return row["operation_id"], json.loads(row["request_json"])["arguments"]
 
 
 def recorded_partition(
@@ -302,6 +311,13 @@ def _check_binding(
     row: sqlite3.Row, request: OperationRequest, digest: str, continuation: str
 ) -> None:
     """Refuse a request whose connection, tool or arguments differ from the record's."""
+    if (
+        request.original_operation_id is not None
+        and row["operation_id"] != request.original_operation_id
+    ):
+        raise OperationRefused(
+            "request_conflict", "the operation changed during admission; retry the call"
+        )
     if (row["connection"], row["host"]) != (request.connection, request.host):
         raise OperationRefused(
             "connection_mismatch",

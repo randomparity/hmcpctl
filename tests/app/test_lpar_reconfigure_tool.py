@@ -278,6 +278,25 @@ def test_unusable_ledger_refuses_without_disclosing_identity(media: MediaHMC, ba
         assert conn is not None and store.find_operation(conn, "hmcpctl", "r1") is None
 
 
+@pytest.mark.parametrize("arguments", [DETACH, MEMORY])
+def test_continuation_binds_the_record_used_to_authorize_its_patch(
+    media, monkeypatch, arguments
+):
+    _provisioned()
+    app = _app(_grant(TOOL, MEM, PROFILE_WRITE, UNMOUNT))
+    first = _call(app, arguments)
+    recorded = engine.recorded_request("hmcpctl", "r1", TOOL)
+    assert recorded is not None and recorded[0] == first["operation_id"]
+    monkeypatch.setattr(engine, "recorded_request", lambda *_: ("0" * 32, recorded[1]))
+    with pytest.raises(
+        ToolError, match="changed during admission|check the original request"
+    ):
+        _call(app, {"continuation": "resume"})
+    with store.read_session() as conn:
+        assert conn is not None
+        assert store.read_record(conn, first["operation_id"]).outcome == "completed"
+
+
 def test_crash_before_guard_resumes_only_the_admitted_medium(media, monkeypatch):
     _provisioned()
     app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
