@@ -22,6 +22,7 @@ from ...config import build_config
 from ...errors import HMCError
 from ...operations.logical import engine
 from ...operations.logical.engine import OperationRequest
+from ...operations.logical.holds import HoldRefused
 from ...operations.logical.models import OperationRecord
 from ...operations.logical.store import connection_label
 from ...operations.lpar.reconfiguration.core import (
@@ -109,6 +110,7 @@ def _authorize_media(
             )
         except (
             HMCError,
+            HoldRefused,
             engine.OperationFailed,
             ValueError,
             LookupError,

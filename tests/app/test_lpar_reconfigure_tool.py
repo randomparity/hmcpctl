@@ -21,8 +21,9 @@ from unit.test_lpar_reconfigure_media import (
 from unit.test_lpar_reconfigure_media import media as media  # noqa: PLC0414 - fixture
 
 from hmcpctl.authorization.access_policy import compile_access_policy
-from hmcpctl.operations.logical import engine, store
+from hmcpctl.operations.logical import engine, holds, store
 from hmcpctl.operations.lpar.reconfiguration import core
+from hmcpctl.resource_identity import guard_partition
 from hmcpctl.server import PRIMARY_TOOLS, TOOL_SECURITY, create_mcp
 from hmcpctl.server_tools.lpar import reconfigure as handler
 
@@ -273,6 +274,32 @@ def test_unusable_ledger_refuses_without_disclosing_identity(media: MediaHMC, ba
     with pytest.raises(ToolError, match="check the original request") as exc:
         _call(_app(_grant(TOOL, UNMOUNT)), DETACH)
     assert all(value not in str(exc.value) for value in (LPAR, VIOS, MEDIA, "entries"))
+    assert media.mounted == [MEDIA]
+    with store.read_session() as conn:
+        assert conn is not None and store.find_operation(conn, "hmcpctl", "r1") is None
+
+
+def test_held_partition_refuses_detach_without_disclosing_hold(media, monkeypatch):
+    _provisioned()
+    holds.place_hold(
+        SYS,
+        LPAR,
+        consumer_label="fixture-owner",
+        agent_id="fixture-agent",
+        connection="<default>",
+    )
+
+    async def resolve(_hmc, _lpar, **_kwargs):
+        guard_partition(LPAR)
+        return LPAR
+
+    monkeypatch.setattr(core, "resolve_and_authorize_lpar_mutation", resolve)
+    with pytest.raises(ToolError, match="check the original request") as exc:
+        _call(_app(_grant(TOOL), _grant(UNMOUNT, targets=_targets())), DETACH)
+    assert all(
+        value not in str(exc.value)
+        for value in (LPAR, "fixture-owner", "fixture-agent")
+    )
     assert media.mounted == [MEDIA]
     with store.read_session() as conn:
         assert conn is not None and store.find_operation(conn, "hmcpctl", "r1") is None
