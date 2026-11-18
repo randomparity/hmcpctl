@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
 
 import typer
+from pydantic import ValidationError
 from rich.text import Text
+from typer._click.core import ParameterSource
 
 from hmcpctl.operations.lpar.provisioning.core import (
     ProvisionAdapters,
+    ProvisionRequest,
     ProvisionResult,
     ProvisionStorage,
     preview_provision,
     validate_provision_assignments,
 )
+from hmcpctl.operations.lpar.provisioning.media import MediaMismatch
 from hmcpctl.operations.lpar.provisioning.operation import (
     json_value,
     provision_body,
@@ -32,6 +37,7 @@ from ...operations.logical import engine, store
 from ...operations.logical.engine import MAX_WAIT_SECONDS, OperationRequest
 from ..output import (
     VerbatimTable,
+    confirm_on_stderr,
     console,
     escape_controls,
     fail,
@@ -40,13 +46,86 @@ from ..output import (
     usage_error,
 )
 from ..runtime import current_options, ssh_config, with_client
-from .assignment_input import load_pcie_assignments, load_physical_io
+from .assignment_input import load_install, load_pcie_assignments, load_physical_io
 
 TOOL = "hmc_provision_lpar"
-CONTINUATIONS = ("none", "resume", "abandon")
+CONTINUATIONS = ("none", "resume", "abandon", "boot")
+
+# A CLI flag may select one member of a composite operation argument.
+_REQUEST_FIELDS = {
+    "system": "system_name_or_uuid",
+    "name": "name",
+    "port_vlan_id": "adapters.port_vlan_id",
+    "mac": "adapters.mac",
+    "vios_uuid": "storage.vios_uuid",
+    "storage_name": "storage.storage_name",
+    "storage_kind": "storage.kind",
+    "vg_uuid": "storage.vg_uuid",
+    "capacity_mib": "storage.capacity_mib",
+    "min_memory": "resources.min_memory",
+    "memory": "resources.desired_memory",
+    "max_memory": "resources.max_memory",
+    "vcpus": "resources.desired_vcpus",
+    "max_vcpus": "resources.max_vcpus",
+    "partition_type": "partition_type",
+    "power_on": "power_on",
+    "install": "install",
+    "boot": "boot",
+    "physical_io": "physical_io",
+    "pcie_assignments": "assignments",
+    "exclusive_writer_window": "exclusive_writer_window",
+}
+_FILE_LOADERS = {
+    "install": load_install,
+    "physical_io": load_physical_io,
+    "pcie_assignments": load_pcie_assignments,
+}
+
+
+def _continuation_values(
+    ctx: typer.Context, recorded: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Send only explicit request flags to the engine's recorded-value check."""
+    given: dict[str, Any] = {}
+    for option, field in _REQUEST_FIELDS.items():
+        if ctx.get_parameter_source(option) != ParameterSource.COMMANDLINE:
+            continue
+        value = ctx.params[option]
+        if loader := _FILE_LOADERS.get(option):
+            value = json_value(loader(Path(value)))
+        group, _, member = field.partition(".")
+        if member:
+            given.setdefault(group, dict(recorded.get(group, {})))[member] = value
+        else:
+            given[group] = value
+    return given
+
+
+def _validated_request(arguments: Mapping[str, Any]) -> tuple[str, ProvisionRequest]:
+    """Keep caller-controlled producer fields and schema errors out of CLI output."""
+    try:
+        return request_from_arguments(arguments)
+    except MediaMismatch:
+        raise ValueError(
+            "--install producer result does not match the requested media, network or MAC"
+        ) from None
+    except ValidationError:
+        if arguments.get("install") is not None:
+            raise ValueError(
+                "Invalid --install provision request; check the typed options"
+            ) from None
+        raise
+    except ValueError as exc:
+        field = str(exc).partition(":")[0]
+        if re.fullmatch(r"install\.network\.routes\[\d+\]\.gateway", field):
+            raise ValueError(
+                f"{field}: supply an IPv4 gateway in the network of install.network.address"
+            ) from None
+        raise
 
 
 def lpars_provision(
+    ctx: typer.Context,
     request_id: str = typer.Option(
         ...,
         "--request-id",
@@ -55,7 +134,7 @@ def lpars_provision(
     continuation: str = typer.Option(
         "none",
         "--continuation",
-        help="none, resume or abandon; a continuation reuses the recorded request",
+        help="none, resume, abandon or boot; a continuation reuses the recorded request",
     ),
     system: str | None = typer.Option(
         None, "--system", "-s", help="Target managed system name or UUID"
@@ -89,15 +168,26 @@ def lpars_provision(
         "--capacity-mib",
         help="Create --storage-name as a new owned virtual disk of this size",
     ),
-    power_on: bool = typer.Option(
-        True, "--power-on/--no-power-on", help="Power on after provisioning"
+    power_on: bool | None = typer.Option(
+        None, "--power-on/--no-power-on", help="Power on after provisioning"
+    ),
+    install: Path | None = typer.Option(
+        None,
+        "--install",
+        help="Prepared or built LparInstall JSON file (2 MiB maximum)",
+    ),
+    mac: str | None = typer.Option(
+        None, "--mac", help="Pinned MAC for prepared install media"
+    ),
+    boot: str | None = typer.Option(
+        None, "--boot", help="Installer boot mode: immediate (default) or deferred"
     ),
     exclusive_writer_window: bool = typer.Option(
         False,
         "--exclusive-writer-window",
         help=(
             "Attest that no other writer changes this partition's profiles until the "
-            "operation ends; required to provision or resume (ADR 0313)"
+            "operation ends; required to provision, resume or boot (ADR 0313)"
         ),
     ),
     dry_run: bool = typer.Option(
@@ -131,7 +221,10 @@ def lpars_provision(
     recorded under --request-id (ADR 0313): repeating it returns the same operation, and a
     paused run continues with --continuation resume (or stops with abandon) from this
     command or hmc_provision_lpar under the same agent id and connection. The command waits
-    for the run to end and exits 1 unless it is configured. No automatic rollback is performed.
+    for the worker. With --install, coordinate writers to the disk's VolumeGroup for the
+    entire operation. Deferred stops with the partition powered off; --continuation boot
+    starts it. Boot success means firmware handed control to the boot image. Guest
+    installation is unverified. An incomplete or failed run exits 1.
     """
     try:
         store.validate_request_id(request_id)
@@ -139,6 +232,8 @@ def lpars_provision(
         usage_error(f"--request-id: {exc}")
     if continuation not in CONTINUATIONS:
         usage_error(f"--continuation must be one of {', '.join(CONTINUATIONS)}")
+    if boot is not None and boot not in ("immediate", "deferred"):
+        usage_error("--boot must be immediate or deferred")
     if not (dry_run or continuation == "abandon" or exclusive_writer_window):
         usage_error(
             "--exclusive-writer-window is required: provision writes a partition "
@@ -147,8 +242,7 @@ def lpars_provision(
     if continuation != "none":
         if dry_run:
             usage_error("--dry-run cannot continue an operation")
-        given = {"exclusive_writer_window": True} if continuation == "resume" else {}
-        _run(request_id, continuation, None, as_json, given)
+        _run(ctx, request_id, continuation, None, as_json)
         return
     missing = [
         flag
@@ -180,7 +274,7 @@ def lpars_provision(
     arguments = {
         "system_name_or_uuid": system,
         "name": name,
-        "adapters": json_value(ProvisionAdapters(port_vlan_id or 0)),
+        "adapters": json_value(ProvisionAdapters(port_vlan_id or 0, mac)),
         "storage": json_value(
             ProvisionStorage(
                 vios_uuid or "",
@@ -200,13 +294,17 @@ def lpars_provision(
             )
         ),
         "partition_type": partition_type,
-        "power_on": power_on,
+        "power_on": install is None if power_on is None else power_on,
         "assignments": json_value(assignments),
         "physical_io": json_value(load_physical_io(physical_io)),
         "exclusive_writer_window": exclusive_writer_window,
     }
+    if install is not None:
+        arguments["install"] = json_value(load_install(install))
+    if boot is not None:
+        arguments["boot"] = boot
     try:
-        system_name, request = request_from_arguments(arguments)
+        system_name, request = _validated_request(arguments)
     except ValueError as exc:
         usage_error(str(exc))
     try:
@@ -225,20 +323,21 @@ def lpars_provision(
             _render_provision_result(result, request.name, True, as_json)
             return
     if not yes:
-        typer.confirm(
-            f"Provision LPAR '{terminal_field(name)}' on system '{terminal_field(system)}"
-            f"' (VLAN {terminal_field(port_vlan_id)}, VIOS {terminal_field(vios_uuid)})?",
+        confirm_on_stderr(
+            f"Provision LPAR '{terminal_field(name, err=True)}' on system "
+            f"'{terminal_field(system, err=True)}' (VLAN {terminal_field(port_vlan_id, err=True)}, "
+            f"VIOS {terminal_field(vios_uuid, err=True)})?",
             abort=True,
         )
-    _run(request_id, continuation, arguments, as_json, {})
+    _run(ctx, request_id, continuation, arguments, as_json)
 
 
 def _run(
+    ctx: typer.Context,
     request_id: str,
     continuation: str,
     arguments: Mapping[str, Any] | None,
     as_json: bool,
-    given: Mapping[str, Any],
 ) -> None:
     """Submit, wait for the worker to end, render, and exit 1 unless it completed."""
     config = ssh_config()
@@ -248,7 +347,10 @@ def _run(
             arguments = engine.recorded_arguments(agent_id, request_id, TOOL)
             if arguments is None:
                 usage_error(f"no operation has request_id {request_id}")
-        system, request = request_from_arguments(arguments)
+            submitted = _continuation_values(ctx, arguments)
+        else:
+            submitted = arguments
+        system, request = _validated_request(arguments)
         # Workers reuse this admitted config instead of resolving the profile again.
         record = engine.submit(
             OperationRequest(
@@ -257,10 +359,13 @@ def _run(
                 store.connection_label(current_options().profile, tool=TOOL),
                 config.host,
                 request_id,
-                arguments if continuation == "none" else given,
+                submitted,
             ),
             provision_body(
-                system, request, lambda _connection, _host: HMCClient(config)
+                system,
+                request,
+                lambda _connection, _host: HMCClient(config),
+                wait_seconds=MAX_WAIT_SECONDS,
             ),
             classifiers=provision_classifiers(
                 request, lambda _connection, _host: HMCClient(config)
@@ -274,7 +379,7 @@ def _run(
         fail(exc)
     result = result_from_record(record)
     _render_provision_result(result, request.name, False, as_json)
-    ended = record.outcome == "configured" or (
+    ended = record.outcome in ("configured", "ready_to_boot", "boot_started") or (
         continuation == "abandon" and record.outcome == "abandoned"
     )
     if not ended:
@@ -290,6 +395,14 @@ def _render_provision_result(
     if dry_run:
         console.print(
             "[yellow]DRY RUN — preconditions validated, no LPAR created[/yellow]"
+        )
+    elif result.operation and result.operation.outcome == "ready_to_boot":
+        console.print(
+            "Installer media staged. The partition is powered off and ready to boot."
+        )
+    elif result.operation and result.operation.outcome == "boot_started":
+        console.print(
+            "Partition firmware handed control to the boot image. Guest installation is unverified."
         )
     elif result.workflow_completed:
         console.print(
