@@ -1632,10 +1632,17 @@ async def installer_media_admission(
         if continuation != "none" or request.original_operation_id is not None:
             raise OperationFailed("the operation no longer exists")
         async with open_client(request.connection, request.host) as hmc:
-            partition = await _resolve(hmc, system, lpar)
-            binding = InstallerMedia.from_ledger(*partition)
-            await binding.verify_vios(hmc)
-        return binding, engine.Admission(None, initial_effect=binding.effect())
+            try:
+                partition = await _resolve(hmc, system, lpar)
+            except OperationFailed:
+                # A peer may have admitted this request and renamed the original LPAR.
+                record = engine.admission_record(request, continuation)
+                if record is None:
+                    raise
+            else:
+                binding = InstallerMedia.from_ledger(*partition)
+                await binding.verify_vios(hmc)
+                return binding, engine.Admission(None, initial_effect=binding.effect())
 
     partition, original = recorded_media(record, plan_key=PLAN_KEY, plan_kind=PLAN_KIND)
     journal_only = continuation in ("none", "abandon") or record.state == "terminal"

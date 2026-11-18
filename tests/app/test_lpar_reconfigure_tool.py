@@ -418,6 +418,39 @@ def test_overlapping_identical_detach_returns_the_first_operation(media, monkeyp
     assert record["outcome"] == "completed" and media.fake.calls.count("unmount") == 1
 
 
+def test_overlapping_detach_returns_the_peer_that_already_renamed_the_partition(
+    media, monkeypatch
+):
+    _provisioned()
+    grants = (_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
+    mixed = {**DETACH, "patch": {"name": "web2", "installer_media": "detach"}}
+    peer = _app(*grants)
+    peer_started = False
+    winner = None
+    resolve = core.resolve_and_authorize_lpar_mutation
+
+    async def resolve_current(hmc, lpar, **kwargs):
+        nonlocal peer_started, winner
+        if not peer_started:
+            peer_started = True
+            winner = await asyncio.to_thread(_call, peer, mixed)
+        if lpar not in (LPAR, media.fake.name):
+            raise ValueError("the original name no longer resolves")
+        return await resolve(hmc, lpar, **kwargs)
+
+    monkeypatch.setattr(core, "resolve_and_authorize_lpar_mutation", resolve_current)
+    record = _call(_app(*grants), mixed)
+    assert winner is not None and record["operation_id"] == winner["operation_id"]
+    assert record["outcome"] == "completed"
+    with pytest.raises(ToolError, match="check the original request"):
+        _call(_app(*grants), {**mixed, "request_id": "no-peer"})
+    assert (
+        media.fake.calls.count("the partition name")
+        == media.fake.calls.count("unmount")
+        == 1
+    )
+
+
 def test_detach_resume_checks_live_vios_before_mixed_changes(media, monkeypatch):
     _provisioned()
     app = _app(_grant(TOOL, MODIFY, RENAME), _grant(UNMOUNT, targets=_targets()))
