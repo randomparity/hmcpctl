@@ -484,7 +484,13 @@ def _logical_workflow_verdict(config: live_config.LiveTestConfig) -> ArmVerdict:
 def _native_boot_verdict(group: str, config: live_config.LiveTestConfig) -> ArmVerdict:
     """Name what one native boot-started arm (#1850) creates, boots and reads."""
     distro, release = provision_boot.NATIVE_GROUPS[group]
-    media = provision_boot.native_media(config, group)
+    try:
+        media = provision_boot.native_media(config, group)
+    except OSError as exc:
+        media = (
+            f"LIVE_TEST_NATIVE_{distro.upper()}_ISO_PATH must name a readable ISO "
+            f"({type(exc).__name__})"
+        )
     if isinstance(media, str):
         return ArmVerdict(group, False, media, (), config.system_name)
     return ArmVerdict(

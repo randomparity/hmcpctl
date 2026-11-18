@@ -1843,3 +1843,48 @@ def test_media_change_checks_teardown_media_name_before_hardware(
     settings["LIVE_TEST_ISO_MEDIA_NAME"] = "lab.iso"
     (workspace / ".env").write_text(_env_text(**settings))
     assert preflight.main(["--group", "vmedia-media-change", "--skip-hardware"]) == 0
+
+
+@pytest.mark.parametrize("group", provision_boot.NATIVE_GROUPS)
+@pytest.mark.parametrize("operation", ["is_file", "open"])
+def test_unreadable_native_iso_skips_arm_and_preserves_aggregate_template_keys(
+    workspace, monkeypatch, capsys, group, operation
+):
+    distro, _ = provision_boot.NATIVE_GROUPS[group]
+    iso = workspace / "launcher.iso"
+    iso.write_bytes(b"launcher")
+    result = workspace / "result.json"
+    result.write_text("{}")
+    iso_key = f"LIVE_TEST_NATIVE_{distro.upper()}_ISO_PATH"
+    (workspace / ".env").write_text(
+        _env_text(
+            LIVE_TEST_NATIVE_BOOT_MAC="02:00:00:00:00:aa",
+            LIVE_TEST_VDISK_VOLUME_GROUP_NAME=live_config.LiveTestConfig.vdisk_volume_group_name,
+            **{
+                iso_key: str(iso),
+                f"LIVE_TEST_NATIVE_{distro.upper()}_MEDIA_RESULT": str(result),
+            },
+        )
+    )
+    _credentials(monkeypatch)
+    original = getattr(Path, operation)
+
+    def deny_iso(path, *args, **kwargs):
+        if path == iso:
+            raise PermissionError("unreadable test image")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, operation, deny_iso)
+    for probe in ("_probe_environment", "_probe_provision_vlan"):
+        monkeypatch.setattr(preflight, probe, lambda *_: pytest.fail("hardware probe"))
+
+    assert preflight.main(["--group", group]) == 0
+    named = capsys.readouterr().out
+    assert "SKIP" in named and iso_key in named and "PermissionError" in named
+    for selection in ([], ["--group", "all"], ["--skip-hardware"]):
+        assert preflight.main(selection) == 1
+        output = capsys.readouterr().out
+        assert "round2: LIVE_TEST_VDISK_VOLUME_GROUP_NAME" in output
+        assert set(re.findall(r"LIVE_TEST_[A-Z_]+", output)) == {
+            "LIVE_TEST_VDISK_VOLUME_GROUP_NAME"
+        }
