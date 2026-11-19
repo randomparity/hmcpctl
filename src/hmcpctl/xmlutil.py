@@ -346,6 +346,32 @@ def render_mtms(resource: Mapping[str, Any]) -> str | None:
     return None if parts is None else "{}-{}*{}".format(*parts)
 
 
+def parse_complete_feed(xml_text: str, resource_type: str) -> list[dict[str, Any]]:
+    """Read a single complete system-child Atom feed before a pool mutation."""
+    root = DET.fromstring(xml_text.encode("utf-8"))
+    atom = "{http://www.w3.org/2005/Atom}"
+    if root.tag != atom + "feed":
+        raise ValueError(f"Expected a complete Atom feed for {resource_type}")
+    if any(
+        link.get("rel", "").casefold() in {"next", "previous", "prev"}
+        for link in root.findall(atom + "link")
+    ):
+        raise ValueError(
+            f"Cannot validate {resource_type} on an incomplete paginated feed"
+        )
+    entries = [_parse_entry(entry) for entry in root.findall(atom + "entry")]
+    for child in root:
+        if localname(child.tag) == "totalResults" and (child.text or "").strip() != str(
+            len(entries)
+        ):
+            raise ValueError(f"Cannot validate {resource_type} on an incomplete feed")
+        if localname(child.tag) == "entry" and child.tag != atom + "entry":
+            raise ValueError(f"Unexpected entry namespace for {resource_type}")
+    if any(entry["ResourceType"] != resource_type for entry in entries):
+        raise ValueError(f"Unexpected resource type in {resource_type} feed")
+    return entries
+
+
 def parse_feed(xml_text: str) -> list[dict[str, Any]]:
     """Parse an HMC Atom feed into flattened resource dictionaries."""
     root = DET.fromstring(xml_text.encode("utf-8"))

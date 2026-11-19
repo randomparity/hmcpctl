@@ -179,6 +179,15 @@ def processor_pools_update(
         asdict(result), selected, columns, [row], title="Shared Processor Pool Update"
     )
     if result.outcome != "verified":
+        if selected != InventoryFormat.json:
+            for label, error in (
+                ("Submission", result.submission_error),
+                ("Readback", result.readback_error),
+            ):
+                if error is not None:
+                    err_console.print(
+                        terminal_field(f"{label}: {error}", err=True), markup=False
+                    )
         raise typer.Exit(1)
 
 

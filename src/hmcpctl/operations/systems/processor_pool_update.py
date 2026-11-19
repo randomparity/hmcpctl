@@ -18,10 +18,10 @@ from hmcpctl.operations.systems.processor_pools import (
     get_shared_processor_pool,
     read_selected_pool,
 )
-from hmcpctl.resource_identity import is_uuid, resolve_system_name
+from hmcpctl.resource_identity import is_uuid
 from hmcpctl.ssh.install import validate_hmc_name
 from hmcpctl.ssh.transport import run_hmc_command
-from hmcpctl.xmlutil import leaf_text
+from hmcpctl.xmlutil import leaf_text, render_mtms
 
 
 @dataclass(frozen=True)
@@ -52,28 +52,35 @@ def _member_units(entry: dict[str, Any], pool_id: int) -> Decimal | None:
     )
 
 
-async def capacity_evidence(
-    hmc: HMCClient,
-    system_uuid: str,
-    pool_id: int,
-    reported_members: tuple[str, ...] | None,
-) -> PoolCapacity:
-    """Read entitlement from both partition feeds and available units from the managed system."""
+async def _system_resource(hmc: HMCClient, system_uuid: str) -> dict[str, Any]:
     system = await hmc.get_managed_system(system_uuid)
     if not system or str(system.get("UUID")).casefold() != system_uuid.casefold():
         raise ValueError("Pool update could not confirm the managed system identity")
     resource = resource_container(system, "Resource")
     if leaf_text(resource.get("State")) != "operating":
         raise ValueError("Pool update requires an operating managed system")
+    return resource
+
+
+async def capacity_evidence(
+    hmc: HMCClient,
+    system_uuid: str,
+    pool_id: int,
+    reported_members: tuple[str, ...] | None,
+    *,
+    resource: dict[str, Any] | None = None,
+) -> PoolCapacity:
+    """Read entitlement from both partition feeds and available units from the managed system."""
+    if resource is None:
+        resource = await _system_resource(hmc, system_uuid)
     processors = resource_container(resource, "AssociatedSystemProcessorConfiguration")
     available = bounded_processor_number(
         leaf_text(processors.get("CurrentAvailableSystemProcessorUnits"))
     )
-    entries = await hmc.list_logical_partitions(system_uuid)
-    vios = await hmc.list_vios(system_uuid)
+    entries = await hmc.list_pool_partition_entries(system_uuid)
     seen: set[str] = set()
     members: dict[str, Decimal] = {}
-    for entry in (*entries, *vios):
+    for entry in entries:
         uuid = entry.get("UUID")
         if not isinstance(uuid, str) or not is_uuid(uuid) or uuid.casefold() in seen:
             raise ValueError(
@@ -112,9 +119,14 @@ class PoolChange:
                 raise ValueError(
                     "Pool name contains a native attribute delimiter; choose another name"
                 )
-            if not name.strip() or not name.isprintable() or len(name) > 14:
+            if (
+                name != name.strip()
+                or not name
+                or not name.isprintable()
+                or len(name) > 14
+            ):
                 raise ValueError(
-                    "Pool name must have 1–14 printable characters and contain nonblank text"
+                    "Pool name must have 1–14 printable characters without outer whitespace"
                 )
         return cls(
             name,
@@ -161,7 +173,11 @@ class PoolUpdateResult:
 
 
 async def _validate_capacity(
-    hmc: HMCClient, system: str, target: SharedProcessorPool, change: PoolChange
+    hmc: HMCClient,
+    system: str,
+    target: SharedProcessorPool,
+    change: PoolChange,
+    resource: dict[str, Any],
 ) -> None:
     if change.maximum is None and change.reserved is None:
         return
@@ -177,7 +193,7 @@ async def _validate_capacity(
     if reservation > maximum:
         raise ValueError("Maximum pool units must cover the pending reservation")
     evidence = await capacity_evidence(
-        hmc, system, target.pool_id, target.assigned_partition_uuids
+        hmc, system, target.pool_id, target.assigned_partition_uuids, resource=resource
     )
     if maximum < reservation + evidence.entitlement:
         raise ValueError(
@@ -224,8 +240,13 @@ async def update_shared_processor_pool(
         slot.name == change.name and slot.pool_id != target.pool_id for slot in slots
     ):
         raise ValueError("New pool name already exists on this managed system")
-    await _validate_capacity(hmc, system, target, change)
-    system_name = await resolve_system_name(hmc, system)
+    resource = await _system_resource(hmc, system)
+    system_name = render_mtms(resource)
+    if system_name is None:
+        raise ValueError(
+            "Shared processor pool update requires the selected system's full MTMS"
+        )
+    await _validate_capacity(hmc, system, target, change, resource)
     submit_error = None
     try:
         await submit_native(hmc.config, system_name, target.pool_id, change)
@@ -242,5 +263,18 @@ async def update_shared_processor_pool(
     if _matches(change, result.pool) and submit_error is None:
         outcome = "verified"
     else:
-        outcome = "partial" if result.pool != target else "unverified"
+        requested_changed = (
+            (change.name is not None and result.pool.name != target.name)
+            or (
+                change.maximum is not None
+                and result.pool.maximum_processing_units
+                != target.maximum_processing_units
+            )
+            or (
+                change.reserved is not None
+                and result.pool.pending_reserved_processing_units
+                != target.pending_reserved_processing_units
+            )
+        )
+        outcome = "partial" if requested_changed else "unverified"
     return PoolUpdateResult(system, target, result.pool, outcome, submit_error, None)

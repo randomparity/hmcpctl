@@ -36,13 +36,20 @@ def hardware():
         "UUID": SYSTEM,
         "Resource": {
             "State": "operating",
+            "MachineTypeModelAndSerialNumber": {
+                "MachineType": "9999",
+                "Model": "001",
+                "SerialNumber": "ABC123",
+            },
             "AssociatedSystemProcessorConfiguration": {
                 "CurrentAvailableSystemProcessorUnits": "2.00"
             },
         },
     }
-    hmc.list_logical_partitions.return_value = [member(LPAR, 2, "0.55")]
-    hmc.list_vios.return_value = [member(VIOS, 2, "0.20")]
+    hmc.list_pool_partition_entries.return_value = [
+        member(LPAR, 2, "0.55"),
+        member(VIOS, 2, "0.20"),
+    ]
     return hmc
 
 
@@ -62,7 +69,7 @@ async def test_missing_membership_or_unreadable_source_refuses():
     hmc = hardware()
     with pytest.raises(ValueError, match="membership"):
         await capacity_evidence(hmc, SYSTEM, 2, ())
-    hmc.list_vios.return_value = [member(VIOS, 2, "NaN")]
+    hmc.list_pool_partition_entries.return_value = [member(VIOS, 2, "NaN")]
     with pytest.raises(ValueError):
         await capacity_evidence(hmc, SYSTEM, 2, None)
 
@@ -75,6 +82,7 @@ async def test_missing_membership_or_unreadable_source_refuses():
         {"reserved": "0.001"},
         {"reserved": True},
         {"name": " "},
+        {"name": " Ops "},
         {"name": "A,B"},
         {"name": "A=B"},
         {"name": 'A"B'},
@@ -161,7 +169,6 @@ def update_boundary(monkeypatch):
         "read_selected_pool",
         AsyncMock(return_value=(SYSTEM, target, (target, make_pool(3, "other")))),
     )
-    monkeypatch.setattr(update, "resolve_system_name", AsyncMock(return_value="sys"))
     monkeypatch.setattr(update, "submit_native", AsyncMock())
     monkeypatch.setattr(
         update,
@@ -244,3 +251,94 @@ def test_mcp_forwards_update_to_domain(update_boundary, monkeypatch):
     result = tools.hmc_update_shared_processor_pool("sys", 2, new_name="test pool")
     assert result["outcome"] == "verified"
     assert result["route"] == "chhwres"
+
+
+@pytest.mark.parametrize(
+    "kind", ["SharedProcessorPool", "LogicalPartition", "VirtualIOServer"]
+)
+def test_complete_pool_inventory_refuses_paged_feed(kind):
+    from hmcpctl.xmlutil import parse_complete_feed
+
+    xml = '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="next" href="?page=2"/></feed>'
+    with pytest.raises(ValueError, match="incomplete"):
+        parse_complete_feed(xml, kind)
+
+
+@pytest.mark.asyncio
+async def test_unrelated_available_units_do_not_make_failed_rename_partial(
+    update_boundary,
+):
+    from dataclasses import replace
+
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPoolResult
+
+    update, hmc, target = update_boundary
+    update.get_shared_processor_pool.return_value = SharedProcessorPoolResult(
+        SYSTEM, "", replace(target, available_processing_units=1)
+    )
+    result = await update.update_shared_processor_pool(hmc, "sys", 2, new_name="new")
+    assert result.outcome == "unverified"
+    assert update.submit_native.await_args.args[1] == "9999-001*ABC123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "continued", ["SharedProcessorPool", "LogicalPartition", "VirtualIOServer"]
+)
+async def test_paged_child_feed_never_reaches_native_update(continued, monkeypatch):
+    from unittest.mock import patch
+
+    from conftest import live_fixture, make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.systems import processor_pool_update as update
+
+    recorded = live_fixture("rest-shared-processor-pool-feed")["body"]
+    empty = '<feed xmlns="http://www.w3.org/2005/Atom"/>'
+    page = '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="next" href="?page=2"/></feed>'
+
+    async def get(path, kind):
+        if kind == continued:
+            return page
+        return recorded if kind == "SharedProcessorPool" else empty
+
+    hmc = HMCClient(make_config())
+    submit = AsyncMock()
+    monkeypatch.setattr(update, "submit_native", submit)
+    with (
+        patch.object(hmc, "_get", side_effect=get),
+        patch.object(
+            hmc,
+            "get_managed_system",
+            return_value=hardware().get_managed_system.return_value,
+        ),
+        pytest.raises(HMCError, match="incomplete"),
+    ):
+        await update.update_shared_processor_pool(hmc, SYSTEM, 2, maximum_units=0)
+    submit.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "xml,message",
+    [
+        ("<entry/>", "complete Atom"),
+        (
+            '<feed xmlns="http://www.w3.org/2005/Atom"><totalResults>2</totalResults></feed>',
+            "incomplete",
+        ),
+        (
+            '<feed xmlns="http://www.w3.org/2005/Atom"><entry xmlns=""/></feed>',
+            "namespace",
+        ),
+        (
+            '<feed xmlns="http://www.w3.org/2005/Atom"><entry><content><Other/></content></entry></feed>',
+            "resource type",
+        ),
+    ],
+)
+def test_refuses_unusable_envelopes(xml, message):
+    from hmcpctl.xmlutil import parse_complete_feed
+
+    with pytest.raises(ValueError, match=message):
+        parse_complete_feed(xml, "LogicalPartition")
