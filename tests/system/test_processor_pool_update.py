@@ -298,7 +298,7 @@ async def test_paged_child_feed_never_reaches_native_update(continued, monkeypat
     empty = '<feed xmlns="http://www.w3.org/2005/Atom"/>'
     page = '<feed xmlns="http://www.w3.org/2005/Atom"><link rel="next" href="?page=2"/></feed>'
 
-    async def get(path, kind):
+    async def get(path, kind, **kwargs):
         if kind == continued:
             return page
         return recorded if kind == "SharedProcessorPool" else empty
@@ -308,6 +308,11 @@ async def test_paged_child_feed_never_reaches_native_update(continued, monkeypat
     monkeypatch.setattr(update, "submit_native", submit)
     with (
         patch.object(hmc, "_get", side_effect=get),
+        patch.object(
+            hmc,
+            "list_system_summaries",
+            return_value=[{"UUID": SYSTEM, "State": "operating"}],
+        ),
         patch.object(
             hmc,
             "get_managed_system",
@@ -342,3 +347,54 @@ def test_refuses_unusable_envelopes(xml, message):
 
     with pytest.raises(ValueError, match=message):
         parse_complete_feed(xml, "LogicalPartition")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,state,accepted",
+    [
+        (204, "Operating", True),
+        (204, "No Connection", False),
+        (200, "Operating", False),
+    ],
+)
+async def test_empty_pool_member_feed_needs_positive_system_state(
+    mock_hmc, status, state, accepted
+):
+    from unittest.mock import patch
+
+    import httpx
+    from conftest import make_config
+
+    from hmcpctl.client.core import HMCClient
+    from hmcpctl.errors import HMCError
+
+    base = f"/rest/api/uom/ManagedSystem/{SYSTEM}"
+    mock_hmc.get(f"{base}/LogicalPartition").mock(
+        return_value=httpx.Response(
+            200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>'
+        )
+    )
+    mock_hmc.get(f"{base}/VirtualIOServer").mock(return_value=httpx.Response(status))
+    async with HMCClient(make_config()) as hmc:
+        with patch.object(
+            hmc,
+            "list_system_summaries",
+            return_value=[{"UUID": SYSTEM, "State": state}],
+        ):
+            if accepted:
+                assert await hmc.list_pool_partition_entries(SYSTEM) == []
+            else:
+                with pytest.raises(HMCError):
+                    await hmc.list_pool_partition_entries(SYSTEM)
+
+
+@pytest.mark.asyncio
+async def test_native_target_admits_the_shared_operating_state_spellings(
+    update_boundary,
+):
+    update, hmc, _ = update_boundary
+    resource = hmc.get_managed_system.return_value["Resource"]
+    resource["State"] = "Operating"
+    await update.update_shared_processor_pool(hmc, "sys", 2, new_name="test pool")
+    update.submit_native.assert_awaited_once()

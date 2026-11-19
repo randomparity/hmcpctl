@@ -513,6 +513,8 @@ class SystemsClient(JobClient, Protocol):
         path: str,
         resource_type: str | None = None,
         include_schema_version: bool = True,
+        *,
+        require_200_body: bool = False,
     ) -> str: ...
 
     async def _post(

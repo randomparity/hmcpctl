@@ -826,6 +826,7 @@ class HMCClient(
         include_schema_version: bool = True,
         *,
         uuid_path_arguments: Mapping[str, str] | None = None,
+        require_200_body: bool = False,
     ) -> str:
         resp = await self._request_with_uuid_path_arguments(
             "GET",
@@ -837,6 +838,8 @@ class HMCClient(
             return ""
         if resp.status_code != 200:
             raise HMCError(f"GET {path} failed", resp.status_code, resp.text)
+        if require_200_body and not resp.content:
+            raise HMCError(f"GET {path} returned HTTP 200 with no feed body")
         return resp.text
 
     async def _post(

@@ -334,8 +334,13 @@ class SystemsMixin:
         entries = []
         for resource_type in ("LogicalPartition", "VirtualIOServer"):
             path = f"/rest/api/uom/ManagedSystem/{system_uuid}/{resource_type}"
-            xml = await self._get(path, resource_type)
-            entries.extend(_parse_complete_feed(xml, path, resource_type))
+            xml = await self._get(path, resource_type, require_200_body=True)
+            members = _parse_complete_feed(xml, path, resource_type) if xml else []
+            if not members:
+                await require_operating_system(
+                    self.list_system_summaries, system_uuid, resource_type
+                )
+            entries.extend(members)
         return entries
 
     async def list_vios(self: SystemsClient, system_uuid: str) -> list[dict[str, Any]]:

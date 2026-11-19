@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from hmcpctl.client.client_resolution import system_operating
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_processors import bounded_processor_number
@@ -57,7 +58,7 @@ async def _system_resource(hmc: HMCClient, system_uuid: str) -> dict[str, Any]:
     if not system or str(system.get("UUID")).casefold() != system_uuid.casefold():
         raise ValueError("Pool update could not confirm the managed system identity")
     resource = resource_container(system, "Resource")
-    if leaf_text(resource.get("State")) != "operating":
+    if not system_operating(leaf_text(resource.get("State"))):
         raise ValueError("Pool update requires an operating managed system")
     return resource
 
