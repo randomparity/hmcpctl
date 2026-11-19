@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from fastmcp import Client, FastMCP
@@ -171,6 +172,31 @@ def test_detach_without_the_writer_window_is_refused(media: MediaHMC):
     assert media.mounted == [MEDIA]
 
 
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        pytest.param(
+            {"wait_seconds": engine.MAX_WAIT_SECONDS + 1},
+            "invalid_wait_seconds",
+            id="invalid-wait",
+        ),
+        pytest.param(
+            {"lpar_name_or_uuid": "x" * store.MAX_REQUEST_BYTES},
+            "request_too_large",
+            id="oversized-selector",
+        ),
+    ],
+)
+def test_detach_rejects_input_limits_before_opening_client(
+    media, monkeypatch, overrides, reason
+):
+    open_client = Mock(wraps=core.open_client)
+    monkeypatch.setattr(core, "open_client", open_client)
+    with pytest.raises(ToolError, match=reason):
+        _call(_app(_grant(TOOL, UNMOUNT)), {**DETACH, **overrides})
+    open_client.assert_not_called()
+
+
 def test_detach_runs_under_an_all_targets_unmount_grant(media: MediaHMC):
     _provisioned()
     record = _call(_app(_grant(TOOL, UNMOUNT)), DETACH)
@@ -235,10 +261,11 @@ def _replace_ledger_media(name):
         )
 
 
-def test_specialist_connection_denial_precedes_identity_lookup(media: MediaHMC):
+@pytest.mark.parametrize("wait", [0, engine.MAX_WAIT_SECONDS + 1])
+def test_specialist_connection_denial_precedes_identity_lookup(media: MediaHMC, wait):
     grant = {**_grant(UNMOUNT, targets=_targets()), "connections": ["other"]}
     with pytest.raises(ToolError, match=UNMOUNT):
-        _call(_app(_grant(TOOL), grant), DETACH)
+        _call(_app(_grant(TOOL), grant), {**DETACH, "wait_seconds": wait})
     assert media.fake.calls == []
     with store.read_session() as conn:
         assert conn is None or store.find_operation(conn, "hmcpctl", "r1") is None

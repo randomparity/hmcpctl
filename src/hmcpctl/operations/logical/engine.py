@@ -217,15 +217,10 @@ class Admission:
             store.record_outcome(conn, operation_id, effect.key, "applied", identity)
 
 
-def _check_inputs(
-    request: OperationRequest, continuation: str, wait_seconds: int
-) -> None:
-    store.validate_request_id(request.request_id)
-    if continuation not in CONTINUATIONS:
-        raise OperationRefused(
-            "invalid_continuation",
-            f"continuation must be one of {', '.join(CONTINUATIONS)}",
-        )
+def validate_request_limits(
+    request: OperationRequest, wait_seconds: int
+) -> tuple[str, str]:
+    """Check the wait and return the size-checked canonical request and digest."""
     if (
         isinstance(wait_seconds, bool)
         or not isinstance(wait_seconds, int)
@@ -235,6 +230,7 @@ def _check_inputs(
             "invalid_wait_seconds",
             f"wait_seconds must be an integer from 0 to {MAX_WAIT_SECONDS}",
         )
+    return canonical_request(request)
 
 
 def submit(
@@ -254,8 +250,13 @@ def submit(
     Supply the body's live checks again on each continuation. Their mapping is
     copied before admission; omitted kinds retain unknown outcomes (ADR 0236).
     """
-    _check_inputs(request, continuation, wait_seconds)
-    request_json, digest = canonical_request(request)
+    store.validate_request_id(request.request_id)
+    if continuation not in CONTINUATIONS:
+        raise OperationRefused(
+            "invalid_continuation",
+            f"continuation must be one of {', '.join(CONTINUATIONS)}",
+        )
+    request_json, digest = validate_request_limits(request, wait_seconds)
     execution_classifiers = dict(classifiers) if classifiers is not None else {}
     # Lock recovery, admission and worker start are one step, so no concurrent call in this
     # process can see a running record whose worker it has not counted and orphan it.
