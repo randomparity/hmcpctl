@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import csv
-import io
 import shlex
 from dataclasses import dataclass
 from decimal import Decimal
@@ -12,8 +10,15 @@ from typing import Any
 from hmcpctl.client.core import HMCClient
 from hmcpctl.config import HMCConfig
 from hmcpctl.documents.lpar_processors import bounded_processor_number
+from hmcpctl.documents.native_records import RECORD_DELIMITERS, build_attribute_record
+from hmcpctl.errors import HMCError
 from hmcpctl.operations.resource_reading import resource_container
-from hmcpctl.resource_identity import is_uuid
+from hmcpctl.operations.systems.processor_pools import (
+    SharedProcessorPool,
+    get_shared_processor_pool,
+    read_selected_pool,
+)
+from hmcpctl.resource_identity import is_uuid, resolve_system_name
 from hmcpctl.ssh.install import validate_hmc_name
 from hmcpctl.ssh.transport import run_hmc_command
 from hmcpctl.xmlutil import leaf_text
@@ -103,6 +108,10 @@ class PoolChange:
             raise ValueError("Request a new pool name, maximum or reserved units")
         if name is not None:
             validate_hmc_name(name, "new pool name")
+            if any(delimiter in name for delimiter in RECORD_DELIMITERS):
+                raise ValueError(
+                    "Pool name contains a native attribute delimiter; choose another name"
+                )
             if not name.strip() or not name.isprintable() or len(name) > 14:
                 raise ValueError(
                     "Pool name must have 1–14 printable characters and contain nonblank text"
@@ -122,19 +131,116 @@ async def submit_native(
     """Submit one documented chhwres command to a non-default slot."""
     if type(pool_id) is not int or pool_id <= 0:
         raise ValueError("Pool update requires a positive non-default pool ID")
-    parts = []
+    parts: list[tuple[str, object]] = []
     if change.name is not None:
-        parts.append(f"new_name={change.name}")
+        parts.append(("new_name", change.name))
     if change.maximum is not None:
-        parts.append(f"max_pool_proc_units={change.maximum}")
+        parts.append(("max_pool_proc_units", change.maximum))
     if change.reserved is not None:
-        parts.append(f"reserved_pool_proc_units={change.reserved:.2f}")
-    attributes = io.StringIO()
-    csv.writer(attributes, lineterminator="").writerow(parts)
+        parts.append(("reserved_pool_proc_units", f"{change.reserved:.2f}"))
+    attributes = build_attribute_record(parts, surface="`chhwres -a`")
     system = shlex.quote(validate_hmc_name(system_name, "system name"))
     await run_hmc_command(
         config,
         f"chhwres -r procpool -m {system} -o s --poolid {pool_id} "
-        f"-a {shlex.quote(attributes.getvalue())}",
+        f"-a {shlex.quote(attributes)}",
         max_output_bytes=65536,
     )
+
+
+@dataclass(frozen=True)
+class PoolUpdateResult:
+    system_uuid: str
+    before: SharedProcessorPool
+    after: SharedProcessorPool | None
+    outcome: str
+    submission_error: str | None
+    readback_error: str | None
+    route: str = "chhwres"
+    if_match: str = "not-applicable"
+
+
+async def _validate_capacity(
+    hmc: HMCClient, system: str, target: SharedProcessorPool, change: PoolChange
+) -> None:
+    if change.maximum is None and change.reserved is None:
+        return
+    maximum = bounded_processor_number(
+        target.maximum_processing_units if change.maximum is None else change.maximum,
+        whole=True,
+    )
+    reservation = bounded_processor_number(
+        target.pending_reserved_processing_units
+        if change.reserved is None
+        else change.reserved
+    )
+    if reservation > maximum:
+        raise ValueError("Maximum pool units must cover the pending reservation")
+    evidence = await capacity_evidence(
+        hmc, system, target.pool_id, target.assigned_partition_uuids
+    )
+    if maximum < reservation + evidence.entitlement:
+        raise ValueError(
+            "Maximum pool units must cover member entitlements and the pending reservation"
+        )
+    if change.reserved is not None and change.reserved > evidence.available:
+        raise ValueError(
+            "Requested reservation exceeds available managed-system processor units"
+        )
+
+
+def _matches(change: PoolChange, after: SharedProcessorPool) -> bool:
+    return (
+        (change.name is None or change.name == after.name)
+        and (change.maximum is None or change.maximum == after.maximum_processing_units)
+        and (
+            change.reserved is None
+            or (
+                after.pending_reserved_processing_units is not None
+                and change.reserved
+                == Decimal(str(after.pending_reserved_processing_units))
+            )
+        )
+    )
+
+
+async def update_shared_processor_pool(
+    hmc: HMCClient,
+    system_name_or_uuid: str,
+    pool: int | str,
+    *,
+    new_name: str | None = None,
+    maximum_units: object = None,
+    reserved_units: object = None,
+) -> PoolUpdateResult:
+    """Validate and submit the selected fields once, then reread the original slot."""
+    change = PoolChange.from_values(
+        name=new_name, maximum=maximum_units, reserved=reserved_units
+    )
+    system, target, slots = await read_selected_pool(hmc, system_name_or_uuid, pool)
+    if target.pool_id == 0:
+        raise ValueError("Cannot update the default shared processor pool (ID 0)")
+    if change.name is not None and any(
+        slot.name == change.name and slot.pool_id != target.pool_id for slot in slots
+    ):
+        raise ValueError("New pool name already exists on this managed system")
+    await _validate_capacity(hmc, system, target, change)
+    system_name = await resolve_system_name(hmc, system)
+    submit_error = None
+    try:
+        await submit_native(hmc.config, system_name, target.pool_id, change)
+    except HMCError as error:
+        submit_error = str(error)
+    try:
+        result = await get_shared_processor_pool(hmc, system, target.pool_id)
+        if result.system_uuid != system or result.pool.uuid != target.uuid:
+            raise ValueError("Shared processor pool identity changed during readback")
+    except (HMCError, ValueError) as error:
+        return PoolUpdateResult(
+            system, target, None, "unverified", submit_error, str(error)
+        )
+    if _matches(change, result.pool) and submit_error is None:
+        outcome = "verified"
+    else:
+        outcome = "partial" if result.pool != target else "unverified"
+    return PoolUpdateResult(system, target, result.pool, outcome, submit_error, None)

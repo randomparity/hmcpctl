@@ -75,6 +75,9 @@ async def test_missing_membership_or_unreadable_source_refuses():
         {"reserved": "0.001"},
         {"reserved": True},
         {"name": " "},
+        {"name": "A,B"},
+        {"name": "A=B"},
+        {"name": 'A"B'},
         {"name": "x" * 15},
         {"name": "a\nb"},
     ],
@@ -95,7 +98,7 @@ async def test_native_command_keeps_values_in_one_csv_attribute(monkeypatch):
 
     dispatch = AsyncMock()
     monkeypatch.setattr(update, "run_hmc_command", dispatch)
-    change = update.PoolChange.from_values(name="A,B", maximum="2.00", reserved="0.05")
+    change = update.PoolChange.from_values(name="A B", maximum="2.00", reserved="0.05")
     await update.submit_native(None, "Power Box", 2, change)
     tokens = shlex.split(dispatch.await_args.args[1])
     assert tokens[:-1] == [
@@ -111,10 +114,133 @@ async def test_native_command_keeps_values_in_one_csv_attribute(monkeypatch):
         "-a",
     ]
     assert next(csv.reader([tokens[-1]])) == [
-        "new_name=A,B",
+        "new_name=A B",
         "max_pool_proc_units=2",
         "reserved_pool_proc_units=0.05",
     ]
     with pytest.raises(ValueError, match="default"):
         await update.submit_native(None, "Power Box", 0, change)
     assert dispatch.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selector", [0, "DefaultPool"])
+async def test_default_refused_by_id_or_name(monkeypatch, selector):
+    from hmcpctl.operations.systems import processor_pool_update as update
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPool
+
+    default = SharedProcessorPool(
+        SYSTEM, 0, "DefaultPool", True, None, None, None, None, None
+    )
+    hmc = AsyncMock()
+    monkeypatch.setattr(
+        update,
+        "read_selected_pool",
+        AsyncMock(return_value=(SYSTEM, default, (default,))),
+    )
+    with pytest.raises(ValueError, match="default"):
+        await update.update_shared_processor_pool(hmc, "sys", selector, new_name="new")
+    hmc.get_managed_system.assert_not_awaited()
+
+
+def make_pool(pool_id=2, name="test pool"):
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPool
+
+    return SharedProcessorPool(LPAR, pool_id, name, True, 2.0, 0.0, 0.0, 2.0, None)
+
+
+@pytest.fixture
+def update_boundary(monkeypatch):
+    from hmcpctl.operations.systems import processor_pool_update as update
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPoolResult
+
+    target = make_pool()
+    hmc = hardware()
+    monkeypatch.setattr(
+        update,
+        "read_selected_pool",
+        AsyncMock(return_value=(SYSTEM, target, (target, make_pool(3, "other")))),
+    )
+    monkeypatch.setattr(update, "resolve_system_name", AsyncMock(return_value="sys"))
+    monkeypatch.setattr(update, "submit_native", AsyncMock())
+    monkeypatch.setattr(
+        update,
+        "get_shared_processor_pool",
+        AsyncMock(return_value=SharedProcessorPoolResult(SYSTEM, "", target)),
+    )
+    return update, hmc, target
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"new_name": "other"}, "already exists"),
+        ({"reserved_units": 3}, "pending reservation"),
+        ({"maximum_units": 0}, "entitlements"),
+        ({"maximum_units": 4, "reserved_units": "2.50"}, "available"),
+    ],
+)
+async def test_prewrite_refusals(update_boundary, kwargs, message):
+    update, hmc, _ = update_boundary
+    with pytest.raises(ValueError, match=message):
+        await update.update_shared_processor_pool(hmc, "sys", 2, **kwargs)
+    update.submit_native.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind,expected",
+    [
+        ("matched", "verified"),
+        ("partial", "partial"),
+        ("unreadable", "unverified"),
+        ("wrong-id", "unverified"),
+        ("unchanged", "unverified"),
+        ("uncertain", "partial"),
+    ],
+)
+async def test_independent_configuration_outcomes(update_boundary, kind, expected):
+    from dataclasses import replace
+
+    from hmcpctl.errors import HMCError
+    from hmcpctl.operations.systems.processor_pools import SharedProcessorPoolResult
+
+    update, hmc, before = update_boundary
+    after = replace(before, name="renamed", pending_reserved_processing_units=0.05)
+    if kind == "partial":
+        after = replace(after, pending_reserved_processing_units=0)
+    if kind == "uncertain":
+        update.submit_native.side_effect = HMCError("write response lost")
+    if kind == "unreadable":
+        update.get_shared_processor_pool.side_effect = HMCError("read unavailable")
+    if kind == "wrong-id":
+        after = replace(after, uuid=VIOS)
+    if kind == "unchanged":
+        after = before
+    update.get_shared_processor_pool.return_value = SharedProcessorPoolResult(
+        SYSTEM, "", after
+    )
+    result = await update.update_shared_processor_pool(
+        hmc, "sys", 2, new_name="renamed", reserved_units="0.05"
+    )
+    assert result.outcome == expected
+    assert (result.route, result.if_match) == ("chhwres", "not-applicable")
+    assert bool(result.submission_error) == (kind == "uncertain")
+    assert bool(result.readback_error) == (kind in {"wrong-id", "unreadable"})
+    if result.after is not None:
+        assert result.after.reserved_processing_units == 0
+    update.submit_native.assert_awaited_once()
+    update.get_shared_processor_pool.assert_awaited_once_with(hmc, SYSTEM, 2)
+
+
+def test_mcp_forwards_update_to_domain(update_boundary, monkeypatch):
+    import asyncio
+
+    from hmcpctl.server_tools.systems import processor_pools as tools
+
+    _, hmc, _ = update_boundary
+    monkeypatch.setattr(tools, "with_client", lambda fn, profile: asyncio.run(fn(hmc)))
+    result = tools.hmc_update_shared_processor_pool("sys", 2, new_name="test pool")
+    assert result["outcome"] == "verified"
+    assert result["route"] == "chhwres"

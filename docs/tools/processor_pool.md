@@ -2,7 +2,7 @@
 
 # `processor_pool` tools
 
-2 tools in the `processor_pool` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
+3 tools in the `processor_pool` operation domain. This reference covers every tool the server registers, including the ones a default deployment does not expose. See the [tool reference index](index.md) for every domain.
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
@@ -10,3 +10,4 @@ The Summary column on each domain page is the first line of the tool's MCP descr
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `hmc_get_shared_processor_pool` | `read` | `processor_pool.get` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | Get one shared processor pool slot, configured or not. |
 | `hmc_list_shared_processor_pools` | `read` | `processor_pool.list` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | List a managed system's shared processor pools. |
+| `hmc_update_shared_processor_pool` | `mutate` | `processor_pool.update` | `managed_system` | `implemented` | `unevidenced` | `existing-runtime-guards` | Update a non-default shared processor pool and read back its configuration. |

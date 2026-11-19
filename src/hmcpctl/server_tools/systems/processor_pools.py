@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import StrictFloat, StrictInt, StrictStr
+
+from hmcpctl.operations.systems.processor_pool_update import (
+    update_shared_processor_pool,
+)
+
 from ..._app import serialize_tool_result, with_client
 from ...operations.systems.processor_pools import (
     get_shared_processor_pool,
@@ -68,3 +74,41 @@ def hmc_get_shared_processor_pool(
         )
 
     return with_client(read, profile=profile)
+
+
+@tool(effect="mutate", operation="processor_pool.update", target_kind="managed_system")
+def hmc_update_shared_processor_pool(
+    system_name_or_uuid: str,
+    pool: StrictInt | StrictStr,
+    new_name: str | None = None,
+    maximum_units: StrictInt | StrictFloat | StrictStr | None = None,
+    reserved_units: StrictInt | StrictFloat | StrictStr | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    """Update a non-default shared processor pool and read back its configuration.
+
+    A verified outcome matches the requested name, maximum and pending reservation.
+    The after object reports current reservation separately. A partial or unverified
+    outcome requires inspection before another write. The native route has no If-Match.
+
+    Args:
+        system_name_or_uuid: Managed system name or UUID.
+        pool: Integer pool ID or exact pool name.
+        new_name: Unique pool name, up to 14 characters. Comma, equals and double quote are native record delimiters.
+        maximum_units: Nonnegative whole processor units, including member entitlements.
+        reserved_units: Nonnegative pending reservation, exactly representable in hundredths.
+        profile: Optional configured HMC connection profile.
+    """
+
+    async def update(hmc):
+        result = await update_shared_processor_pool(
+            hmc,
+            system_name_or_uuid,
+            pool,
+            new_name=new_name,
+            maximum_units=maximum_units,
+            reserved_units=reserved_units,
+        )
+        return serialize_tool_result(result)
+
+    return with_client(update, profile=profile)

@@ -12,17 +12,16 @@ from fastmcp import Client
 from hmcpctl.client.core import HMCClient
 from hmcpctl.errors import HMCError
 from hmcpctl.operations.systems.processor_pool_update import (
-    PoolChange,
     capacity_evidence,
-    submit_native,
 )
 from hmcpctl.operations.systems.processor_pools import (
     SharedProcessorPool,
     get_shared_processor_pool,
     list_shared_processor_pools,
 )
-from hmcpctl.resource_identity import is_uuid, resolve_system_name
+from hmcpctl.resource_identity import is_uuid
 
+from ..observation import Assertion
 from ..recovery.common import Finding, StateUnreadable
 
 if TYPE_CHECKING:
@@ -116,7 +115,37 @@ async def recover(call, baseline: dict) -> list[Finding]:
     return []
 
 
-async def _round_trip(hmc: HMCClient, state: RunState) -> None:
+async def _submit(
+    client: Client,
+    state: RunState,
+    system: str,
+    pool_id: int,
+    name: str,
+    maximum: int,
+    reserved: str,
+) -> None:
+    status, data = await state.call(
+        client,
+        "hmc_update_shared_processor_pool",
+        system_name_or_uuid=system,
+        pool=pool_id,
+        new_name=name,
+        maximum_units=maximum,
+        reserved_units=reserved,
+    )
+    if (
+        status != "PASS"
+        or not isinstance(data, dict)
+        or data.get("outcome") != "verified"
+        or data.get("route") != "chhwres"
+        or data.get("if_match") != "not-applicable"
+    ):
+        raise ValueError(
+            "Public pool update did not confirm the native configuration change"
+        )
+
+
+async def _round_trip(client: Client, hmc: HMCClient, state: RunState) -> None:
     listing = await list_shared_processor_pools(
         hmc, state.config.system_name, include_unconfigured=True
     )
@@ -134,8 +163,6 @@ async def _round_trip(hmc: HMCClient, state: RunState) -> None:
     name = "hmcp" + uuid4().hex[:8]
     if any(pool.name == name for pool in listing.pools):
         raise ValueError("Temporary shared processor pool name already exists")
-    native_name = await resolve_system_name(hmc, system)
-    change = PoolChange.from_values(name=name, maximum=1, reserved="0.05")
     baseline = baseline_data(system, original)
     state.record(SUBTASK, BASELINE, "PASS", {**baseline, "temporary_name": name})
     if state.checkpoint is None:
@@ -145,7 +172,7 @@ async def _round_trip(hmc: HMCClient, state: RunState) -> None:
     if before.pool != original:
         raise ValueError("Selected pool changed after its baseline checkpoint")
     try:
-        await submit_native(hmc.config, native_name, original.pool_id, change)
+        await _submit(client, state, system, original.pool_id, name, 1, "0.05")
     finally:
         observed = (await get_shared_processor_pool(hmc, system, original.pool_id)).pool
         if (
@@ -162,20 +189,29 @@ async def _round_trip(hmc: HMCClient, state: RunState) -> None:
         )
         if current.member_count:
             raise ValueError("Pool acquired a member; manual recovery required")
-        restore = PoolChange.from_values(name=original.name, maximum=0, reserved=0)
-        await submit_native(hmc.config, native_name, original.pool_id, restore)
+        await _submit(client, state, system, original.pool_id, original.name, 0, "0")
     restored = (await get_shared_processor_pool(hmc, system, original.pool_id)).pool
     if baseline_data(system, restored) != baseline:
         raise ValueError("Pool restoration differs from checkpoint; run recovery")
-    state.record(
+    state.record_verified(
         SUBTASK,
-        "native shared processor pool change and restore",
-        "PASS",
-        {"route": "chhwres", "if_match": "not-applicable", "restored": True},
+        "hmc_update_shared_processor_pool",
+        operation="processor_pool.update",
+        scenario="st75-shared-processor-pool-update",
+        assertions=[
+            Assertion("name-maximum-pending-matched", True),
+            Assertion(
+                "current-reservation-read",
+                observed.reserved_processing_units is not None,
+            ),
+            Assertion("original-slot-restored", True),
+        ],
+        cleanup="passed",
+        data={"route": "chhwres", "if_match": "not-applicable"},
     )
 
 
-async def exercise_processor_pool(_client: Client, state: RunState) -> None:
+async def exercise_processor_pool(client: Client, state: RunState) -> None:
     if state.group != GROUP or state.hmc_config is None:
         state.record(
             SUBTASK, GROUP, "FAIL", "Expected the named group and an HMC profile"
@@ -183,6 +219,6 @@ async def exercise_processor_pool(_client: Client, state: RunState) -> None:
         return
     try:
         async with HMCClient(state.hmc_config) as hmc:
-            await _round_trip(hmc, state)
+            await _round_trip(client, hmc, state)
     except (ValueError, HMCError) as error:
         state.record(SUBTASK, GROUP, "FAIL", str(error))

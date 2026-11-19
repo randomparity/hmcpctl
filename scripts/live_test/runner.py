@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 74; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71, ST72, ST73 and ST74 require named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 75; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71, ST72, ST73, ST74 and ST75 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71, 72, 73 and 74 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract`, `partition-profiles`,

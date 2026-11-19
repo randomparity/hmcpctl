@@ -920,6 +920,13 @@
       "observed_at": null
     },
     {
+      "operation": "processor_pool.update",
+      "implementation": "implemented",
+      "verification": "unevidenced",
+      "reason": null,
+      "observed_at": null
+    },
+    {
       "operation": "provision.lpar",
       "implementation": "partial",
       "verification": "current",

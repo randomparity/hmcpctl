@@ -84,7 +84,6 @@ def test_round_trip_checkpoints_then_changes_and_restores(monkeypatch):
         arm, "list_shared_processor_pools", AsyncMock(return_value=listing)
     )
     monkeypatch.setattr(arm, "capacity_evidence", AsyncMock(return_value=capacity))
-    monkeypatch.setattr(arm, "resolve_system_name", AsyncMock(return_value="system"))
     monkeypatch.setattr(arm, "uuid4", lambda: SimpleNamespace(hex="abcd1234"))
     observed = original
 
@@ -93,20 +92,27 @@ def test_round_trip_checkpoints_then_changes_and_restores(monkeypatch):
 
     monkeypatch.setattr(arm, "get_shared_processor_pool", get)
 
-    async def submit(_config, _name, pool_id, change):
+    async def submit(_client, tool, **kwargs):
         nonlocal observed
         state.checkpoint.assert_called_once()
-        assert pool_id == original.pool_id
+        assert tool == "hmc_update_shared_processor_pool"
+        assert kwargs["pool"] == original.pool_id
         observed = replace(
             original,
-            name=change.name,
-            maximum_processing_units=float(change.maximum),
-            reserved_processing_units=float(change.reserved),
-            pending_reserved_processing_units=float(change.reserved),
+            name=kwargs["new_name"],
+            maximum_processing_units=float(kwargs["maximum_units"]),
+            reserved_processing_units=float(kwargs["reserved_units"]),
+            pending_reserved_processing_units=float(kwargs["reserved_units"]),
         )
+        return "PASS", {
+            "outcome": "verified",
+            "route": "chhwres",
+            "if_match": "not-applicable",
+        }
 
-    monkeypatch.setattr(arm, "submit_native", AsyncMock(side_effect=submit))
-    asyncio.run(arm._round_trip(hmc, state))
+    state.call = AsyncMock(side_effect=submit)
+    state.record_verified = Mock()
+    asyncio.run(arm._round_trip(object(), hmc, state))
     assert observed == original
-    assert arm.submit_native.await_count == 2
-    assert state.record.call_args.args[2] == "PASS"
+    assert state.call.await_count == 2
+    state.record_verified.assert_called_once()
