@@ -3671,3 +3671,22 @@ second, and the one snapshot matched the bound pre-fixture digest: READY in 32
 seconds and 12 REST requests, then recovery UNCHANGED. The settling path was
 exercised. The raw results stay private; `scripts/live_test_evidence.py` has no
 route for fixture journals.
+
+## Shared processor pool update
+
+The opt-in `shared-processor-pool-update` group (ST75) uses a non-default,
+unconfigured placeholder slot with zero maximum and reservations. It verifies the
+slot has no members, checkpoints the original fields, gives it a temporary name,
+sets a one-unit maximum and a 0.05-unit reservation, then restores the original
+values. The authorization must cover that managed system and processor pool.
+Use a fresh absolute results path in a private directory outside the checkout.
+
+```sh
+uv run --no-sync python scripts/live_test_preflight.py --group shared-processor-pool-update
+uv run --no-sync python scripts/live_shared_processor_pool.py --results-file "$POOL_RESULTS"
+uv run --no-sync python scripts/live_test_recovery.py --results "$POOL_RESULTS"
+```
+
+Run recovery after each attempted arm. It independently checks the original UUID,
+name, maximum and both reservation fields. A changed or unreadable slot requires
+inspection of the private baseline before another write.
