@@ -42,8 +42,6 @@ from xml.etree.ElementTree import Element
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
-from hmcpctl.documents.common import UOM_NS
-
 UUID = re.compile(
     r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
 )
@@ -1506,7 +1504,6 @@ def build_vocabulary(
 # --- schema enums ------------------------------------------------------------
 
 _XSD = "{http://www.w3.org/2001/XMLSchema}"
-_ENUM_CATALOG = "/rest/api/web/schema/inc/Enumerations.xsd"
 
 
 def _read_schema_xml(body: bytes) -> tuple[Element, dict[Element, str]]:
@@ -1535,7 +1532,7 @@ def _read_schema_xml(body: bytes) -> tuple[Element, dict[Element, str]]:
 
 def _schema_roots(
     corpus: Sequence[dict[str, Any]], *, indexed: bool
-) -> Iterator[tuple[str, Element, dict[Element, str]]]:
+) -> Iterator[tuple[Element, dict[Element, str]]]:
     for index, record in enumerate(corpus, 1):
         if (
             record.get("kind") != "rest"
@@ -1553,7 +1550,7 @@ def _schema_roots(
         except (ET.ParseError, DefusedXmlException, LookupError, ValueError):
             raise ExportError(f"schema record {index} is not safe, valid XML") from None
         if root.tag == f"{_XSD}schema":
-            yield record["path"], root, references
+            yield root, references
         elif indexed:
             raise ExportError(f"schema record {index} does not contain an XSD schema")
 
@@ -1586,7 +1583,7 @@ def derive_enums(
     definitions: dict[str, set[tuple[str, ...]]] = collections.defaultdict(set)
     owners: dict[str, set[str]] = collections.defaultdict(set)
     targets: dict[str, set[tuple[str, str]]] = collections.defaultdict(set)
-    for path, root, references in _schema_roots(corpus, indexed=indexed):
+    for root, references in _schema_roots(corpus, indexed=indexed):
         namespace = root.get("targetNamespace", "")
         for declaration in root:
             name = declaration.get("name", "")
@@ -1602,10 +1599,6 @@ def derive_enums(
                 )
                 definitions[name].add(values)
                 owners[name].add(namespace)
-                # The capture sweep's canonical shared enum catalog supplies UOM
-                # vocabulary even though that catalog omits targetNamespace.
-                if path == _ENUM_CATALOG and not namespace:
-                    owners[name].add(UOM_NS)
         for element, target, reference_ns in _element_bindings(root, references):
             targets[element].add((target, reference_ns))
     types = {

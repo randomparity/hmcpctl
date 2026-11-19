@@ -117,7 +117,7 @@ CAPTURED_BEHAVIOR = {
         "TwinaxialCapable": "ROO",
         "VitalProductDataModel": "ROO",
         "VitalProductDataSerialNumber": "ROO",
-        "VitalProductDataStale": "ROO",  # live-vocabulary: allow captured schema behavior annotation
+        "VitalProductDataStale": "ROO",
         "VitalProductDataType": "ROO",
     },
     "Capability": {
@@ -157,7 +157,7 @@ CAPTURED_BEHAVIOR = {
         "AdapterID": "ROR",
         "AllocationAllowed": "CUR",
         "AssignedUUIDs": "CUD",
-        "CableType": "ROR",  # live-vocabulary: allow captured schema behavior annotation
+        "CableType": "ROR",
         "Capability": "CUR",
         "Description": "CUD",
         "DeviceName": "ROR",
@@ -195,7 +195,7 @@ CAPTURED_BEHAVIOR = {
         "PhysicalLocation": "ROR",
         "PhysicalPortID": "ROR",
         "PortGroupID": "CUD",
-        "PortState": "ROR",  # live-vocabulary: allow captured schema behavior annotation
+        "PortState": "ROR",
         "UniqueDeviceID": "ROR",
     },
     "IOAdapter": {
@@ -237,7 +237,7 @@ CAPTURED_BEHAVIOR = {
         "AutoStart": "CUD",
         "BootMode": "CUD",  # live-vocabulary: allow captured schema behavior annotation, not a field value
         "ConnectionMonitoringEnabled": "CUD",
-        "DesiredProcessorCompatibilityMode": "CUD",  # live-vocabulary: allow captured schema behavior annotation
+        "DesiredProcessorCompatibilityMode": "CUD",
         "ElectronicErrorReportingEnabled": "CUD",
         "HostEthernetAdapterLogicalPorts": "CUD",
         "IOConfigurationInstance": "CUD",
@@ -329,7 +329,7 @@ CAPTURED_BEHAVIOR = {
         "AssociatedProfileVETHBackupDevice": "COD",
         "AssociatedProfileVNICBackupDevice": "COD",
         "BackupDeviceSlotID": "COD",
-        "BackupDeviceType": "COD",  # live-vocabulary: allow captured schema behavior annotation
+        "BackupDeviceType": "COD",
         "ConfigurationID": "CUR",
         "ConfiguredCapacity": "CUR",
         "ConfiguredCapacityPercentage": "CUR",
@@ -358,7 +358,7 @@ CAPTURED_BEHAVIOR = {
         "AssociatedProfileVETHBackupDevice": "COD",
         "AssociatedProfileVNICBackupDevice": "COD",
         "BackupDeviceSlotID": "COD",
-        "BackupDeviceType": "COD",  # live-vocabulary: allow captured schema behavior annotation
+        "BackupDeviceType": "COD",
         "ConfigurationID": "CUR",
         "ConfiguredCapacity": "CUR",
         "ConfiguredCapacityPercentage": "CUR",

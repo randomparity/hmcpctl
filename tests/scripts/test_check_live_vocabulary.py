@@ -64,7 +64,6 @@ def _evidence() -> guard.Evidence:
     return guard.Evidence(
         allowed={"PartitionState": {"running", "error", "open firmware"}},
         bindings={"PartitionState": "LogicalPartitionState.Enum"},
-        job_statuses=None,
         endpoints=[
             e["path"] for e in VOCABULARY["rest"]["endpoints"] if e["method"] == "GET"
         ],
@@ -205,9 +204,7 @@ def test_stated_bindings_hold_every_captured_value() -> None:
         enum_list = json.loads(path.read_text())
         for name, values in enum_list["types"].items():
             types.setdefault(name, set()).update(values)
-        for element, bound in enum_list.get("elements", {}).items():
-            if element in STATED_BY_1516:
-                assert bound == STATED_BY_1516[element], (path.name, element)
+        assert not STATED_BY_1516.keys() & enum_list.get("elements", {}), path.name
     for path in directory.glob("v*.json"):
         rest = json.loads(path.read_text())["rest"]
         for element, enum in stated["elements"].items():
@@ -546,34 +543,13 @@ def test_assignments_naming_an_element_are_checked(statement: str) -> None:
 def test_job_status_assignments_are_checked_as_status() -> None:
     """Regression: `fake_hmc.wait_job_status = "running"` passed the gate."""
     evidence = _evidence()
-    evidence.job_statuses = {"RUNNING", "COMPLETED_OK"}
+    evidence.allowed["Status"] = {"RUNNING", "COMPLETED_OK"}
     found = guard.literal_violations(
         "t.py",
         'fake_hmc.wait_job_status = "running"\nok = f(job_status="RUNNING")\n',
         evidence,
     )
     assert [(v.subject, v.value, v.line) for v in found] == [("Status", "running", 1)]
-
-
-def test_vnic_schema_values_remain_generic_status_evidence() -> None:
-    evidence = guard.load_evidence(Path(__file__).parents[2])
-    vnic_only = ("ADAPTER_ERROR", "NETWORK_ERROR", "UNKNOWN", "UNRESPONSIVE")
-    for value in vnic_only:
-        text = (
-            f'fake_hmc.wait_job_status = "{value}"\n'
-            f'f(job_status="{value}")\n'
-            f'Status = "{value}"\n'
-            f'payload = {{"Status": "{value}"}}\n'
-        )
-        found = guard.literal_violations("example.py", text, evidence)
-        assert [(v.subject, v.value, v.line) for v in found] == [
-            ("Status", value, 1),
-            ("Status", value, 2),
-        ]
-    for admitted in ("COMPLETED_OK", "LINK_DOWN", "OPERATIONAL"):
-        assert not guard.literal_violations(
-            "example.py", f'f(job_status="{admitted}")', evidence
-        )
 
 
 def test_other_snake_case_parameters_are_not_mapped() -> None:

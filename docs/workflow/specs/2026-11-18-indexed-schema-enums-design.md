@@ -33,10 +33,11 @@ extension. A nested child's type belongs to the child. Ignore example markup in
 annotations. Bind only a unique observed enum target. A different declaration
 of the same element, including a non-enum declaration, suppresses the binding.
 Conflicting definitions of a flat type name suppress that type and its bindings.
-The retained bindings use unprefixed type names. Leave qualified references
-unbound in this flat capture projection. Prefix stripping could claim evidence
-for a type declared elsewhere. Repeated equivalent declarations give reproducible output independent of record
-order. Preserve the literal order of a single declaration.
+Compare the in-scope default namespace of an unprefixed type reference with
+the target namespace of its captured declaration. A catalog path supplies no
+evidence of namespace ownership. Leave prefixed references unresolved in
+this flat projection. Repeated equivalent declarations give reproducible
+output independent of record order. Preserve the literal order of a single declaration.
 
 Publish firmware, types and elements in the existing vocabulary shape. Add the
 verified build and a sorted mapping from nonempty schema routes to SHA-256 for
@@ -79,6 +80,8 @@ Exercise the CLI with synthetic capture directories, reversed and conflicting
 declarations, zero-byte and unsafe or malformed responses, integrity mismatches,
 invalid metadata, private markers and previous output. Reproduce the fixture
 twice from the retained directory, check source hashes and inspect the projection.
-Run the vocabulary gate using six line-specific annotations for existing profile
-schema access codes that the checker otherwise interprets as element values.
-The original scope and the maintainer's later decision are recorded on issue #1813.
+Verify a resolvable binding and a no-namespace catalog imported alongside
+an absent UOM declaration. The retained release contributes 138 enum types,
+733 literals and 171 source digests. Its element references lack a verified
+namespace owner, so its binding map is empty. Run the existing vocabulary
+gate and check the fixture-specific inventory of 171 reviewed digest entries.

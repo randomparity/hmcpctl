@@ -2454,22 +2454,23 @@ def test_schema_bindings_respect_the_default_namespace_at_the_type_reference() -
     assert export.derive_enums([a, b, c], "vX")["elements"] == {"Match": "Mode.Enum"}
 
 
-def test_namespaceless_catalog_only_supplies_shared_uom_vocabulary() -> None:
+def test_imported_no_namespace_catalog_cannot_supply_a_missing_uom_type() -> None:
     catalog = "/rest/api/web/schema/inc/Enumerations.xsd"
     uom = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
     schema = f'''<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
         xmlns="{uom}" targetNamespace="{uom}">
+        <xsd:import schemaLocation="inc/Enumerations.xsd"/>
+        <xsd:include schemaLocation="UomMode.xsd"/>
         <xsd:element name="UomMode" type="BootMode.Enum"/>
-        <xsd:element name="OtherMode" xmlns="urn:other" type="BootMode.Enum"/>
         </xsd:schema>'''
-    source = _rest("/schema/Object.xsd", schema)
-    ordinary = export.derive_enums(
-        [_rest("/schema/Unrelated.xsd", ENUMS_XSD), source], "vX"
-    )
-    assert "UomMode" not in ordinary["elements"]
-    declared = export.derive_enums([_rest(catalog, ENUMS_XSD), source], "vX")
-    assert declared["elements"]["UomMode"] == "BootMode.Enum"
-    assert "OtherMode" not in declared["elements"]
+    sources = [
+        _rest(catalog, ENUMS_XSD),
+        _rest("/rest/api/web/schema/Object.xsd", schema),
+        _rest("/rest/api/web/schema/UomMode.xsd", ""),
+    ]
+    result = export.derive_enums(sources, "vX", indexed=True)
+    assert result["types"]["BootMode.Enum"] == ["Normal", "Unknown"]
+    assert "UomMode" not in result["elements"]
 
 
 def test_schema_enums_keep_equivalent_declarations_and_skip_empty_200() -> None:

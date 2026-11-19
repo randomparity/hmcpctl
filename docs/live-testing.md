@@ -1366,13 +1366,13 @@ just live-vocabulary
 
 Use the repeatable `--private REGEX` option for site-specific names and review
 the diff before publication. A matching private pattern rejects the output.
-The fixture identifies build `2211040014` and records one source digest per
-nonempty XSD. Eighteen indexed HTTP 200 responses had zero bytes. Three
-element names had conflicting schema bindings. The fixture includes only
-the unambiguous bindings. The exporter checks the default namespace where
-each type is named. The sweep’s shared `inc/Enumerations.xsd` catalog supplies
-UOM enum names despite its omitted target namespace. Its 138 enum types and 93 bindings are schema
-evidence. Runtime support and transitive schema closure need separate evidence.
+The fixture identifies build `2211040014` and records 171 nonempty schema
+sources, 138 enum types and 733 literals. Eighteen indexed HTTP 200 responses
+had zero bytes. The catalog declares its types without a target namespace.
+The element references name types in the UOM namespace, and the captured
+declarations do not establish that those types belong to UOM. The fixture
+therefore has an empty `elements` map. Runtime support and transitive schema
+closure need separate evidence.
 
 `just setup` also links the ignored, optional `docs/refs/` API reference
 from the main checkout when available. The exporter reads the capture

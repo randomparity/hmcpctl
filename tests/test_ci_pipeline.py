@@ -60,7 +60,7 @@ BASELINED_FINDINGS = {
     "tests/app/test_cli.py": 2,
     "tests/conftest.py": 1,
     # Indexed schema SHA-256 digests and the same reviewed enum symbol (#1813).
-    "tests/fixtures/live/vocabulary/enums-v9r2-sp953.json": 172,
+    "tests/fixtures/live/vocabulary/enums-v9r2-sp953.json": 171,
     # An enum type name long enough to read as Base64 entropy, once per enum list (#1202).
     "tests/fixtures/live/vocabulary/enums-v10r3-p10-9080-hex.json": 1,
     "tests/fixtures/live/vocabulary/enums-v10r3-p8-8247-22l.json": 1,
