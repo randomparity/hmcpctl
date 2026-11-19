@@ -104,6 +104,7 @@ class Evidence:
     bindings: dict[str, str]
     endpoints: list[str]
     commands: list[str]
+    job_statuses: set[str] | None
 
 
 def load_evidence(root: Path) -> Evidence:
@@ -149,7 +150,14 @@ def load_evidence(root: Path) -> Evidence:
         for element, enums in bindings.items()
     }
     named = {element: " or ".join(sorted(enums)) for element, enums in bindings.items()}
-    return Evidence(allowed, named, endpoints, commands)
+    # Job assignments have an identified object even though the Status XML name
+    # is shared. Observed Status literals remain admitted across captures.
+    job_statuses = None
+    if "Status" in bindings:
+        job_statuses = observed.get("Status", set()).union(
+            types.get("JobStatus.Enum", ())
+        )
+    return Evidence(allowed, named, endpoints, commands, job_statuses)
 
 
 # --- literal values -----------------------------------------------------------
@@ -229,16 +237,6 @@ def _literals(node: ast.AST) -> list[str] | None:
     return None
 
 
-def _assigned_element(name: str) -> str:
-    """The element an assignment target or keyword names: itself, or `Status` for a job.
-
-    `PartitionState="down"` names its element outright; `wait_job_status = "running"`
-    names a job's `Status`. Other snake_case names are hmcpctl's own parameters, whose
-    values are CLI or API forms rather than XML values, so they are not mapped.
-    """
-    return "Status" if name.lower().endswith("job_status") else name
-
-
 def _assignments(node: ast.AST) -> Iterator[tuple[str, ast.expr]]:
     """(name, value) for `x = v`, `obj.x = v` and `f(x=v)`."""
     if isinstance(node, ast.Assign):
@@ -251,16 +249,22 @@ def _assignments(node: ast.AST) -> Iterator[tuple[str, ast.expr]]:
         yield node.arg, node.value
 
 
-def _python_comparisons(tree: ast.AST) -> Iterator[tuple[str, str, int, Any]]:
-    """(element, value, line, case) for comparisons, dict entries and assignments.
+def _python_comparisons(
+    tree: ast.AST, evidence: Evidence
+) -> Iterator[tuple[str, str, int, set[str] | None]]:
+    """Yield each literal, its source location and its applicable evidence.
 
     Each is keyed by an element: `x.get("PartitionState") == "running"`,
     `{"PartitionState": "running"}`, `PartitionState="running"`.
     """
     for node in ast.walk(tree):
         for name, value in _assignments(node):
+            if name.lower().endswith("job_status"):
+                element, allowed = "Status", evidence.job_statuses
+            else:
+                element, allowed = name, evidence.allowed.get(name)
             for literal in _literals(value) or ():
-                yield _assigned_element(name), literal, value.lineno, None
+                yield element, literal, value.lineno, allowed
         if isinstance(node, ast.Compare):
             operands = [node.left, *node.comparators]
             for left, right in itertools.pairwise(operands):
@@ -268,8 +272,12 @@ def _python_comparisons(tree: ast.AST) -> Iterator[tuple[str, str, int, Any]]:
                     access = _element_access(side)
                     values = _literals(other)
                     if access and values:
+                        element, case = access
+                        allowed = evidence.allowed.get(element)
+                        if case is not None and allowed is not None:
+                            allowed = {case(a) for a in allowed}
                         for value in values:
-                            yield access[0], value, node.lineno, access[1]
+                            yield element, value, node.lineno, allowed
         elif isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values, strict=True):
                 values = _literals(value) if isinstance(value, ast.Constant) else None
@@ -278,7 +286,12 @@ def _python_comparisons(tree: ast.AST) -> Iterator[tuple[str, str, int, Any]]:
                     and isinstance(key.value, str)
                     and values
                 ):
-                    yield key.value, values[0], value.lineno, None
+                    yield (
+                        key.value,
+                        values[0],
+                        value.lineno,
+                        evidence.allowed.get(key.value),
+                    )
 
 
 def _leaf_violations(
@@ -301,13 +314,8 @@ def literal_violations(file: str, text: str, evidence: Evidence) -> list[Violati
         for string, line in _strings(tree)
         for v in _leaf_violations(string, line, file, evidence)
     ]
-    for element, value, line, case in _python_comparisons(tree):
-        allowed = evidence.allowed.get(element)
-        if allowed is None:
-            continue
-        if case is not None:
-            allowed = {case(a) for a in allowed}
-        if value not in allowed:
+    for element, value, line, allowed in _python_comparisons(tree, evidence):
+        if allowed is not None and value not in allowed:
             found.append(Violation("literal", file, element, value, line))
     return found
 
