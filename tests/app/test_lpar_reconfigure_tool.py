@@ -173,20 +173,27 @@ def test_detach_without_the_writer_window_is_refused(media: MediaHMC):
 
 
 @pytest.mark.parametrize(
-    ("wait", "byte_limit", "reason"),
+    ("overrides", "reason"),
     [
-        (engine.MAX_WAIT_SECONDS + 1, store.MAX_REQUEST_BYTES, "invalid_wait_seconds"),
-        (0, 32, "request_too_large"),
+        pytest.param(
+            {"wait_seconds": engine.MAX_WAIT_SECONDS + 1},
+            "invalid_wait_seconds",
+            id="invalid-wait",
+        ),
+        pytest.param(
+            {"lpar_name_or_uuid": "x" * store.MAX_REQUEST_BYTES},
+            "request_too_large",
+            id="oversized-selector",
+        ),
     ],
 )
 def test_detach_rejects_input_limits_before_opening_client(
-    media, monkeypatch, wait, byte_limit, reason
+    media, monkeypatch, overrides, reason
 ):
-    monkeypatch.setattr(store, "MAX_REQUEST_BYTES", byte_limit)
     open_client = Mock(wraps=core.open_client)
     monkeypatch.setattr(core, "open_client", open_client)
     with pytest.raises(ToolError, match=reason):
-        _call(_app(_grant(TOOL, UNMOUNT)), {**DETACH, "wait_seconds": wait})
+        _call(_app(_grant(TOOL, UNMOUNT)), {**DETACH, **overrides})
     open_client.assert_not_called()
 
 
