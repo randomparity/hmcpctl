@@ -2201,6 +2201,19 @@ def _indexed_cli(root: Path, out: Path, *options: str) -> int:
     )
 
 
+def test_missing_enum_input_keeps_private_path_out_of_diagnostic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "previous.json"
+    out.write_text("previous")
+    missing = tmp_path / "private-extraction-marker"
+    assert _indexed_cli(missing, out) == 1
+    error = capsys.readouterr().err
+    assert "enum input" in error and "private-extraction-marker" not in error
+    assert str(tmp_path) not in error
+    assert out.read_text() == "previous"
+
+
 def test_indexed_capture_records_verified_schema_sources_only(tmp_path: Path) -> None:
     rows = _indexed_capture(tmp_path)
     out = tmp_path / "result.json"

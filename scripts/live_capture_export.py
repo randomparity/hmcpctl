@@ -1746,6 +1746,18 @@ def _indexed_enums(root: Path, firmware: str) -> dict[str, Any]:
     }
 
 
+def _load_enums(corpus: Path, firmware: str) -> dict[str, Any]:
+    try:
+        if corpus.is_dir():
+            return _indexed_enums(corpus, firmware)
+        text = corpus.read_text(encoding="utf-8")
+    except OSError:
+        raise ExportError(
+            "cannot open enum input; check the capture file or extracted directory"
+        ) from None
+    return derive_enums(json.loads(text), firmware)
+
+
 # --- entry point -------------------------------------------------------------
 
 
@@ -1810,15 +1822,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dump(corpus, handle, indent=1)
             print(f"{len(corpus)} records tokenized -> {args.out}")
             return 0
-        if args.command == "enums" and args.corpus.is_dir():
-            data = _indexed_enums(args.corpus, args.firmware)
+        if args.command == "enums":
+            data = _load_enums(args.corpus, args.firmware)
         else:
             corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
-            if args.command == "enums":
-                data = derive_enums(corpus, args.firmware)
-            else:
-                enums = json.loads(args.enums.read_text(encoding="utf-8"))
-                data = build_vocabulary(corpus, enums, args.firmware, args.source)
+            enums = json.loads(args.enums.read_text(encoding="utf-8"))
+            data = build_vocabulary(corpus, enums, args.firmware, args.source)
         _write_scanned(data, args.out, args.private)
         print(f"wrote {args.out}")
         return 0
