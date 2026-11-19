@@ -97,12 +97,15 @@ def _authorize_media(
     continuation: str,
     by_kind: Mapping[str, str],
     profile: str | None,
+    *,
+    wait_seconds: int,
 ) -> tuple[InstallerMedia | None, engine.Admission]:
     """Resolve inferred targets inside the specialist's connection-eligible gate."""
     resolved: tuple[InstallerMedia | None, engine.Admission] | None = None
 
     def targets(_name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         nonlocal resolved
+        engine.validate_request_limits(request, wait_seconds)
         try:
             resolved = run_sync(
                 lambda: installer_media_admission(
@@ -305,7 +308,13 @@ def reconfigure_handler(
             binding = admission = None
             if model.installer_media is not None:
                 binding, admission = _authorize_media(
-                    policy, tool_security, candidate, continuation, by_kind, profile
+                    policy,
+                    tool_security,
+                    candidate,
+                    continuation,
+                    by_kind,
+                    profile,
+                    wait_seconds=wait_seconds,
                 )
             body = reconfigure_body(
                 model,
