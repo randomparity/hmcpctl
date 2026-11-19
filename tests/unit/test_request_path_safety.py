@@ -1224,6 +1224,7 @@ _UUID_UOM_REQUEST_SITES = {
     ),
     "client_systems.SystemsMixin.get_vios_storage_detail": "vios_uuid",
     "client_systems.SystemsMixin.list_persistent_memory_volumes": "system_uuid",
+    "client_systems.SystemsMixin.list_pool_partition_entries": "system_uuid resource_type",
     "client_systems.SystemsMixin.list_shared_processor_pools": "system_uuid",
     "client_systems.SystemsMixin.list_vios": "system_uuid",
     "client_systems.SystemsMixin.modify_managed_system": "system_uuid",
