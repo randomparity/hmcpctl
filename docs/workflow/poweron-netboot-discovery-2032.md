@@ -29,7 +29,7 @@ GETs used `Accept: */*` under `/rest/api/web/schema/`. The `LogicalPartition.xsd
 was 67,178 bytes (SHA-256 `8f7a0e219fe9195551b9249e4dc3a21a55caaf545dd49ee8b4efde2073c3974c`).
 Starting there, the traversal inspected every XSD include in each nonempty schema, deduplicating
 paths across cycles. The firmware uses source paths such as `../uom/BasePartition.xsd` and
-`../../uom/inc/Types.xsd`. These resolved through the public schema mount as
+`../uom/inc/Types.xsd`. These resolved through the public schema mount as
 `BasePartition.xsd` and `inc/Types.xsd`. Of 125 distinct names encountered including the root,
 118 yielded XSDs. Those contained 337 include declarations and no imports.
 
@@ -41,7 +41,7 @@ The seven unresolved dependencies limit schema coverage.
 
 Separate probes of `{Job,JobRequest,JobParameter,JobParameters,RequestedOperation,JobResponse,PowerOn,PowerOn_LogicalPartition}.xsd`
 and `web/{JobRequest,JobParameter,RequestedOperation,JobResponse}.xsd` all returned HTTP 200
-with zero bytes. This firmware also returns empty successes for unknown schema names.
+with zero bytes. An earlier V10R3 read recorded the same HTTP status and empty body for an unknown schema name.
 [Observed schema route](../api-patterns.md#media-types-per-endpoint)
 
 A case-insensitive search across all 118 XML bodies found no `netboot`, `OperationType`,
