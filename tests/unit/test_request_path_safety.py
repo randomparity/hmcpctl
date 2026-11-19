@@ -1224,7 +1224,7 @@ _UUID_UOM_REQUEST_SITES = {
     ),
     "client_systems.SystemsMixin.get_vios_storage_detail": "vios_uuid",
     "client_systems.SystemsMixin.list_persistent_memory_volumes": "system_uuid",
-    "client_systems.SystemsMixin.list_pool_partition_entries": "system_uuid resource_type",
+    "client_systems.SystemsMixin.list_pool_partition_entries": "system_uuid",
     "client_systems.SystemsMixin.list_shared_processor_pools": "system_uuid",
     "client_systems.SystemsMixin.list_vios": "system_uuid",
     "client_systems.SystemsMixin.modify_managed_system": "system_uuid",
@@ -1287,6 +1287,12 @@ _CLASSIFIED_UOM_SITES = (
         ("client_profiles", "_validate_parent", "system", "request"),
         # Existing enforcement remains separately asserted: ADRs 0143, 0151, 0157.
         ("client_lpm", "LpmMixin._lpar_job", "operation", "request"),
+        (
+            "client_systems",
+            "SystemsMixin.list_pool_partition_entries",
+            "resource_type",
+            "request",
+        ),
         ("client_users", "UsersMixin._child_path", "child_type", "request"),
         ("client_users", "UsersMixin.get_hmc_user", "profile_path_id", "request"),
         ("client_users", "UsersMixin.modify_hmc_user", "profile_path_id", "request"),
