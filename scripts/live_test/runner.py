@@ -17,8 +17,8 @@ Usage:
 `--no-sync` is required: a bare `uv run` prunes the `app` extra and the runner
 stops importing (AGENTS.md).
 
-Registered subtasks span 0 through 74; 26 to 36 are other arms' row ids.
-ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71, ST72, ST73 and ST74 require named groups and are excluded from default and all selections.
+Registered subtasks span 0 through 75; 26 to 36 are other arms' row ids.
+ST53–ST59, ST61, ST64, ST65, ST66, ST67, ST70, ST71, ST72, ST73, ST74 and ST75 require named groups and are excluded from default and all selections.
 Subtasks 9, 11, 37, 38, 39, 40, 41, 42, 45, 46, 71, 72, 73 and 74 SKIP outside their
 own `network`, `users`, `vios-backup`, `pcm`, `lpar-config`, `storage` and
 `lpar-power`, `partition-profile-contract`, `partition-profiles`,
@@ -118,6 +118,7 @@ from live_test.arms.network import inventory_network, mutate_virtual_networking
 from live_test.arms.paging_switchover import exercise_paging_switchover
 from live_test.arms.partition_profiles import exercise_partition_profiles
 from live_test.arms.processor_move import exercise_processor_move
+from live_test.arms.processor_pool import exercise_processor_pool
 from live_test.arms.processor_quantities import exercise_processor_quantities
 from live_test.arms.processor_sharing_weight import exercise_processor_sharing_weight
 from live_test.arms.profile_contract_run import (
@@ -676,6 +677,7 @@ SUBTASKS = {
     72: exercise_provision_boot,
     73: exercise_logical_workflow,
     74: exercise_lpar_vscsi_client,
+    75: exercise_processor_pool,
 }
 _SCENARIO_MODULES = frozenset(inspect.getmodule(task) for task in SUBTASKS.values())
 
@@ -734,6 +736,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
     "lpar-accelerator-qos": [64],
     "lpar-processor-move": [61],
     "lpar-processor-quantities": [56],
+    "shared-processor-pool-update": [75],
     "lpar-vtpm": [51],
     # Not in "all": the arm creates, reconfigures, activates and deletes its own
     # partition (#1226).
@@ -769,6 +772,7 @@ SUBTASK_GROUPS: dict[str, list[int]] = {
 
 
 _PRIVATE_RESULT_GROUPS = {
+    "shared-processor-pool-update": "Processor pool update",
     "lpar-paging-switchover": "Paging switch",
     "lpar-memory-statistics": "Statistics reset",
     "lpar-memory-move": "Memory move",

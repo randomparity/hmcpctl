@@ -188,10 +188,10 @@ def _selector_matches(pool: SharedProcessorPool, selector: int | str) -> bool:
     return pool.pool_id == selector
 
 
-async def get_shared_processor_pool(
+async def read_selected_pool(
     hmc: HMCClient, system_name_or_uuid: str, pool: int | str
-) -> SharedProcessorPoolResult:
-    """Get one pool slot by PoolID (an int, 0 included) or exact PoolName (a str)."""
+) -> tuple[str, SharedProcessorPool, tuple[SharedProcessorPool, ...]]:
+    """Resolve the target and sibling slots from one managed-system feed."""
     if isinstance(pool, bool) or not isinstance(pool, (int, str)):
         raise TypeError("pool must be an integer PoolID or a pool name")
     if isinstance(pool, int) and pool < 0:
@@ -219,4 +219,12 @@ async def get_shared_processor_pool(
             f"Ambiguous shared processor pool name {pool!r}: pool IDs "
             f"{', '.join(str(match.pool_id) for match in matches)}"
         )
-    return SharedProcessorPoolResult(system_uuid, CONFIGURED_RULE, matches[0])
+    return system_uuid, matches[0], pools
+
+
+async def get_shared_processor_pool(
+    hmc: HMCClient, system_name_or_uuid: str, pool: int | str
+) -> SharedProcessorPoolResult:
+    """Get one pool slot by PoolID (an int, 0 included) or exact PoolName (a str)."""
+    system_uuid, selected, _ = await read_selected_pool(hmc, system_name_or_uuid, pool)
+    return SharedProcessorPoolResult(system_uuid, CONFIGURED_RULE, selected)

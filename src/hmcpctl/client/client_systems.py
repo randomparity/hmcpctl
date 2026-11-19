@@ -16,8 +16,12 @@ from ..jobs import (
     power_on_system_job,
     power_on_vios_job,
 )
-from .client_contracts import SystemsClient, _reject_non_uuid_path_argument
-from .client_parse import _parse_feed
+from .client_contracts import (
+    SystemsClient,
+    _reject_non_uuid_path_argument,
+    _reject_unknown_uom_type,
+)
+from .client_parse import _parse_complete_feed, _parse_feed
 from .client_resolution import (
     ambiguity_candidate_ids,
     ambiguous_parent_details,
@@ -324,7 +328,25 @@ class SystemsMixin:
         _reject_non_uuid_path_argument("system_uuid", system_uuid)
         path = f"/rest/api/uom/ManagedSystem/{system_uuid}/SharedProcessorPool"
         xml = await self._get(path, "SharedProcessorPool")
-        return _parse_feed(xml, path) if xml else []
+        return _parse_complete_feed(xml, path, "SharedProcessorPool") if xml else []
+
+    async def list_pool_partition_entries(
+        self: SystemsClient, system_uuid: str
+    ) -> list[dict[str, Any]]:
+        """Collect complete LPAR and VIOS envelopes for current pool membership."""
+        _reject_non_uuid_path_argument("system_uuid", system_uuid)
+        entries = []
+        for resource_type in ("LogicalPartition", "VirtualIOServer"):
+            _reject_unknown_uom_type("resource_type", resource_type)
+            path = f"/rest/api/uom/ManagedSystem/{system_uuid}/{resource_type}"
+            xml = await self._get(path, resource_type, require_200_body=True)
+            members = _parse_complete_feed(xml, path, resource_type) if xml else []
+            if not members:
+                await require_operating_system(
+                    self.list_system_summaries, system_uuid, resource_type
+                )
+            entries.extend(members)
+        return entries
 
     async def list_vios(self: SystemsClient, system_uuid: str) -> list[dict[str, Any]]:
         _reject_non_uuid_path_argument("system_uuid", system_uuid)

@@ -7,6 +7,10 @@ from typing import Any
 
 import typer
 
+from hmcpctl.operations.systems.processor_pool_update import (
+    update_shared_processor_pool,
+)
+
 from ...operations.systems.processor_pools import (
     SharedProcessorPool,
     get_shared_processor_pool,
@@ -117,7 +121,78 @@ def processor_pools_get(
     )
 
 
+def processor_pools_update(
+    system: str = typer.Argument(..., help="Managed system name or UUID"),
+    pool_id: int | None = typer.Option(None, "--id", help="Non-default pool ID"),
+    pool_name: str | None = typer.Option(
+        None, "--name", help="Exact existing pool name"
+    ),
+    new_name: str | None = typer.Option(
+        None, "--new-name", help="New unique pool name"
+    ),
+    maximum_units: str | None = typer.Option(
+        None, "--maximum-units", help="Whole maximum processing units"
+    ),
+    reserved_units: str | None = typer.Option(
+        None, "--reserved-units", help="Pending reservation in hundredths"
+    ),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
+    format: InventoryFormat | None = typer.Option(
+        None, "--format", help="Output format"
+    ),
+) -> None:
+    """Update a non-default pool and independently verify its configuration."""
+    if (pool_id is None) == (pool_name is None):
+        usage_error("select exactly one of --id or --name")
+    selected = resolve_inventory_format(as_json, format)
+    selector = pool_id if pool_id is not None else str(pool_name)
+    result = with_client(
+        lambda hmc: update_shared_processor_pool(
+            hmc,
+            system,
+            selector,
+            new_name=new_name,
+            maximum_units=maximum_units,
+            reserved_units=reserved_units,
+        )
+    )
+    after = result.after
+    columns = (
+        "Outcome",
+        "Route",
+        "If-Match",
+        "Name",
+        "Maximum",
+        "Pending Reserved",
+        "Current Reserved",
+    )
+    row = (
+        result.outcome,
+        result.route,
+        result.if_match,
+        after.name if after else None,
+        after.maximum_processing_units if after else None,
+        after.pending_reserved_processing_units if after else None,
+        after.reserved_processing_units if after else None,
+    )
+    print_inventory(
+        asdict(result), selected, columns, [row], title="Shared Processor Pool Update"
+    )
+    if result.outcome != "verified":
+        if selected != InventoryFormat.json:
+            for label, error in (
+                ("Submission", result.submission_error),
+                ("Readback", result.readback_error),
+            ):
+                if error is not None:
+                    err_console.print(
+                        terminal_field(f"{label}: {error}", err=True), markup=False
+                    )
+        raise typer.Exit(1)
+
+
 def register_commands(group: typer.Typer) -> None:
     """Register this module's commands on *group*."""
     group.command("list")(processor_pools_list)
     group.command("get")(processor_pools_get)
+    group.command("update")(processor_pools_update)

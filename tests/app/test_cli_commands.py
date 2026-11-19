@@ -7265,3 +7265,64 @@ def test_processor_pools_get_requires_exactly_one_selector(monkeypatch, argument
     assert result.exit_code == 2
     assert "exactly one of --id or --name" in result.stderr
     operation.assert_not_awaited()
+
+
+@pytest.mark.parametrize("outcome,code", [("verified", 0), ("unverified", 1)])
+def test_processor_pool_update_prints_verification_and_sets_exit(
+    monkeypatch, outcome, code
+):
+    from hmcpctl.operations.systems.processor_pool_update import PoolUpdateResult
+
+    pool = _pool(2, "Pool Two", 2, ())
+    value = PoolUpdateResult("sys", pool, pool, outcome, None, None)
+    operation = _patch_pool_cli(monkeypatch, "update_shared_processor_pool", value)
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "processor-pools",
+            "update",
+            "sys",
+            "--name",
+            pool.name,
+            "--maximum-units",
+            "2",
+            "--reserved-units",
+            "0.05",
+            "--json",
+        ],
+    )
+    assert result.exit_code == code
+    assert json.loads(result.output)["outcome"] == outcome
+    assert operation.await_args.args[1:] == ("sys", pool.name)
+    assert operation.await_args.kwargs == {
+        "new_name": None,
+        "maximum_units": "2",
+        "reserved_units": "0.05",
+    }
+
+
+def test_processor_pool_update_tsv_reports_both_errors(monkeypatch):
+    from hmcpctl.operations.systems.processor_pool_update import PoolUpdateResult
+
+    pool = _pool(2, "Pool Two", 2, ())
+    value = PoolUpdateResult(
+        "sys", pool, None, "unverified", "submission unknown", "readback unavailable"
+    )
+    _patch_pool_cli(monkeypatch, "update_shared_processor_pool", value)
+    result = RUNNER.invoke(
+        cli.app,
+        [
+            "processor-pools",
+            "update",
+            "sys",
+            "--id",
+            "2",
+            "--new-name",
+            "renamed",
+            "--format",
+            "tsv",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Submission: submission unknown" in result.stderr
+    assert "Readback: readback unavailable" in result.stderr

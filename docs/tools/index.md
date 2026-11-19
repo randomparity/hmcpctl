@@ -6,15 +6,15 @@ This reference covers every tool the server registers, including the ones a defa
 
 The Summary column on each domain page is the first line of the tool's MCP description. The complete text, including the conditions under which a tool refuses, is the tool handler's docstring under `src/hmcpctl/server_tools/`. An MCP client receives that docstring's prose as the tool's description and its argument detail in the input schema; `Returns:` and `Raises:` sections are not sent.
 
-- **215** tools are registered.
-- **214** are callable in a default deployment.
+- **216** tools are registered.
+- **215** are callable in a default deployment.
 - **11** are listed by `tools/list` in a default deployment (ADR 0330); `hmc_search_tools` finds the rest, which are called by name or through `hmc_invoke_tool`.
 
 | Effect class | Tools |
 | --- | --- |
 | `arbitrary-command` | 1 |
 | `destructive` | 50 |
-| `mutate` | 68 |
+| `mutate` | 69 |
 | `read` | 96 |
 
 ## Maturity vocabulary
@@ -52,7 +52,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `permissions` | 1 | [permissions.md](permissions.md) |
 | `placement` | 1 | [placement.md](placement.md) |
 | `pmem` | 5 | [pmem.md](pmem.md) |
-| `processor_pool` | 2 | [processor_pool.md](processor_pool.md) |
+| `processor_pool` | 3 | [processor_pool.md](processor_pool.md) |
 | `provision` | 1 | [provision.md](provision.md) |
 | `remote_access` | 2 | [remote_access.md](remote_access.md) |
 | `resource_group` | 2 | [resource_group.md](resource_group.md) |
@@ -292,6 +292,7 @@ The maturity fields come from the [canonical HMC reference capability ledger](..
 | `hmc_update_firmware` | `destructive` | [update.md](update.md) |
 | `hmc_update_network_adapter` | `mutate` | [adapter.md](adapter.md) |
 | `hmc_update_partition_profile` | `mutate` | [lpar_profile.md](lpar_profile.md) |
+| `hmc_update_shared_processor_pool` | `mutate` | [processor_pool.md](processor_pool.md) |
 | `hmc_update_system_profile` | `mutate` | [system_profile.md](system_profile.md) |
 | `hmc_update_vios_partition_profile` | `mutate` | [vios_profile.md](vios_profile.md) |
 | `hmc_update_vios_vfc_group_label` | `mutate` | [vios_label.md](vios_label.md) |

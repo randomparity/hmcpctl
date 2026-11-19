@@ -816,6 +816,16 @@ _STATIC_VERDICTS = {
         ),
         "{config.system_name}",
     ),
+    "shared-processor-pool-update": ArmVerdict(
+        "shared-processor-pool-update",
+        True,
+        "configuration validated",
+        (
+            "one unconfigured nondefault pool: temporary name, maximum 1, reserved 0.05",
+            "restore exact pool slot and perform independent recovery",
+        ),
+        "{config.system_name}",
+    ),
     "lpar-processor-quantities": ArmVerdict(
         "lpar-processor-quantities",
         True,

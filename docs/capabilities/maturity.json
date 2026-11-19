@@ -6975,6 +6975,20 @@
       "evidence": []
     },
     {
+      "operation": "processor_pool.update",
+      "implementation": {
+        "state": "implemented",
+        "implemented_scope": [
+          {
+            "variant": "system-scoped",
+            "parameters": []
+          }
+        ],
+        "missing_scope": []
+      },
+      "evidence": []
+    },
+    {
       "operation": "processor_pool.list",
       "implementation": {
         "state": "implemented",

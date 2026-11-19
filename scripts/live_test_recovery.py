@@ -81,6 +81,7 @@ from live_test.arms import (
     lpar_vtpm,
     memory_quantities,
     network,
+    processor_pool,
     processor_quantities,
     processor_sharing_weight,
     provision_boot,
@@ -153,6 +154,7 @@ _READ_ONLY_TOOLS = frozenset(
         "hmc_list_vios",
         "hmc_list_lpars",
         "hmc_get_system",
+        "hmc_get_shared_processor_pool",
         "hmc_list_virtual_networks",
         "hmc_list_adapters",
         "hmc_list_vios_fc_port_labels",
@@ -192,6 +194,7 @@ _WITNESSED_SUBTASKS = (
         lpar_reconfigure.SUBTASK,
         memory_quantities.SUBTASK,
         processor_quantities.SUBTASK,
+        processor_pool.SUBTASK,
         processor_sharing_weight.SUBTASK,
         lpar_security_policy.SUBTASK,
         lpar_hardware_memory.SUBTASK,
@@ -341,6 +344,12 @@ def _recover_generic_document(document: dict[str, Any], results_path: Path) -> i
         )
         return 2
     unread: list[str] = []
+    pool_input = None
+    if processor_pool.SUBTASK in subtasks:
+        try:
+            pool_input = processor_pool.recovery_input(document)
+        except ValueError as error:
+            unread.append(str(error))
     round2_inputs = None
     try:
         round2_inputs = round2_inputs_from_document(document, subtasks)
@@ -402,6 +411,7 @@ def _recover_generic_document(document: dict[str, Any], results_path: Path) -> i
         (checker, inputs)
         for checker, inputs in (
             (check, pcie),
+            (processor_pool.recover, pool_input),
             (check_test_partition, partition),
             (check_vios_backup, vios),
             (check_network, network_inputs),

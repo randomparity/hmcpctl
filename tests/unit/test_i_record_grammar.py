@@ -933,6 +933,7 @@ def test_the_scan_finds_every_known_site(scanned_modules):
         "unassign_sriov_logical_port_profile",
     }
     assert by_label["-a"] == {
+        "submit_native",
         "_capture",
         "_source_command",
         "_capture_source",
