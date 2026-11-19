@@ -23,16 +23,21 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
+import hashlib
 import ipaddress
 import json
 import os
 import re
 import shlex
+import stat
 import sys
 import urllib.parse
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import ExitStack
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
@@ -1051,8 +1056,8 @@ def redact_identifier_keys(value: Any) -> Any:
     return value
 
 
-def _has_raw_identifier(data: Any) -> bool:
-    """Check actual unsanitized strings and keys without scrub-span exemptions."""
+def _output_strings(data: Any) -> Iterator[str]:
+    """Yield decoded string keys and values from a JSON projection."""
     pending = [data]
     while pending:
         value = pending.pop()
@@ -1061,9 +1066,12 @@ def _has_raw_identifier(data: Any) -> bool:
             pending.extend(value.values())
         elif isinstance(value, (list, tuple)):
             pending.extend(value)
-        elif isinstance(value, str) and _RAW_IDENTIFIER_LEAK.search(value):
-            return True
-    return False
+        elif isinstance(value, str):
+            yield value
+
+
+def _has_raw_identifier(data: Any) -> bool:
+    return any(_RAW_IDENTIFIER_LEAK.search(value) for value in _output_strings(data))
 
 
 def _tokenize_record(tok: Tokenizer, record: dict[str, Any]) -> dict[str, Any]:
@@ -1498,42 +1506,249 @@ def build_vocabulary(
 _XSD = "{http://www.w3.org/2001/XMLSchema}"
 
 
-def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, Any]:
-    """Enum types from the captured `Enumerations.xsd`, bindings from any captured XSD."""
-    types: dict[str, list[str]] = {}
-    elements: dict[str, str] = {}
+def _read_schema_xml(body: bytes) -> tuple[Element, dict[Element, str]]:
+    """Keep the in-scope default namespace of each unprefixed QName attribute."""
+    reader = ET.iterparse(
+        BytesIO(body), events=("start-ns", "start", "end"), forbid_dtd=True
+    )
+    namespaces = [""]
+    pending_default = None
+    references: dict[Element, str] = {}
+    for event, item in reader:
+        if event == "start-ns":
+            prefix, uri = item
+            if not prefix:
+                pending_default = uri
+        elif event == "start":
+            default = namespaces[-1] if pending_default is None else pending_default
+            namespaces.append(default)
+            pending_default = None
+            if item.get("type") or item.get("base"):
+                references[item] = default
+        else:
+            namespaces.pop()
+    return reader.root, references
+
+
+def _schema_roots(
+    corpus: Sequence[dict[str, Any]], *, indexed: bool
+) -> Iterator[tuple[Element, dict[Element, str]]]:
     for index, record in enumerate(corpus, 1):
-        body = record.get("body") or ""
         if (
             record.get("kind") != "rest"
             or record.get("status") != 200
             or not _is_schema(record)
         ):
             continue
+        body = record.get("body") or b""
+        if not body:
+            continue
         try:
-            root = ET.fromstring(body.encode("utf-8"))
-        except (ET.ParseError, DefusedXmlException):
-            raise ExportError(f"schema record {index} is not safe, valid XML") from None
-        for simple in root.iter(f"{_XSD}simpleType"):
-            name = simple.get("name") or ""
-            if name.endswith(".Enum"):
-                types[name] = [
-                    e.get("value") or "" for e in simple.iter(f"{_XSD}enumeration")
-                ]
-        for element in root.iter(f"{_XSD}element"):
-            name = element.get("name")
-            bound = element.get("type") or next(
-                (ext.get("base") for ext in element.iter(f"{_XSD}extension")), None
+            root, references = _read_schema_xml(
+                body.encode("utf-8") if isinstance(body, str) else body
             )
-            if name and bound and bound.endswith(".Enum"):
-                elements[name] = bound
-    if not types:
-        raise ValueError("no Enumerations.xsd record with enum types in the corpus")
-    return {
-        "firmware": firmware,
-        "types": dict(sorted(types.items())),
-        "elements": dict(sorted(elements.items())),
+        except (ET.ParseError, DefusedXmlException, LookupError, ValueError):
+            raise ExportError(f"schema record {index} is not safe, valid XML") from None
+        if root.tag == f"{_XSD}schema":
+            yield root, references
+        elif indexed:
+            raise ExportError(f"schema record {index} does not contain an XSD schema")
+
+
+def _element_bindings(
+    root: Element, references: dict[Element, str]
+) -> Iterator[tuple[str, str, str]]:
+    nodes = [root]
+    while nodes:
+        node = nodes.pop()
+        if not node.tag.startswith(_XSD) or node.tag == f"{_XSD}annotation":
+            continue
+        nodes.extend(node)
+        if node.tag == f"{_XSD}element" and (name := node.get("name")):
+            extension = node.find(
+                f"{_XSD}complexType/{_XSD}simpleContent/{_XSD}extension"
+            )
+            if target := node.get("type"):
+                yield name, target, references[node]
+            elif extension is not None and (target := extension.get("base")):
+                yield name, target, references[extension]
+            else:
+                yield name, "", ""
+
+
+def derive_enums(
+    corpus: Sequence[dict[str, Any]], firmware: str, *, indexed: bool = False
+) -> dict[str, Any]:
+    """Collect declarations before resolving names used by the flat vocabulary."""
+    definitions: dict[str, set[tuple[str, ...]]] = collections.defaultdict(set)
+    owners: dict[str, set[str]] = collections.defaultdict(set)
+    targets: dict[str, set[tuple[str, str]]] = collections.defaultdict(set)
+    for root, references in _schema_roots(corpus, indexed=indexed):
+        namespace = root.get("targetNamespace", "")
+        for declaration in root:
+            name = declaration.get("name", "")
+            if ":" in name or not name.endswith(".Enum"):
+                continue
+            if declaration.tag == f"{_XSD}complexType":
+                definitions[name].add(())
+            elif declaration.tag == f"{_XSD}simpleType":
+                values = tuple(
+                    value
+                    for e in declaration.findall(f"{_XSD}restriction/{_XSD}enumeration")
+                    if (value := e.get("value")) is not None
+                )
+                definitions[name].add(values)
+                owners[name].add(namespace)
+        for element, target, reference_ns in _element_bindings(root, references):
+            targets[element].add((target, reference_ns))
+    types = {
+        name: list(min(variants))
+        for name, variants in sorted(definitions.items())
+        if () not in variants and len({frozenset(values) for values in variants}) == 1
     }
+    if not types:
+        raise ValueError(
+            "no Enumerations.xsd record with unambiguous enum types in the corpus"
+        )
+    elements = {}
+    for name, candidates in sorted(targets.items()):
+        if len(candidates) != 1:
+            continue
+        target, reference_ns = next(iter(candidates))
+        if target in types and reference_ns in owners[target]:
+            elements[name] = target
+    return {"firmware": firmware, "types": types, "elements": elements}
+
+
+_SCHEMA_ROUTE = re.compile(
+    r"/rest/api/web/schema/((?:(?:inc|links)/)?[A-Za-z][A-Za-z0-9_-]*\.xsd)"
+)
+_MEMBER_LIMIT = 4 * 1024 * 1024
+_TOTAL_LIMIT = 32 * 1024 * 1024
+_ROW_LIMIT = 4096
+
+
+def _read_member(directory: int, parts: Sequence[str], limit: int, label: str) -> bytes:
+    """Read a bounded regular file without following links inside the selected capture."""
+    with ExitStack() as handles:
+        try:
+            for part in parts[:-1]:
+                directory = os.open(
+                    part, os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+                )
+                handles.callback(os.close, directory)
+            fd = os.open(
+                parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+            )
+            handles.callback(os.close, fd)
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+                raise ExportError(
+                    f"{label}: expected a regular file within its byte limit"
+                )
+            with open(fd, "rb", closefd=False) as handle:
+                contents = handle.read(limit + 1)
+        except OSError:
+            raise ExportError(
+                f"{label}: cannot open capture member; check the extracted files"
+            ) from None
+    if len(contents) > limit:
+        raise ExportError(f"{label}: capture member exceeds its byte limit")
+    return contents
+
+
+def _unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError("duplicate JSON field")
+    return fields
+
+
+def _capture_json(directory: int, name: str, limit: int) -> Any:
+    raw = _read_member(directory, [name], limit, name)
+    try:
+        return json.loads(raw, object_pairs_hook=_unique_fields)
+    except (ValueError, RecursionError):
+        raise ExportError(f"{name}: expected valid JSON with unique fields") from None
+
+
+def _indexed_body(
+    directory: int, row: Any, label: str, seen: set[str], remaining: int
+) -> tuple[str, bytes]:
+    if (
+        not isinstance(row, dict)
+        or type(row.get("status")) is not int
+        or row["status"] != 200
+    ):
+        raise ExportError(f"{label}: expected an indexed HTTP 200 response")
+    path = row.get("path")
+    route = _SCHEMA_ROUTE.fullmatch(path) if isinstance(path, str) else None
+    if route is None or path in seen:
+        raise ExportError(f"{label}: expected a unique web schema route")
+    member = "schemas/" + route[1]
+    if row.get("relative_file") != member:
+        raise ExportError(f"{label}: indexed filename disagrees with its schema route")
+    size = row.get("bytes")
+    if type(size) is not int or not 0 <= size <= min(_MEMBER_LIMIT, remaining):
+        raise ExportError(
+            f"{label}: invalid response size or capture exceeds its byte limit"
+        )
+    body = _read_member(directory, member.split("/"), size, label)
+    if len(body) != size or hashlib.sha256(body).hexdigest() != row.get("sha256"):
+        raise ExportError(f"{label}: body size or SHA-256 differs from the index")
+    seen.add(path)
+    return path, body
+
+
+def _indexed_enums(root: Path, firmware: str) -> dict[str, Any]:
+    try:
+        directory = os.open(root, os.O_DIRECTORY)
+    except OSError:
+        raise ExportError("cannot open the selected schema capture directory") from None
+    with ExitStack() as handles:
+        handles.callback(os.close, directory)
+        summary = _capture_json(directory, "summary.json", 64 * 1024)
+        if (
+            not isinstance(summary, dict)
+            or summary.get("release") != firmware
+            or not re.fullmatch(r"V[0-9]+R[0-9]+SP[0-9]+", firmware)
+        ):
+            raise ExportError("summary.json: --firmware must match the capture release")
+        build = summary.get("build")
+        if not isinstance(build, str) or not re.fullmatch(r"[0-9]{10}", build):
+            raise ExportError("summary.json: expected a ten-digit build")
+        rows = _capture_json(directory, "index.json", _MEMBER_LIMIT)
+        if not isinstance(rows, list) or len(rows) > _ROW_LIMIT:
+            raise ExportError("index.json: expected a bounded list of schema responses")
+        records = []
+        sources = {}
+        seen: set[str] = set()
+        remaining = _TOTAL_LIMIT
+        for index, row in enumerate(rows, 1):
+            path, body = _indexed_body(
+                directory, row, f"schema record {index}", seen, remaining
+            )
+            remaining -= len(body)
+            records.append({"kind": "rest", "status": 200, "path": path, "body": body})
+            if body:
+                sources[path] = row["sha256"]
+    return {
+        **derive_enums(records, firmware, indexed=True),
+        "build": build,
+        "sources": dict(sorted(sources.items())),
+    }
+
+
+def _load_enums(corpus: Path, firmware: str) -> dict[str, Any]:
+    try:
+        if corpus.is_dir():
+            return _indexed_enums(corpus, firmware)
+        text = corpus.read_text(encoding="utf-8")
+    except OSError:
+        raise ExportError(
+            "cannot open enum input; check the capture file or extracted directory"
+        ) from None
+    return derive_enums(json.loads(text), firmware)
 
 
 # --- entry point -------------------------------------------------------------
@@ -1541,11 +1756,18 @@ def derive_enums(corpus: Sequence[dict[str, Any]], firmware: str) -> dict[str, A
 
 def _write_scanned(data: Any, out: Path, private: Sequence[str]) -> None:
     text = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
-    leaks = Tokenizer({}, set(), private).leaks(text)
+    scanner = Tokenizer({}, set(), private)
+    leaks = scanner.leaks(text)
     if leaks:
         raise LeakError(
             f"{len(leaks)} private value(s) in the derived output; nothing written"
         )
+    if scanner.private and any(
+        pattern.search(value)
+        for value in _output_strings(data)
+        for pattern in scanner.private
+    ):
+        raise LeakError("a private value is in the derived output; nothing written")
     if _has_raw_identifier(data):
         raise LeakError("a raw identifier is in the derived output; nothing written")
     out.write_text(text, encoding="utf-8")
@@ -1593,10 +1815,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dump(corpus, handle, indent=1)
             print(f"{len(corpus)} records tokenized -> {args.out}")
             return 0
-        corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
         if args.command == "enums":
-            data = derive_enums(corpus, args.firmware)
+            data = _load_enums(args.corpus, args.firmware)
         else:
+            corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
             enums = json.loads(args.enums.read_text(encoding="utf-8"))
             data = build_vocabulary(corpus, enums, args.firmware, args.source)
         _write_scanned(data, args.out, args.private)

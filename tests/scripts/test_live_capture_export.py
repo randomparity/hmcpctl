@@ -9,6 +9,7 @@ tokenized, and an SSH key comment leaking a host.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import re
@@ -2169,6 +2170,323 @@ def test_enums_are_derived_from_the_captured_schema() -> None:
     enums = export.derive_enums(_corpus(), "vX")
     assert enums["types"]["BootMode.Enum"] == ["Normal", "Unknown"]
     assert enums["elements"] == {"DesignatedBootMode": "BootMode.Enum"}
+
+
+def _indexed_capture(root: Path, schema: str = ENUMS_XSD) -> list[dict[str, Any]]:
+    (root / "schemas/inc").mkdir(parents=True)
+    (root / "summary.json").write_text(
+        json.dumps({"release": "V9R2SP953", "build": "2211040014"})
+    )
+    rows = []
+    for name, body in (("inc/Enums.xsd", schema.encode()), ("Empty.xsd", b"")):
+        relative = "schemas/" + name
+        (root / relative).write_bytes(body)
+        rows.append(
+            {
+                "path": "/rest/api/web/schema/" + name,
+                "relative_file": relative,
+                "status": 200,
+                "bytes": len(body),
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "source_pass": "synthetic-private-metadata",
+            }
+        )
+    (root / "index.json").write_text(json.dumps(rows))
+    return rows
+
+
+def _indexed_cli(root: Path, out: Path, *options: str) -> int:
+    return export.main(
+        ["enums", str(root), "--firmware", "V9R2SP953", "--out", str(out), *options]
+    )
+
+
+def test_missing_enum_input_keeps_private_path_out_of_diagnostic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "previous.json"
+    out.write_text("previous")
+    missing = tmp_path / "private-extraction-marker"
+    assert _indexed_cli(missing, out) == 1
+    error = capsys.readouterr().err
+    assert "enum input" in error and "private-extraction-marker" not in error
+    assert str(tmp_path) not in error
+    assert out.read_text() == "previous"
+
+
+def test_indexed_capture_records_verified_schema_sources_only(tmp_path: Path) -> None:
+    rows = _indexed_capture(tmp_path)
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out, "--private", "synthetic-private") == 0
+    first = out.read_bytes()
+    assert json.loads(first) == {
+        **export.derive_enums([_rest("/schema/Enums.xsd", ENUMS_XSD)], "V9R2SP953"),
+        "build": "2211040014",
+        "sources": {rows[0]["path"]: rows[0]["sha256"]},
+    }
+    (tmp_path / "index.json").write_text(json.dumps(list(reversed(rows))))
+    assert _indexed_cli(tmp_path, out) == 0
+    assert out.read_bytes() == first
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("path", "/rest/api/web/schema/../private.xsd"),
+        ("path", "/unexpected/Private.xsd"),
+        ("relative_file", "schemas/Empty.xsd"),
+        ("status", 404),
+        ("bytes", -1),
+        ("bytes", True),
+        ("bytes", 1),
+        ("sha256", "0" * 64),
+    ],
+)
+def test_indexed_capture_rejects_invalid_row(
+    tmp_path: Path, key: str, value: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    rows[0][key] = value
+    (tmp_path / "index.json").write_text(json.dumps(rows))
+    out = tmp_path / "result.json"
+    out.write_text("previous")
+    assert _indexed_cli(tmp_path, out) == 1
+    assert out.read_text() == "previous"
+    assert "record 1" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("filename", "contents"),
+    [
+        ("summary.json", "{}"),
+        ("summary.json", '["private-note"]'),
+        ("summary.json", '{"release":"V9R2SP952","build":"2211040014"}'),
+        ("summary.json", '{"release":"V9R2SP953","build":"private-note"}'),
+        ("index.json", "{}"),
+        ("index.json", "[null]"),
+        (
+            "summary.json",
+            '{"release":"wrong","release":"V9R2SP953","build":"2211040014"}',
+        ),
+        ("index.json", "["),
+    ],
+)
+def test_indexed_capture_rejects_invalid_metadata(
+    tmp_path: Path, filename: str, contents: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _indexed_capture(tmp_path)
+    (tmp_path / filename).write_text(contents)
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert err and "private-note" not in err and str(tmp_path) not in err
+
+
+def test_indexed_capture_checks_duplicate_routes_and_empty_hashes(
+    tmp_path: Path,
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    out = tmp_path / "result.json"
+    for invalid in ([*rows, rows[0]], [rows[0], {**rows[1], "sha256": "0" * 64}]):
+        (tmp_path / "index.json").write_text(json.dumps(invalid))
+        assert _indexed_cli(tmp_path, out) == 1
+        assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "member", ["schemas/inc", "schemas/inc/Enums.xsd", "index.json", "summary.json"]
+)
+def test_indexed_capture_rejects_linked_members(tmp_path: Path, member: str) -> None:
+    root = tmp_path / "capture"
+    _indexed_capture(root)
+    path = root / member
+    external = tmp_path / "external"
+    path.rename(external)
+    path.symlink_to(external, target_is_directory=external.is_dir())
+    out = tmp_path / "result.json"
+    assert _indexed_cli(root, out) == 1
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "body", [" ", "<schema", "<unrelated/>", "<!DOCTYPE schema><schema/>"]
+)
+def test_indexed_capture_rejects_nonempty_invalid_schema(
+    tmp_path: Path, body: str
+) -> None:
+    _indexed_capture(tmp_path, body)
+    out = tmp_path / "result.json"
+    out.write_text("previous")
+    assert _indexed_cli(tmp_path, out) == 1
+    assert out.read_text() == "previous"
+
+
+@pytest.mark.parametrize(
+    ("literal", "pattern"),
+    [("synthetic&quot;marker", 'synthetic"marker'), ("198.51.100.37", "absent")],
+)
+def test_indexed_capture_privacy_checks_decoded_and_serialized_output(
+    tmp_path: Path, literal: str, pattern: str
+) -> None:
+    _indexed_capture(tmp_path, ENUMS_XSD.replace('"Normal"', f'"{literal}"'))
+    out = tmp_path / "result.json"
+    out.write_text("previous")
+    assert _indexed_cli(tmp_path, out, "--private", pattern) == 1
+    assert out.read_text() == "previous"
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [
+        ("_ROW_LIMIT", "bounded list"),
+        ("_TOTAL_LIMIT", "byte limit"),
+        ("_MEMBER_LIMIT", "byte limit"),
+    ],
+)
+def test_indexed_capture_enforces_size_bounds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    limit: str,
+    expected: str,
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    if limit == "_TOTAL_LIMIT":
+        second = "schemas/inc/Second.xsd"
+        (tmp_path / second).write_bytes(
+            (tmp_path / rows[0]["relative_file"]).read_bytes()
+        )
+        rows.append(
+            {
+                **rows[0],
+                "relative_file": second,
+                "path": "/rest/api/web/schema/inc/Second.xsd",
+            }
+        )
+        (tmp_path / "index.json").write_text(json.dumps(rows))
+        ceiling = rows[0]["bytes"]
+    else:
+        ceiling = 1
+    monkeypatch.setattr(export, limit, ceiling)
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out) == 1
+    assert expected in capsys.readouterr().err and not out.exists()
+
+
+def test_indexed_capture_requires_regular_member(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = _indexed_capture(tmp_path)
+    member = tmp_path / rows[0]["relative_file"]
+    member.rename(tmp_path / "saved")
+    member.mkdir()
+    out = tmp_path / "result.json"
+    assert _indexed_cli(tmp_path, out) == 1
+    assert "regular file" in capsys.readouterr().err and not out.exists()
+
+
+def test_schema_enums_resolve_conflicts_independently_of_record_order() -> None:
+    extra = """<xsd:element name="DesignatedBootMode" type="xsd:string"/>
+      <xsd:element name="Child" type="BootMode.Enum"/>
+      <xsd:element name="Local" type="self:BootMode.Enum"/>
+      <xsd:element name="Foreign" type="other:BootMode.Enum"/>
+      <xsd:annotation><xsd:appinfo>
+        <xsd:element name="Example" type="BootMode.Enum"/>
+      </xsd:appinfo></xsd:annotation>
+      <xsd:element name="Parent"><xsd:complexType><xsd:sequence>
+        <xsd:element name="Nested"><xsd:complexType><xsd:simpleContent>
+          <xsd:extension base="BootMode.Enum"/>
+        </xsd:simpleContent></xsd:complexType></xsd:element>
+      </xsd:sequence></xsd:complexType></xsd:element>"""
+    wrapper = (
+        '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"'
+        ' xmlns:self="urn:synthetic:local" xmlns:other="urn:synthetic:other"'
+        ' targetNamespace="urn:synthetic:local">'
+    )
+    a = _rest("/schema/A.xsd", ENUMS_XSD)
+    b = _rest("/schema/B.xsd", wrapper + extra + "</xsd:schema>")
+    expected = export.derive_enums([a, b], "vX")
+    assert expected["elements"] == {"Child": "BootMode.Enum", "Nested": "BootMode.Enum"}
+    assert export.derive_enums([b, a], "vX") == expected
+
+    conflicting = _rest("/schema/C.xsd", ENUMS_XSD.replace('"Normal"', '"Changed"'))
+    result = export.derive_enums([a, b, conflicting], "vX")
+    assert "BootMode.Enum" not in result["types"]
+    assert not result["elements"]
+    assert result == export.derive_enums([conflicting, b, a], "vX")
+
+
+def test_schema_enums_omit_qualified_declaration_names_and_complex_type_conflicts() -> (
+    None
+):
+    extra = """
+      <xsd:complexType name="BootMode.Enum"/>
+      <xsd:simpleType name="other:Mode.Enum"><xsd:restriction base="xsd:string">
+        <xsd:enumeration value="Example"/>
+      </xsd:restriction></xsd:simpleType>
+      <xsd:element name="Foreign" type="other:Mode.Enum"/>
+    """
+    conflicting = ENUMS_XSD.replace("</xsd:schema>", extra + "</xsd:schema>")
+    result = export.derive_enums([_rest("/schema/Types.xsd", conflicting)], "vX")
+    assert set(result["types"]) == {"LogicalPartitionState.Enum"}
+    assert not result["elements"]
+
+
+def test_schema_bindings_respect_the_default_namespace_at_the_type_reference() -> None:
+    xsd = "http://www.w3.org/2001/XMLSchema"
+    primary = "urn:synthetic:primary"
+    foreign = "urn:synthetic:other"
+    x = f'<xs:schema xmlns:xs="{xsd}" targetNamespace="{primary}" xmlns="{primary}">'
+    definition = """<xs:simpleType name="Mode.Enum"><xs:restriction base="xs:string">
+      <xs:enumeration value="On"/></xs:restriction></xs:simpleType>"""
+    a = _rest("/schema/A.xsd", x + definition + "</xs:schema>")
+    same = '<xs:element name="Match" type="Mode.Enum"/>'
+    other = f'<xs:element name="Wrong" xmlns="{foreign}" type="Mode.Enum"/>'
+    nested = f"""<xs:element name="Nested"><xs:complexType><xs:simpleContent>
+      <xs:extension xmlns="{foreign}" base="Mode.Enum"/>
+      </xs:simpleContent></xs:complexType></xs:element>"""
+    b = _rest("/schema/B.xsd", x + same + other + nested + "</xs:schema>")
+    c = _rest(
+        "/schema/C.xsd",
+        x.replace(primary, foreign) + same.replace("Match", "Other") + "</xs:schema>",
+    )
+    assert export.derive_enums([a, b, c], "vX")["elements"] == {"Match": "Mode.Enum"}
+
+
+def test_imported_no_namespace_catalog_cannot_supply_a_missing_uom_type() -> None:
+    catalog = "/rest/api/web/schema/inc/Enumerations.xsd"
+    uom = "http://www.ibm.com/xmlns/systems/power/firmware/uom/mc/2012_10/"
+    schema = f'''<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+        xmlns="{uom}" targetNamespace="{uom}">
+        <xsd:import schemaLocation="inc/Enumerations.xsd"/>
+        <xsd:include schemaLocation="UomMode.xsd"/>
+        <xsd:element name="UomMode" type="BootMode.Enum"/>
+        </xsd:schema>'''
+    sources = [
+        _rest(catalog, ENUMS_XSD),
+        _rest("/rest/api/web/schema/Object.xsd", schema),
+        _rest("/rest/api/web/schema/UomMode.xsd", ""),
+    ]
+    result = export.derive_enums(sources, "vX", indexed=True)
+    assert result["types"]["BootMode.Enum"] == ["Normal", "Unknown"]
+    assert "UomMode" not in result["elements"]
+
+
+def test_schema_enums_keep_equivalent_declarations_and_skip_empty_200() -> None:
+    a = _rest("/schema/A.xsd", ENUMS_XSD)
+    b = _rest(
+        "/schema/B.xsd",
+        ENUMS_XSD.replace('"Normal"', '"swap"')
+        .replace('"Unknown"', '"Normal"')
+        .replace('"swap"', '"Unknown"'),
+    )
+    empty = _rest("/schema/Empty.xsd", "")
+    forward = export.derive_enums([a, b, empty], "vX")
+    assert set(forward["types"]["BootMode.Enum"]) == {"Normal", "Unknown"}
+    assert forward == export.derive_enums([empty, b, a], "vX")
+    with pytest.raises(ValueError, match="no .*enum types"):
+        export.derive_enums([empty], "vX")
 
 
 @pytest.mark.parametrize("body", ["<root>ordinary</root>", ENUMS_XSD])

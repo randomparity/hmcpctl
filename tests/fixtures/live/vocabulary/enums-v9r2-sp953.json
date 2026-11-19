@@ -1,0 +1,1189 @@
+{
+ "firmware": "V9R2SP953",
+ "types": {
+  "AIXCapability.Enum": [
+   "Active",
+   "Inactive",
+   "Unavailable"
+  ],
+  "AddressBroadcastPerformancePolicy.Enum": [
+   "Chip Affinity",
+   "No Affinity",
+   "Node Affinity",
+   "Unknown"
+  ],
+  "AllowInactiveSourceStorageVios.Enum": [
+   "Disabled",
+   "Enabled"
+  ],
+  "BootMode.Enum": [
+   "Diagnostic with Default Boot List",
+   "Diagnostic with Stored Boot List",
+   "Normal",
+   "Open Firmware OK Prompt",
+   "System Management Services",
+   "Unknown"
+  ],
+  "CageType.Enum": [
+   "BPA",
+   "Disk Enclosure",
+   "Fans",
+   "IO",
+   "None",
+   "System"
+  ],
+  "CapacityOnDemandOnOffState.Enum": [
+   "StateAvailable",
+   "StateNotAvailable",
+   "Running",
+   "UnreturnedResources",
+   "CodeNotEntered"
+  ],
+  "ConfigurationState.Enum": [
+   "Configured",
+   "UnConfigured",
+   "InvalidConfiguration"
+  ],
+  "ConnectionSpeed.Enum": [
+   "auto",
+   "E10Mbps",
+   "E100Mbps",
+   "E1Gbps",
+   "E10Gbps",
+   "unknown"
+  ],
+  "CurrentProfileSync.Enum": [
+   "Disabled",
+   "On",
+   "Suspended",
+   "Unknown"
+  ],
+  "DetailedState.Enum": [
+   "Dump In Progress",
+   "Failed Authentication",
+   "Incomplete",
+   "None",
+   "Open Firmware",
+   "Optimizing Memory",
+   "Other",
+   "Password Update Required",
+   "Performing Hardware Discovery",
+   "Recovery",
+   "Service Processor Failover",
+   "Stressed",
+   "Terminated",
+   "Unknown",
+   "Version Mismatch",
+   "Remote Restarting",
+   "Remote Restarted"
+  ],
+  "DeviceState.Enum": [
+   "active",
+   "defined",
+   "inactive",
+   "missingBackingDevice",
+   "Unknown"
+  ],
+  "DeviceType.Enum": [
+   "logical",
+   "physical",
+   "Unknown"
+  ],
+  "DuplexMode.Enum": [
+   "auto",
+   "half",
+   "full",
+   "unknown"
+  ],
+  "EnergyManagementModeType.Enum": [
+   "Disable",
+   "Static",
+   "Dynamic_Favor_Power",
+   "Dynamic_Favor_Performance",
+   "Dynamic_Performance",
+   "Fixed_Maximum_Frequency",
+   "Maximum_Performance",
+   "Power_Saving_Mode_Transitioning",
+   "Unknown"
+  ],
+  "EnvironmentSize.Enum": [
+   "custom",
+   "large",
+   "medium",
+   "small",
+   "Unknown"
+  ],
+  "EthernetAdapterType.Enum": [
+   "HEALogicalPort",
+   "LinkAggregationAdapter",
+   "PhysicalEthernetAdapter",
+   "SRIOVEthernetLogicalPort"
+  ],
+  "EthernetFrameSize.Enum": [
+   "Non-Jumbo 1500 Byte",
+   "Jumbo 9000 Byte",
+   "unknown"
+  ],
+  "EventType.Enum": [
+   "INVALID_URI",
+   "CACHE_CLEARED",
+   "MISSING_EVENTS",
+   "ADD_URI",
+   "MODIFY_URI",
+   "DELETE_URI",
+   "REBUILD_COMPLETE",
+   "NEW_CLIENT",
+   "HIDDEN_URI",
+   "VISIBLE_URI"
+  ],
+  "FailureGroupState.Enum": [
+   "Online",
+   "Offline",
+   "Degraded",
+   "Unknown"
+  ],
+  "FrameState.Enum": [
+   "failed authentication",
+   "incomplete",
+   "no connection",
+   "pending authentication - password updates required",
+   "pending frame number",
+   "standby/not available",
+   "standby/standby",
+   "standby/starting",
+   "starting/unknown",
+   "Unknown"
+  ],
+  "FspmOsIplMode.Enum": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "Unavailable"
+  ],
+  "FullSystemPartitionIPLMode.Enum": [
+   "TODO"
+  ],
+  "FunctionalState.Enum": [
+   "Functional",
+   "NonFunctional",
+   "Unknown"
+  ],
+  "GroupColor.Enum": [
+   "Red",
+   "Blue",
+   "Green",
+   "Grey",
+   "Yellow",
+   "Orange",
+   "Pink",
+   "Purple",
+   "Cyan"
+  ],
+  "HMC.Enum": [
+   "HMC"
+  ],
+  "HighAvailabilityMode.Enum": [
+   "auto",
+   "disabled",
+   "standby"
+  ],
+  "HostChannelAdapterCableType.Enum": [
+   "Cable",
+   "Fiber"
+  ],
+  "HostEthernetAdapterLogicalPortState.Enum": [
+   "Available",
+   "Unavailable",
+   "Unknown"
+  ],
+  "HostEthernetAdapterPhysicalPortType.Enum": [
+   "E1Gbps",
+   "E10Gbps",
+   "Unknown"
+  ],
+  "IBMIRestrictedIOModeSRIOVLogicalPortAssignmentCapability.Enum": [
+   "true",
+   "false",
+   "Unavailable"
+  ],
+  "IOAdapterType.Enum": [
+   "HostEthernetAdapter",
+   "physicalEthernetAdpter",
+   "physical_FiberCnnel",
+   "physical_FiberCnnel_OverEthernetAdapter",
+   "physicalopticaldrive",
+   "physicalcontroller",
+   "physicalSASController",
+   "physicalSCSIAdapter",
+   "SRIOV_Adapter"
+  ],
+  "IPInterfaceState.Enum": [
+   "Active",
+   "Inactive",
+   "Disconnected"
+  ],
+  "IPLSource.Enum": [
+   "a",
+   "b",
+   "c",
+   "d",
+   "Unknown"
+  ],
+  "IPLSpeed.Enum": [
+   "Extreme",
+   "Fast",
+   "Hyper",
+   "No Override",
+   "Slow"
+  ],
+  "InactiveProfileMigrationPolicy.Enum": [
+   "LastActivatedProfile",
+   "PartitionConfiguration"
+  ],
+  "InstallationType.Enum": [
+   "DVD",
+   "Image",
+   "NIM"
+  ],
+  "IsRequired.Enum": [
+   "NotRequired",
+   "RequiredAllTheTime",
+   "RequiredAtLPARBoot",
+   "Unknown"
+  ],
+  "KeylockPosition.Enum": [
+   "manual",
+   "normal",
+   "unknown"
+  ],
+  "LinkAggregationHashMode.Enum": [
+   "default",
+   "dst_port",
+   "src_dst_port",
+   "src_port"
+  ],
+  "LinkAggregationMode.Enum": [
+   "ieee8023ad",
+   "round_robin",
+   "standard"
+  ],
+  "LogicalHostEthernetAdapterCapability.Enum": [
+   "Base Minimum",
+   "Dedicated",
+   "Defined Resource Amounts",
+   "High",
+   "Low",
+   "Medium",
+   "Unknown"
+  ],
+  "LogicalPartitionEnvironment.Enum": [
+   "AIX/Linux",
+   "OS400",
+   "Virtual IO Server",
+   "Shark",
+   "Ostype_rpa_io_server",
+   "Unknown"
+  ],
+  "LogicalPartitionProcessorCompatibilityMode.Enum": [
+   "default",
+   "POWER5",
+   "POWER6",
+   "POWER6_Plus",
+   "POWER6_Plus_Enhanced",
+   "POWER6_Enhanced",
+   "POWER7",
+   "POWER7_Plus",
+   "POWER7_Enhanced",
+   "POWER7_Plus_Enhanced",
+   "POWER8",
+   "POWER8_Enhanced",
+   "POWER9",
+   "POWER9_Base",
+   "POWER9_Enhanced",
+   "Unknown"
+  ],
+  "LogicalPartitionProcessorSharingMode.Enum": [
+   "keep idle procs",
+   "sre idle proces",
+   "sre idle procs active",
+   "sre idle procs always",
+   "capped",
+   "uncapped",
+   "Unknown"
+  ],
+  "LogicalPartitionState.Enum": [
+   "error",
+   "not activated",
+   "not available",
+   "open firmware",
+   "running",
+   "shutting down",
+   "starting",
+   "migrating not active",
+   "migrating running",
+   "hardware discovery",
+   "suspended",
+   "suspending",
+   "resuming",
+   "Unknown"
+  ],
+  "LogicalUnitMigrationState.Enum": [
+   "Successful",
+   "Inprogress",
+   "Failed",
+   "SuccessfulInRecursive",
+   "InprogressInRecursive",
+   "FailedInRecursive",
+   "Unknown"
+  ],
+  "LogicalUnitType.Enum": [
+   "VirtualIO_Disk",
+   "VirtualIO_Hibernation",
+   "VirtualIO_Image",
+   "VirtualIO_Active_Memory_Sharing"
+  ],
+  "MajorBootType.Enum": [
+   "Power On",
+   "Reboot",
+   "Unknown"
+  ],
+  "ManagedFrameCapability.Enum": [
+   "TODO"
+  ],
+  "ManagedFrameState.Enum": [
+   "BPA (H System)",
+   "BPA (IH System)",
+   "BPA (IO-Only Frame)",
+   "CUoD Click to Accept",
+   "Error",
+   "Error-Dump in progress",
+   "Error-Terminated",
+   "Failed Authentication",
+   "Incomplete",
+   "No Connection",
+   "On Demand Recovery",
+   "Operating",
+   "Pending Authentication - Password Updates Required",
+   "Pending Frame Number",
+   "PMU - Hitachi SRX",
+   "Power Off",
+   "Power Off In Progress",
+   "Rack Standby/Not Available",
+   "Rack Standby/Rack Standby",
+   "Rack Standby/Starting",
+   "Recovery",
+   "Running",
+   "Service processor static failover error",
+   "Standby",
+   "Standby/Not Available",
+   "Standby/Standby",
+   "Standby/Starting",
+   "Starting/Unknown",
+   "Version Mismatch"
+  ],
+  "ManagedFrameType.Enum": [
+   "HE BPA",
+   "IH BPA",
+   "IO Only",
+   "PMU-Hitachi SRX",
+   "Unknown"
+  ],
+  "MasterConsoleConnectionStatus.Enum": [
+   "Connected",
+   "Not Connected",
+   "Reauthentication Required",
+   "Version Mismatch",
+   "Unavailable",
+   "Unknown"
+  ],
+  "MediaSpeed.Enum": [
+   "E10_Full_Duplex",
+   "E10_Half_Duplex",
+   "E100_Full_Duplex",
+   "E100_Half_Duplex",
+   "E1000_Full_Duplex",
+   "E10000_Full_Duplex",
+   "Auto_Negotiation"
+  ],
+  "MemoryDefragStatus.Enum": [
+   "Not_In_Progress",
+   "In_Progress",
+   "Cancelled",
+   "Timeout",
+   "Cancelling",
+   "No_Solution",
+   "Error",
+   "Partial_Success",
+   "No_Change",
+   "Insufficient_Free_Logical_Memory_Blocks",
+   "Partial_Mirroring_Not_Supported"
+  ],
+  "MemoryMirroringMode.Enum": [
+   "none",
+   "system firmware only"
+  ],
+  "MemoryMirroringState.Enum": [
+   "Off",
+   "Full",
+   "Partial",
+   "Unknown"
+  ],
+  "MigrationStorageViosDataStatus.Enum": [
+   "Valid",
+   "Update_Failed",
+   "Update_Pending",
+   "No_Data"
+  ],
+  "MultiCoreScalingValue.Enum": [
+   "1",
+   "2",
+   "4",
+   "8",
+   "16"
+  ],
+  "NodeState.Enum": [
+   "Up",
+   "Down",
+   "Unknown"
+  ],
+  "OperatingSystemType.Enum": [
+   "AIX/Linux",
+   "AIX",
+   "Linux",
+   "VIOS",
+   "IBM i"
+  ],
+  "PSPUsage.Enum": [
+   "First_PSP_Is_Primary",
+   "Second_PSP_Primary",
+   "First_PSP_Primary_Second_PSP_Secondary",
+   "Second_PSP_Primary_First_PSP_Secondary"
+  ],
+  "PartitionBootMode.Enum": [
+   "Normal",
+   "Diagnostic_With_Default_Boot_List",
+   "Diagnostic_With_Stored_Boot_List",
+   "Open_Firmware",
+   "System_Management_Services",
+   "Unavailable",
+   "Default",
+   "Unknown"
+  ],
+  "PartitionMigrationState.Enum": [
+   "Not_Migrating",
+   "Migration_Starting",
+   "Migration_Waiting",
+   "Migration_Dispatch_In_Progress",
+   "Migration_Dispatched",
+   "Migration_Waiting_For_Retry",
+   "Migration_Stopped",
+   "Migration_In_Progress",
+   "Migration_Failed",
+   "Migration_Complete"
+  ],
+  "PartitionPowerManagementMode.Enum": [
+   "None",
+   "Nominal",
+   "Dyanmic_Power_Save_Maximum_Performance",
+   "Dynamic_Power_Save"
+  ],
+  "PartitionRemoteRestart.Enum": [
+   "Invalid",
+   "Remote_Restartable",
+   "Source_Remote_Restarting",
+   "Destination_Remote_Restarting",
+   "Remote_Restarted",
+   "Profile_Restored",
+   "Reserved_Storage_Device_Update_Failed",
+   "Forced_Source_Side_Restart",
+   "Source_Side_Cleanup_Failed",
+   "Reserved_Storage_Device_Update_Failed_With_Override",
+   "Remote_Restartable_Suspended",
+   "Local_Update_Failed",
+   "Partial_Update",
+   "Stale_Data",
+   "Local_Data_Valid",
+   "Out_Of_Space",
+   "Local_Data_Invalid",
+   "Destination_Remote_Restarted",
+   "Source_Remote_Restarting_Suspended",
+   "Local_Storage_Update_Failed",
+   "Page_Device_Update_Override"
+  ],
+  "PhysicalVolumeReservePolicy.Enum": [
+   "ClusterReserve",
+   "ExclusivePersistent",
+   "NoReserve",
+   "SCSI-2",
+   "SharedPersistent",
+   "SinglePath"
+  ],
+  "PhysicalVolumeState.Enum": [
+   "active",
+   "missing",
+   "removed",
+   "varied off"
+  ],
+  "PhysicalVolumeUsage.Enum": [
+   "HiddenDisk",
+   "Ams",
+   "Disk",
+   "Hibernation",
+   "Image",
+   "OpticalImage",
+   "OpticalImageIm",
+   "Repo",
+   "Unused",
+   "Vg",
+   "Vscsi",
+   "Vss_Pool"
+  ],
+  "PowerEnterprisePoolComplianceState.Enum": [
+   "ApproachingOutOfCompliancePool",
+   "ApproachingOutOfComplianceServer",
+   "InCompliance",
+   "OutOfCompliance",
+   "Unavailable"
+  ],
+  "PowerOnOption.Enum": [
+   "autostart",
+   "standby",
+   "Unknown"
+  ],
+  "PowerOnSide.Enum": [
+   "permanent",
+   "temporary",
+   "Unknown"
+  ],
+  "PowerOnSource.Enum": [
+   "OperatorPanel",
+   "SystemManagementConsole",
+   "OtherManagementTool",
+   "ASMMenu",
+   "ManagementModule",
+   "ModemPowerOn",
+   "TimedPowerOn",
+   "Other",
+   "Auto-PowerRestart"
+  ],
+  "PowerOnSpeed.Enum": [
+   "fast",
+   "slow",
+   "normal",
+   "maintenance",
+   "Unknown"
+  ],
+  "PowerOnSpeedOverride.Enum": [
+   "fast",
+   "none",
+   "slow",
+   "Unknown"
+  ],
+  "PowerOnStartPolicy.Enum": [
+   "autorecovery",
+   "autostart",
+   "userinit",
+   "Unknown"
+  ],
+  "PrimaryState.Enum": [
+   "Aborted",
+   "Active",
+   "Deploying",
+   "Inactive",
+   "In Error",
+   "Not Available",
+   "Relocating",
+   "Resetting",
+   "Shutting Down",
+   "Standby",
+   "Started",
+   "Starting",
+   "Stopped",
+   "Stopping",
+   "Suspended",
+   "Suspending",
+   "Unknown",
+   "Waiting for Input"
+  ],
+  "ProcessorMode.Enum": [
+   "cap",
+   "uncap",
+   "uncapWeight",
+   "Unknown"
+  ],
+  "ProfileType.Enum": [
+   "FULL_SYSTEM_LPAR_PROFILE_TYPE",
+   "REG_LPAR_PROFILE_TYPE",
+   "Other",
+   "Unknown"
+  ],
+  "ProgressState.Enum": [
+   "Hibernate Completing",
+   "Hibernate Preparing",
+   "Hibernate Saving HMC Data",
+   "Hibernate Saving Partition Data",
+   "Hibernate Validating",
+   "Resume Completing",
+   "Resume Preparing",
+   "Resume Reading HMC Data",
+   "Resume Reading Partition Data",
+   "Resume Restoring Partition Data",
+   "Resume Validating",
+   "Unknown"
+  ],
+  "RMCState.Enum": [
+   "active",
+   "inactive",
+   "none",
+   "unknown"
+  ],
+  "Redundancy.Enum": [
+   "ALL",
+   "NONE"
+  ],
+  "RemoteRestartJobOperation.Enum": [
+   "Validate",
+   "RemoteRestart",
+   "Recover"
+  ],
+  "ResourceMonitoringControlState.Enum": [
+   "active",
+   "inactive",
+   "none",
+   "unknown",
+   "busy"
+  ],
+  "ResourceSharingMode.Enum": [
+   "dedicated",
+   "shared"
+  ],
+  "SCSIReservePolicyAlgorithm.Enum": [
+   "Failover",
+   "Round_Robin",
+   "Load_Balance",
+   "Adaptive",
+   "CLAROpt",
+   "LeastBlocks",
+   "LeastIO",
+   "StreamIO",
+   "SymmOpt",
+   "Unknown"
+  ],
+  "SPFailoverState.Enum": [
+   "notReady",
+   "ready",
+   "unknown"
+  ],
+  "SRIOVAdapterCapabilities.Enum": [
+   "VirtualInterfaceCapable",
+   "NonVirtualInterfaceCapable",
+   "NonVirtualInterfaceSharingCapable"
+  ],
+  "SRIOVAdapterMode.Enum": [
+   "Sriov",
+   "Dedicated",
+   "ForceDedicated",
+   "unknown"
+  ],
+  "SRIOVAdapterPersonalities.Enum": [
+   "NoQoSSupport",
+   "SingleSettingQoSSupport",
+   "Unknown"
+  ],
+  "SRIOVAdapterState.Enum": [
+   "Initializing",
+   "NotConfigured",
+   "PoweredOff",
+   "PoweringOff",
+   "Running",
+   "Dumping",
+   "Failed",
+   "Missing",
+   "PCIEIDMismatch"
+  ],
+  "SRIOVAdapterStatus.Enum": [
+   "NotConfigured",
+   "Initializing",
+   "Running",
+   "PoweringOff",
+   "PoweredOff",
+   "Dumping",
+   "Failed",
+   "Missing",
+   "PCIE ID Mismatch"
+  ],
+  "SRIOVBackupDeviceType.Enum": [
+   "veth",
+   "vnic"
+  ],
+  "SRIOVConnectionSpeed.Enum": [
+   "E100Gbps",
+   "E100Mbps",
+   "E10Gbps",
+   "E10Mbps",
+   "E1Gbps",
+   "E40Gbps",
+   "E25Gbps",
+   "E50Gbps",
+   "Auto",
+   "Unknown"
+  ],
+  "SRIOVFunctionalStatus.Enum": [
+   "Functional",
+   "NonFunctional",
+   "Unknown"
+  ],
+  "SRIOVLogicalPortCommonAttributes.Enum": [
+   "TODO"
+  ],
+  "SRIOVLogicalPortOption.Enum": [
+   "PromiscousMode",
+   "DiagnosticMode",
+   "MACRestricted",
+   "AdjunctBased",
+   "DestructiveDebugMode",
+   "HugeDMAWindow",
+   "PreviligedStatisticsCollection",
+   "AssignedToVIOSPartition"
+  ],
+  "SRIOVLogicalPortType.Enum": [
+   "Ethernet",
+   "FCoE",
+   "FiberChannel",
+   "RoCE",
+   "Unconfigured"
+  ],
+  "SRIOVPersonality.Enum": [
+   "NO_CAPACITY_SUPPORTED",
+   "MIN_CAPACITY",
+   "MAX_MIN_CAPACITY",
+   "UNKNOWN"
+  ],
+  "SRIOVPhysicalPortMTU.Enum": [
+   "E_1500",
+   "E_9000",
+   "Unknown"
+  ],
+  "SRIOVPhysicalPortOptions.Enum": [
+   "autoDuplex",
+   "externalLoopBack",
+   "fullDuplex",
+   "halfDuplex",
+   "internalLoopBack",
+   "linkUp",
+   "promiscousMode",
+   "receiveFlowControl",
+   "transmitFlowControl",
+   "Veb",
+   "Vepa",
+   "PriorityFlowControl"
+  ],
+  "SRIOVPhysicalPortType.Enum": [
+   "Cna",
+   "Ethernet",
+   "FiberChannel",
+   "RoCE",
+   "Unknown"
+  ],
+  "SRIOVPortCapability.Enum": [
+   "Veb",
+   "Vepa",
+   "Pvid",
+   "IEEE8021Q_Priority",
+   "PriorityACL",
+   "Mac Vlan ACL Restriction",
+   "Clear Physical Port Stat",
+   "Clear Logical Port Stat",
+   "PORT_VF_CONFIGURATION_OPTION",
+   "PORT_VLAN_RESTRICTION_NOT_ALLOWED_WITH_PVID_SET",
+   "Enable VF Options",
+   "unknown"
+  ],
+  "SelectionType.Enum": [
+   "auto",
+   "manual",
+   "Unknown"
+  ],
+  "ServiceProcessorFailoverState.Enum": [
+   "Not Ready",
+   "Ready",
+   "unavailable",
+   "unsupported"
+  ],
+  "ServiceProcessorSide.Enum": [
+   "Permanent",
+   "Temporary",
+   "Both",
+   "Unknown"
+  ],
+  "SharedEthernetAdapterHighAvailabilityMode.Enum": [
+   "disabled",
+   "auto",
+   "standby",
+   "sharing"
+  ],
+  "SharedEthernetAdapterQualityOfServiceMode.Enum": [
+   "disabled",
+   "strict",
+   "loose"
+  ],
+  "StorageDeviceState.Enum": [
+   "Active",
+   "Inactive",
+   "Missing_Backing_Device",
+   "Defined",
+   "Error",
+   "Unknown"
+  ],
+  "StorageDeviceType.Enum": [
+   "Logical",
+   "Phys",
+   "Ssplu",
+   "Unknown"
+  ],
+  "StorageVolumeType.Enum": [
+   "PhysicalVolume",
+   "LogicalUnit"
+  ],
+  "SupportedMACRestrictions.Enum": [
+   "ALLOW_ALL_OS_DEFINED",
+   "DENY_ALL_OS_DEFINED",
+   "SPECIFY_ALLOWABLE_OS_DEFINED"
+  ],
+  "SupportedVLANRestrictions.Enum": [
+   "ALLOW_ALL",
+   "DENY_VLAN_TAGGED",
+   "ALLOW_SPECIFIED"
+  ],
+  "SystemPartitionProcessorLimit.Enum": [
+   "max",
+   "E24",
+   "E32",
+   "E128"
+  ],
+  "SystemState.Enum": [
+   "error",
+   "error - dump in progress",
+   "error - terminated",
+   "failed authentication",
+   "incomplete",
+   "initializing",
+   "no connection",
+   "on demand recovery",
+   "operating",
+   "pending authentication - password updates required",
+   "power off",
+   "power off in progress",
+   "recovery",
+   "standby",
+   "version mismatch",
+   "service processor failover",
+   "unknown"
+  ],
+  "SystemType.Enum": [
+   "fsp",
+   "bmc",
+   "unknown"
+  ],
+  "TemplateFormat.Enum": [
+   "csv"
+  ],
+  "TemplateLocation.Enum": [
+   "file",
+   "url"
+  ],
+  "TemplateType.Enum": [
+   "system",
+   "virtual machine"
+  ],
+  "TierMirrorState.Enum": [
+   "NotMirrored",
+   "Synchronized",
+   "Degraded",
+   "Unknown"
+  ],
+  "TierType.Enum": [
+   "RestrictedSystemTier",
+   "UnrestrictedSystemTier",
+   "UserTier",
+   "Unknown"
+  ],
+  "TurboCoreSupport.Enum": [
+   "Reserved",
+   "Turbocore_Capable",
+   "Not_Enough_Nodes",
+   "Not_All_Processors_Are_Turbocore_Capable",
+   "Unknown"
+  ],
+  "VNICBackingDevicePortUsage.Enum": [
+   "NOT_VNIC",
+   "DEDICATED_VNIC",
+   "SHARED_VNIC"
+  ],
+  "VirtualAdapterConnectionRole.Enum": [
+   "client",
+   "server",
+   "Unknown"
+  ],
+  "VirtualAdapterRole.Enum": [
+   "client",
+   "server"
+  ],
+  "VirtualIOAdapterType.Enum": [
+   "Server",
+   "Client",
+   "Unknown"
+  ],
+  "VirtualIOConfigurationState.Enum": [
+   "complete",
+   "notConfigured",
+   "partial"
+  ],
+  "VirtualNICBackingDeviceAction.Enum": [
+   "NO_ACTION",
+   "ADD_BD",
+   "DELETE_BD",
+   "CHANGE_PRIORITY_OF_BD",
+   "RESET_BD",
+   "CLEAR_BD_ERRORS",
+   "FORCE_FAIL_OVER_ON_BD",
+   "ADD_BD_ALLOW_NET_DISRUPT"
+  ],
+  "VirtualNICBackingDeviceStatus.Enum": [
+   "OPERATIONAL",
+   "POWERED_OFF",
+   "LINK_DOWN",
+   "NETWORK_ERROR",
+   "UNRESPONSIVE",
+   "ADAPTER_ERROR",
+   "UNKNOWN"
+  ],
+  "VirtualNICBackingDeviceType.Enum": [
+   "SRIOV"
+  ],
+  "VirtualNICMode.Enum": [
+   "DEDICATED",
+   "SHARED"
+  ],
+  "VirtualNetworkAvailabilityMode.Enum": [
+   "disabled",
+   "failover",
+   "loadBalanced"
+  ],
+  "VirtualOpticalMediaType.Enum": [
+   "DEV",
+   "ISO",
+   "BLANK"
+  ],
+  "VirtualStationInterfaceType.Enum": [
+   "Pre-Associate",
+   "Pre-Associate_With_Resource_Reservation",
+   "Associate",
+   "De-Associate",
+   "Vsi_Manager_Id",
+   "Organizationally_Defined_TLV"
+  ],
+  "VirtualSwitchMode.Enum": [
+   "Veb",
+   "Vepa",
+   "Unknown"
+  ],
+  "VirtualSwitchModes.Enum": [
+   "VEB",
+   "VEPA"
+  ],
+  "VitalProductDataStale.Enum": [
+   "NoVPD",
+   "ValidVPD",
+   "StaleVPD",
+   "Unknown"
+  ],
+  "WWPNLoggedInBy.Enum": [
+   "Unknown",
+   "None",
+   "Client",
+   "VirtualIO_Server"
+  ],
+  "WWPNStatus.Enum": [
+   "Unknown",
+   "LoggedIn",
+   "LoggedOut"
+  ]
+ },
+ "elements": {},
+ "build": "2211040014",
+ "sources": {
+  "/rest/api/web/schema/BasePartition.xsd": "d3fd61375338522409c577497e6ed05b9e87ecdc22bc8c5ab567980fa81ff1dc",
+  "/rest/api/web/schema/BootListInformation.xsd": "fe46e0dc9e44f8b245785711ec4f6776a7fcf2147ff5f0b2c4a875da97c97d9a",
+  "/rest/api/web/schema/CapacityOnDemand.xsd": "0a0a5d9edf503b2e8e6dce73b0c060b1f6fa26287986ba91b92b7d5902451451",
+  "/rest/api/web/schema/DynamicPowerSavingTunables.xsd": "ebf864d33341a4bd87605b06c2e242a4a946b00d5d53524f885d9562aaf78ad5",
+  "/rest/api/web/schema/EnergyManagementConfiguration.xsd": "32d618c516bb51ce1632fa0ea08631c2f31532dc51e3e3c6665deca86f4bca74",
+  "/rest/api/web/schema/EthernetBackingDevice.xsd": "fd4c090dd009626c3fe4470d8202f0d6215a50de0f66a8d257316e885264ba79",
+  "/rest/api/web/schema/FAN.xsd": "0d39c5e36d127b2604436e848da0f2ab83d3d609d89cf89ebd0a59a888546ac5",
+  "/rest/api/web/schema/FANCollection.xsd": "baf02bafd99e0f5deefb6e426528a058d0d6bce664d62ada218c82fc661dffb0",
+  "/rest/api/web/schema/HardwareAcceleratorQoSType.xsd": "7ec20ff323ca9c0b0b8f1548ba98a6eb5ddf8bd1b219b592a11bc1317f0f50c3",
+  "/rest/api/web/schema/HardwareAcceleratorQoSTypeCollection.xsd": "fba0f160ded616b64795257363f92dc039d358f778ad0fba1ddbfa688e223744",
+  "/rest/api/web/schema/HardwareAcceleratorType.xsd": "7213bdd66a57ba36f9303c5d096d0e1ea27491a2d1361afd23f1b3731bff8242",
+  "/rest/api/web/schema/HardwareAcceleratorTypeCollection.xsd": "63faac4ab6531a2e022e25ab5e703ef040576003f5b6984681aec504672eb63d",
+  "/rest/api/web/schema/HostChannelAdapter.xsd": "09ccfc8bf12448a9ba27423ede935f15367b472d50cb614411defd0b599fa7a6",
+  "/rest/api/web/schema/HostChannelAdapterBandwidthCapability.xsd": "51b604dc346ea9144bcdca593bc500978c9a097f2c295e68123c0463de15c659",
+  "/rest/api/web/schema/HostChannelAdapterCollection.xsd": "f89a0dad9acf27457344467d9a7e87fc856f5f040f6b919ce8549b0a447cc1ed",
+  "/rest/api/web/schema/HostEthernetAdapterLogicalPort.xsd": "16290e33acbbf06064983757bb4aa4ac6ff06fd1b9cdf0b014fefc0e46536214",
+  "/rest/api/web/schema/HostEthernetAdapterLogicalPortCollection.xsd": "fd9662dacf7b80d674ed0f93b1a0add20dc7a3f8760b4e6eaef382d7e054623f",
+  "/rest/api/web/schema/IBMiIOSlot.xsd": "ed32ae8bd776eace3661c7b2614ee091cdfbf65881bb77497d1b80271d89f11d",
+  "/rest/api/web/schema/IBMiProfileTaggedIO.xsd": "f1c2114862187b966d3c66fd1a3340f77fc7142b7cbc51d2176b845a38c4743c",
+  "/rest/api/web/schema/IFixDetail.xsd": "c7cfcb53733d6c0cefadc778621b051a64faa596a9dca5c00523ee1a7d44fb27",
+  "/rest/api/web/schema/IFixDetailCollection.xsd": "58aea7acc9bd40e3ca99ad0aee406c44084f30919d3975217746a1995f18ae5e",
+  "/rest/api/web/schema/IOAdapter.xsd": "45bed4a5606528e3f08c7feb3faea98cf14c3ae8331ca9848add784ff7283ef0",
+  "/rest/api/web/schema/IOBus.xsd": "b8423b0b1fcfce6e9b92b06c02efc96e779a885064f41914f6bac351030e8b88",
+  "/rest/api/web/schema/IOBusCollection.xsd": "e006a90cc84135e63a6b8f08d3896ca6c34b94a4a54f5738cf171ccf719439f0",
+  "/rest/api/web/schema/IOPool.xsd": "4af013fa20ca3d15076c0ae127c7bdc359e55b529b3f4c954ea7d94ec91fc5e6",
+  "/rest/api/web/schema/IOPoolCollection.xsd": "a54e3c56bacca69b1ff27c6b072403c3272fb27a6cfe58d5be6d46b5ba2e7a99",
+  "/rest/api/web/schema/IORDevice.xsd": "84479c24a09083beb55491acd9e9888d43cfd7cc27516fa733287a6e5a694730",
+  "/rest/api/web/schema/IORDeviceCollection.xsd": "5b1786abe5b7d76187133d8a098db559aa481b8ddbf1526d5d237aad3a51fbf9",
+  "/rest/api/web/schema/IOSlot.xsd": "b1d0fc43caefeaa3063486eacd3ab08aaab15a03072afb10587258b77598142d",
+  "/rest/api/web/schema/IOSlotCollection.xsd": "cd40cfb6838284408a2225321d7ebf5258637e74b071d27354f11805e4af920c",
+  "/rest/api/web/schema/IPInterface.xsd": "7ecf1ba94d76945c60d93e6e0672410d263b6c5f42ac9e1ad3f21a72bc18299c",
+  "/rest/api/web/schema/IPLConfiguration.xsd": "d2dcbadf781c02fa891c2ff507211c337989baa4b911091fd69b1219ffe58e08",
+  "/rest/api/web/schema/IdlePowerSavingTunables.xsd": "cb612afa21cbe3e6b89f65a805d28235c9d60564c06cc8e27543bf9685e3dbd0",
+  "/rest/api/web/schema/LogicalPartition.xsd": "e4029ef44126b1d550f5bf37e6be1b81e270014cba6f5d0e1cd151d8202a1277",
+  "/rest/api/web/schema/LogicalPartitionCapabilities.xsd": "f84d455c1a4a71c526e44d4bf1bb45e80bd4ce65e5ea2b73d0435c8436172499",
+  "/rest/api/web/schema/LogicalPartitionDedicatedProcessorConfiguration.xsd": "eb24c2e04a0c60e875fa9cedc74f9080883b0d5dbd1294fb2fe05dce5a78825c",
+  "/rest/api/web/schema/LogicalPartitionIOConfiguration.xsd": "07b0d5890beb51d94ca768568b7590ba68e0028046b68eb69cdcf71f55462081",
+  "/rest/api/web/schema/LogicalPartitionMemoryConfiguration.xsd": "e702b3523c704ee8cd4b27242a624c6ba259c47df03d8b1277558735584dea32",
+  "/rest/api/web/schema/LogicalPartitionProcessorConfiguration.xsd": "15fd44807ca5ac6c1a42c2ae22d09c8b7f21c4a72ada73e0a08e40d3af6c64fb",
+  "/rest/api/web/schema/LogicalPartitionProfile.xsd": "ab95a1d173a31ac402ec6fe4803e0818873471331193c6c8b20b92f7d7959e6a",
+  "/rest/api/web/schema/LogicalPartitionProfileDedicatedProcessorConfiguration.xsd": "2ec73b4bb21b52a9f114a1a3f35788777f3e0463f2703f3a8077cbdbfff5bb32",
+  "/rest/api/web/schema/LogicalPartitionProfileIOConfiguration.xsd": "4af537d499c78be1fbc34e6d635a0579d5e74b8af84bbd21675bdf488175f1bd",
+  "/rest/api/web/schema/LogicalPartitionProfileMemoryConfiguration.xsd": "5916499b85ee43e273683e1d42b2e40c7b7dbf3498bcc2c53e334f51615fc510",
+  "/rest/api/web/schema/LogicalPartitionProfileProcessorConfiguration.xsd": "3cf87c98a2d4e07bffd0ffc3225cf03eb54078e3e9d3e95767c290196b9f5f6a",
+  "/rest/api/web/schema/LogicalPartitionProfileSharedProcessorConfiguration.xsd": "3d9810427ffeec8c34260f7bde32785c310f9cf1a644f273a4594ac1677ad680",
+  "/rest/api/web/schema/LogicalPartitionSharedProcessorConfiguration.xsd": "a811420ea96105b1b6519dbdba80c8c19abe96a02a337336c81bbf0de8f89daa",
+  "/rest/api/web/schema/LogicalUnit.xsd": "3d5a39bdb38437e4bfeba08ded64b12b496de0cf541c665f56302b49958a9c92",
+  "/rest/api/web/schema/LogicalUnitMigration.xsd": "190ba74f41d85bb0f7d17e1320a7bcac689d0b3a27d59cd8ece11f2d052a6d85",
+  "/rest/api/web/schema/LogicalVolumeVirtualTargetDevice.xsd": "73de9d73cde8b420754ea9e44b4cc10b9aa4d86f8948cd2b774230adc9f64595",
+  "/rest/api/web/schema/MachineTypeModelSerialNumber.xsd": "0b0559722774aad2e78875755d84265027687cef85cf78b425998b68491b5c2c",
+  "/rest/api/web/schema/ManagedSystem.xsd": "613c56d92e1b20078de02cbc83c313e9999b58fcdc0af6840294f3cd52ba0f7c",
+  "/rest/api/web/schema/ManagementConsole.xsd": "c6b610d2f25946c17117d36d013009fa01a5f43a310920c7b09f7aec72c6b206",
+  "/rest/api/web/schema/ManagementConsoleMemoryConfiguration.xsd": "83988846932a4d6d79e4a3a6790bddd9458e715f2794a0034900ecc635d86e9b",
+  "/rest/api/web/schema/ManagementConsoleNetworkInterface.xsd": "aaadadaef1d507ac8ccacaccbbc57e159bb3a5b2dcf3558d7b2ddace1a9fc55d",
+  "/rest/api/web/schema/ManagementConsoleNetworkInterfaceCollection.xsd": "9f3753e0a41b5fb72bc8b1837c5cb6fa4a384e5a9cb7e0472532c2615ecbfa17",
+  "/rest/api/web/schema/ManagementConsoleProcessorConfiguration.xsd": "16f9e64f0c26e17e74bfe47c4cb48fb3b284083026211cd3e18895ae07b80e24",
+  "/rest/api/web/schema/NetworkBootDevice.xsd": "d9031534b8ded5a5d510c531f23c00f840ba67eb40976be0e54698cd3a802914",
+  "/rest/api/web/schema/NetworkBootDeviceCollection.xsd": "7266c85498b6283235848db95513d90cd83c6f2f0d83babf143474ba11eb8fb3",
+  "/rest/api/web/schema/OperatingSystemDisk.xsd": "0b6ddfa4bdd91c4dbd59f683681fd6609b6af2cbd155ce80d44819e36843f235",
+  "/rest/api/web/schema/OperatingSystemDiskCollection.xsd": "754699f4a58b0255c76041dafbd757334de024b08ec81618543d548fea0b15ec",
+  "/rest/api/web/schema/PartitionPersistentMemoryConfiguration.xsd": "088f5812697262c0d7996fa1d2de0d0d258b4633cfc32b9cc742f4fa678b26ff",
+  "/rest/api/web/schema/PhysicalFibreChannelAdapter.xsd": "d6fbee647461730252655a0de2bf56f158b224ba73ef636a20640fc005737789",
+  "/rest/api/web/schema/PhysicalFibreChannelPort.xsd": "59d1293ed065ad53116228fe747fb4dc378ef315ce55dafadecf5ef0385c2f17",
+  "/rest/api/web/schema/PhysicalFibreChannelPortCollection.xsd": "d56f6a12d1795846e85b6cf213a0a6ead4aa9213f1078fddaae8ccd108d97ef3",
+  "/rest/api/web/schema/PhysicalVolume.xsd": "2bf898e4584261cbfa728d2dc4a29b3e25a34d6d3244de0f3efbcac0f8d1a1e6",
+  "/rest/api/web/schema/PhysicalVolumeCollection.xsd": "0c9d3025dc14dac279ce0ace9dd3ca1aca53f95aac2aaa863d88c0b59a82b3e4",
+  "/rest/api/web/schema/PhysicalVolumeVirtualTargetDevice.xsd": "186ddbb7214448ad3b2d834499b44217f34d5b6eae6db69ccb899fc3ba687eee",
+  "/rest/api/web/schema/PortVFConfigurationOption.xsd": "b332dad9ee2b21cdfaa1910c7c72e53132602efc39f4f56fe75bc4a4f29355e9",
+  "/rest/api/web/schema/PortVFConfigurationOptionCollection.xsd": "0762917efb208be0338de7b4091f84684efb74012e066066fb9d8d1d37d84523",
+  "/rest/api/web/schema/PowerSupply.xsd": "4a3b2c9c6f5ae9c8a52eaac9c9c362fcd511611a73a3175ae21410042d73d6db",
+  "/rest/api/web/schema/PowerSupplyCollection.xsd": "7de6ac6badef83de141d18c87051c65d199ccfb93cf87d3e3bdf8f9b9ba04a2a",
+  "/rest/api/web/schema/ProfileClientNetworkAdapter.xsd": "c95f11c887f08f42a32e51c6ed4f744c0bfeca54f9b838a85dd37f27e7d6c2ff",
+  "/rest/api/web/schema/ProfileIOSlot.xsd": "19e70e0262b0aadd4b1a83514fedfd2d6978b5d0620ebc1f1b6517efae202b2e",
+  "/rest/api/web/schema/ProfileIOSlotCollection.xsd": "29407b0f9ae6ecdc6926f11a65b66a9ba662a5b73eb8a834b39c4f1ae3979728",
+  "/rest/api/web/schema/ProfileSRIOVConfiguredLogicalPort.xsd": "1b9474f1ec8e7a3b194765b845e9e87cb5a1cc741289128407f7a50237eba541",
+  "/rest/api/web/schema/ProfileSRIOVEthernetLogicalPort.xsd": "f9ccaa6726905f0073f609503c9231020ebe891fb68058df41826ef01aa64499",
+  "/rest/api/web/schema/ProfileSRIOVEthernetLogicalPortCollection.xsd": "88bd1f9f87f40134aa710f515a863122c72479db95b18395000e1991e5a838e6",
+  "/rest/api/web/schema/ProfileSRIOVRoCELogicalPort.xsd": "9ed1600d86ecfe28db0fba1874cc9a3aba9dd06ce5b60f74e62ad35659d1e8f1",
+  "/rest/api/web/schema/ProfileSRIOVRoCELogicalPortCollection.xsd": "641cfd65cbea1f19db0fe53958c2bed73978f6fef5734b47dcaa2dba55c24d99",
+  "/rest/api/web/schema/ProfileSRIOVVirtualNICBackupDevice.xsd": "fbc77f499e9be18092c8d417eb253c9a89d44ef11e6410edc37775c60cce3de7",
+  "/rest/api/web/schema/ProfileSRIOVVirtualNICBackupDeviceCollection.xsd": "6c568d0e9fcf85302438a26cb6613665f9a6816b77b6b32ae1eb2f04dd1003b3",
+  "/rest/api/web/schema/ProfileTrunkAdapter.xsd": "93e6befde78556abac47c5d1749f455cbe224738ba3b91fbf1ff35f7def591e8",
+  "/rest/api/web/schema/ProfileVirtualEthernetAdapter.xsd": "99b8e34f697d3073b08d0ca717bc73895425c188f21c88eb75c21d61884bb6b5",
+  "/rest/api/web/schema/ProfileVirtualFibreChannelAdapter.xsd": "4632ec0d37d5bf7769c27f8c4109cbb1f93ef4210d96ed99b081d74f11669dc2",
+  "/rest/api/web/schema/ProfileVirtualFibreChannelClientAdapter.xsd": "b1141776748c894c059fd04edbdc7432a6d5ab969658d4b157413039bcff8a21",
+  "/rest/api/web/schema/ProfileVirtualFibreChannelServerAdapter.xsd": "6b7d2825fbd0d3b0959c63f3fddd9d74cc16d6e7deada1898ae71e894052e8b8",
+  "/rest/api/web/schema/ProfileVirtualIOAdapter.xsd": "ffa61686a0dbd477d5595111f687bca30cb3e3fdeea87cb4c3be81888de70a5f",
+  "/rest/api/web/schema/ProfileVirtualNICBackingDevice.xsd": "6b9232854b610b561b71c908c1eb45446289cab94f755dc8e7698be04869c1a5",
+  "/rest/api/web/schema/ProfileVirtualNICDedicated.xsd": "0f00edd39fc05ead26c784dc3fedbc9821fffbc6e669d8fea19fa6f86436ed7e",
+  "/rest/api/web/schema/ProfileVirtualNICDetails.xsd": "87e77b14aa6fb43d72389ef81285789d5847b86cdb2f03c9d9f7b8b061d73b41",
+  "/rest/api/web/schema/ProfileVirtualNICSRIOVBackingDevice.xsd": "69be4965a6186870e25f650cce2bf855a572d2aa55262e2674b8e9b29cbe9170",
+  "/rest/api/web/schema/ProfileVirtualNICShared.xsd": "98135209b4a3c3dda8519b4fd2f36aa935af0532d80578ed90a9fadb7aed5a8d",
+  "/rest/api/web/schema/ProfileVirtualSCSIAdapter.xsd": "06cdda6c63a9472e64c93bb802d97003a31fbfa17f7d2419b5cacc5964a53c2f",
+  "/rest/api/web/schema/ProfileVirtualSCSIClientAdapter.xsd": "a018e046eda32df979fe71534d4ac9993064b20c7e385086eb8860ea17ed2377",
+  "/rest/api/web/schema/ProfileVirtualSCSIServerAdapter.xsd": "f9912b403c5d6eb07e6a87a0115b68bc0154ceaed6e71c3d7d146f7fc1e734bc",
+  "/rest/api/web/schema/ReservedStorageDevice.xsd": "41c146aeff9d294b18e079a6af310e7744529865eeea765838162adde2360045",
+  "/rest/api/web/schema/ReservedStorageDeviceCollection.xsd": "46de2690406d094a6d23c9d3d72b0dd9a3d0b137643d182af0d31477030dff96",
+  "/rest/api/web/schema/SRIOVAdapter.xsd": "64eec3e5e531f22402cf9bce62ebb91492ba25c110474847b89bcc3572298b37",
+  "/rest/api/web/schema/SRIOVConvergedNetworkAdapterPhysicalPort.xsd": "96a72ce7476f911e1b3b96d9190ebabeffa6b7c5bca638a6bffebaf692222dfa",
+  "/rest/api/web/schema/SRIOVConvergedNetworkAdapterPhysicalPortCollection.xsd": "7baf8ab020921910bd634e01f78f49f29e733fef10b5913eb2d8c57782f7d8cb",
+  "/rest/api/web/schema/SRIOVEthernetPhysicalPort.xsd": "91cc28b4838cb6418a9cc5f776183389d4c8ae03cc9ec1178d50d1c91412adcb",
+  "/rest/api/web/schema/SRIOVEthernetPhysicalPortCollection.xsd": "4875da594e084a165404b8c94a4ebe4bf1815865629f5065752eb7f22e857e2b",
+  "/rest/api/web/schema/SRIOVPhysicalPort.xsd": "5e27e09cdb2afd7fb15d615a2aba9f7ba8d8dbd46fe7ed3c3d00de3b3fe4d0b5",
+  "/rest/api/web/schema/SRIOVRoCEPhysicalPort.xsd": "73f0f8a2b2e88da92a734f6dbb813c50915c9db87ea809928425ee482bc7abdd",
+  "/rest/api/web/schema/SRIOVRoCEPhysicalPortCollection.xsd": "d357eed6d53bc8899379f480f10ab94ae8119eb56cdd0dcddd8ef92af9a8239b",
+  "/rest/api/web/schema/SRIOVUnconfiguredLogicalPort.xsd": "cceac6b7e63f9336d95874b56a1170bf9c2f956564e94188591ca9766e10c537",
+  "/rest/api/web/schema/SRIOVUnconfiguredLogicalPortCollection.xsd": "894c4902b63030be80b45c0cce7782c18577769f63482a11c1d6cb1c4a08dd5c",
+  "/rest/api/web/schema/SchemaVersion.xsd": "b29fd56f7f7c31b7296180853e1c0155ba6679c6130b7c5cc8b050259b3f2657",
+  "/rest/api/web/schema/SharedEthernetAdapter.xsd": "993ec81b734fcb39884442ea218e3ebf2f08748874d67d3bb0b3207503180efe",
+  "/rest/api/web/schema/SharedEthernetAdapterCollection.xsd": "61fe8227bf6da4fbcda43ebbe833ff7d4a3a97a2a45f5e9973c922dbd01fc098",
+  "/rest/api/web/schema/SharedFileSystemFile.xsd": "173332e82404d347b4f23505182312f5b44a2791d58cd0bd3510d9179a635e30",
+  "/rest/api/web/schema/SharedFileSystemFileVirtualTargetDevice.xsd": "db683c4243edd87a2ef24ef21d836203beaa95421268fe2fe9fed78011b403e7",
+  "/rest/api/web/schema/SharedMemoryPool.xsd": "efb949eae5f364fa21802bed5a3f87e6233709655d97648f6f3072904530c808",
+  "/rest/api/web/schema/SharedStoragePoolLogicalUnitVirtualTargetDevice.xsd": "d88f1446a6d10922b7bc0fb235daa7229c2b47b0d5f1d1975dfb757a0817ec9b",
+  "/rest/api/web/schema/SystemCapabilities.xsd": "c2b68e52c96ae8638bfddf79add99379ecedc187f4e168bf5d31f7c27b053f5b",
+  "/rest/api/web/schema/SystemIOConfiguration.xsd": "34a2d5c77c81a3793b23200016d392a91a84d5dcb098df563a28d613ffe60de1",
+  "/rest/api/web/schema/SystemMemoryConfiguration.xsd": "2d9e8bb537d681ec4d250949015f9dcb458d41a0d272e953959612c359db0f78",
+  "/rest/api/web/schema/SystemMigrationInformation.xsd": "98f0e8da22322f4815492748f0ed1ebcca4ec8896642ff21fb5eff37ff382e71",
+  "/rest/api/web/schema/SystemPersistentMemoryConfiguration.xsd": "50594e1ed2b327492bdca0bf901c40adf9398121ab273a1472d085b9efff5fbd",
+  "/rest/api/web/schema/SystemProcessorConfiguration.xsd": "dadaee8e10d812b6289e909c0b61068d40eda702ebf1a2add61686309a04ca26",
+  "/rest/api/web/schema/SystemSecurity.xsd": "a822ada4741aad8bd846926dbcfa6ae8ae9f7d3ecab821991cc1662558e70f88",
+  "/rest/api/web/schema/SystemVirtualNetwork.xsd": "27f2f3a9cf88bde7216dcb7b95c80a19711f55f65211e2577ab03ffeffc9624b",
+  "/rest/api/web/schema/SystemVirtualStorage.xsd": "8543032cbccba0291448e4321e1a014ee3bb77d285cf7b3fc9074a2bf47d361a",
+  "/rest/api/web/schema/SystemVirtualStorageCollection.xsd": "b0ba5ba02815baed23b86256c1b91029e25d029db1ee28965923278a125179e7",
+  "/rest/api/web/schema/TrunkAdapter.xsd": "d337fc92562c58d9d9c190cf6a490f5f8e04e08517c8483ca9b6ae80dbce81b6",
+  "/rest/api/web/schema/TrunkAdapterCollection.xsd": "6db1b9533564881f6ce0b160454b9a9c6322bf9f7eb3f8e4e27615ff40bbaacb",
+  "/rest/api/web/schema/VacatingMigrationTier.xsd": "058f9f9d3d213eeb76757581730cd6166ab14d25a3eb1330a004cc57ed5f5439",
+  "/rest/api/web/schema/VersionReleaseMaintenance.xsd": "c07d5603156d88dfd0617ef0e71f692b2cc3389eb4512f013b87814dc57d3ab9",
+  "/rest/api/web/schema/VirtualDisk.xsd": "3a374ba03d2d46af0458d66c30ac54cf4957c73a7d80062b6ad3f939124e5464",
+  "/rest/api/web/schema/VirtualEnvironmentConfiguration.xsd": "8b8ce27886111a0538c98de3059a04811f330798d1520e3846f495040b5f1fdd",
+  "/rest/api/web/schema/VirtualEthernetAdapter.xsd": "5674a647d0b2f245f91a54d3815ee0a6162a8ce12b69c9cf45b3f607082edef9",
+  "/rest/api/web/schema/VirtualFibreChannelAdapter.xsd": "6cabd8c0b2d2d3389e169995f1d79e5e38fe98bea128eb4fdc900d26e5685c00",
+  "/rest/api/web/schema/VirtualFibreChannelClientAdapter.xsd": "9d5421c5f623eb4edb48b004c7e50ad5f75d26446a14b12494adf26f2c09da08",
+  "/rest/api/web/schema/VirtualFibreChannelMapping.xsd": "b7e18246d3d24796df9c3a26e2fddee9c1abcaabdd23fa729daff2c245a5ca0c",
+  "/rest/api/web/schema/VirtualFibreChannelMappingCollection.xsd": "f953792caf8a450082ddc516a8af7630c5465787e46a4e14ff951ddf69426ca7",
+  "/rest/api/web/schema/VirtualFibreChannelNPortLoginStatus.xsd": "e1506937ae4856a10f09f5a7b9b11daf4ee820533bc4b4af3395c5fe57e087f1",
+  "/rest/api/web/schema/VirtualFibreChannelNPortLoginStatusCollection.xsd": "3df686b153ee99b53d62b787f2f87704f6aa260095744bd09f94c649751b6038",
+  "/rest/api/web/schema/VirtualFibreChannelServerAdapter.xsd": "b52cdb652f81d3b8a2dd23b6d38eb66fc71594d0ba2f47ebda830af12aec62c7",
+  "/rest/api/web/schema/VirtualIOAdapter.xsd": "8a433b23d10bbbf299dc0abd02f932858972fc44c2753ad6dde2341876de365a",
+  "/rest/api/web/schema/VirtualIOServer.xsd": "04db1b861171ab528bd510756e7807355736482d7dc51279e3c94dd8ea498b45",
+  "/rest/api/web/schema/VirtualIOServerCapabilities.xsd": "bb58937b680538e7e3164d40fcc966bce482b36bfe6e86192e10e6d0af70a20d",
+  "/rest/api/web/schema/VirtualIOServerInstallConfiguration.xsd": "30029a965a163a6ea47ebfb9bd2b2a8aaef22bf2bf1222caf5ec2adf5d8c517c",
+  "/rest/api/web/schema/VirtualMediaRepository.xsd": "a8d384c3ed252d2ba6471308897bf2cf7db658419fe447ebeb90b20be421f34b",
+  "/rest/api/web/schema/VirtualMediaRepositoryCollection.xsd": "515358db0cba702c04b2f799519859e9100d508826ed56634dde5ebc25f49e2a",
+  "/rest/api/web/schema/VirtualNICBackingDevice.xsd": "2dfddb54d76fa239f24adb482843ddcc0c67f6f7a95c45082d05398dae8cb7d8",
+  "/rest/api/web/schema/VirtualNICDedicated.xsd": "d36df23e43f624fc82ea2b11ebdf86bd6f1cd4d9eaa6505649552b92402c8d03",
+  "/rest/api/web/schema/VirtualNICDetails.xsd": "65341c68e2c0c092fe90bcb617ed5ef9c24f74530650cbdd8be2d1c2c797ecaa",
+  "/rest/api/web/schema/VirtualNICSRIOVBackingDevice.xsd": "4f146e6b596d81d939560f0cc6bc035d555159bb5ff6d23f1163494716b9d238",
+  "/rest/api/web/schema/VirtualNICShared.xsd": "0035cc8b6cd8d4040ba4050642c1babfa311784616a0cfbc09cea51d3c3e87a7",
+  "/rest/api/web/schema/VirtualOpticalMedia.xsd": "ef22e1234e9b602978fa1c5bc3ec8873980d72f8489fe97b1be6c6afd3ed20b1",
+  "/rest/api/web/schema/VirtualOpticalMediaCollection.xsd": "f107ae2eb0cc78124ea502e30464555f7af5bd50271b6f850897a146d97d656e",
+  "/rest/api/web/schema/VirtualOpticalTargetDevice.xsd": "d00ac2908f25a74af537ae013240eaa89469b74e9cf7fc0e5a52d7c9ee410120",
+  "/rest/api/web/schema/VirtualOpticalTargetDeviceCollection.xsd": "68f64eb5dacb320b050f0f2d3202dc8d3fd4b80fcbf7b394b9db03de5f4c240e",
+  "/rest/api/web/schema/VirtualSCSIAdapter.xsd": "d1da4aeceb24041d8cf2bce5074fcb67ee7acd7e1314a5ac9386dfc3f609a2f7",
+  "/rest/api/web/schema/VirtualSCSIClientAdapter.xsd": "eb44181e4a1c559535d618ec057b05ca4264cac1f4b449be7a8f7b9094a5011b",
+  "/rest/api/web/schema/VirtualSCSIMapping.xsd": "c9407efe740f9ecad63c274e87e57397f70032dd5e76e53d75d27077bd095056",
+  "/rest/api/web/schema/VirtualSCSIMappingCollection.xsd": "b6f5c54197abfa39162400298921ddff6813b23fb7820751ec5641977a8ab55a",
+  "/rest/api/web/schema/VirtualSCSIServerAdapter.xsd": "31728d1d1810eadb8367767610a281bb4fc382030a13022d0d9bb8077846a740",
+  "/rest/api/web/schema/VirtualSCSIStorage.xsd": "5c0ed7c30dd0e38f653d4602d86d88be36743ffddd4d6f1aab11f8d554a5c4e5",
+  "/rest/api/web/schema/VirtualTargetDevice.xsd": "1897e8bb15276ba31dbe48be4a02a98a8b69a8d8d2642415b2ec3b61dc9cec76",
+  "/rest/api/web/schema/inc/ChoiceCollections.xsd": "cea54860514d7c216142ca93f8457c3752f9c49e1aea0a68f50aabe74293371a",
+  "/rest/api/web/schema/inc/Enumerations.xsd": "4b677611d1f536311eaf775887e5f3796e65225b214694b30e459ef3a215b97d",
+  "/rest/api/web/schema/inc/Globals.xsd": "07d2ee4084b4be3fa05b26e98440c60d839543f29205c701cf8714fd0447d499",
+  "/rest/api/web/schema/inc/Lists.xsd": "23c188489f35409170de9ee30bc85827cafdc9f48e0a85fb1481ee509a9f2c19",
+  "/rest/api/web/schema/inc/Patterns.xsd": "45234ea47a890004700d10ed9acec67f4c38dce15b284beacffa0100386c2b27",
+  "/rest/api/web/schema/inc/Primitives.xsd": "fc17d8481ba5a4b0d2314f7fb7f2e5483d948de4ff1683d7d4589af49035d549",
+  "/rest/api/web/schema/inc/ProfileVirtualNICBackingDeviceChoiceCollection.xsd": "bf4da01f475fcff522169a30931e9d1cc2cbb0729ba4a2eff7255c31269e3e7c",
+  "/rest/api/web/schema/inc/Types.xsd": "08aabd7cf1ac01468a295dc7cd47ee031277f46eae84868f942e9c2ee8bed06b",
+  "/rest/api/web/schema/inc/Unions.xsd": "7e9c995b467fa3268108a965771cde2187e2007b90929058b844b2cbc5898a9b",
+  "/rest/api/web/schema/links/BasePartition_Links.xsd": "f2c3630767f3bf3e49ed2319d6e0a0411453489764ea5cc2cdca38ba44f8b655",
+  "/rest/api/web/schema/links/SharedMemoryPool_Links.xsd": "ffb525e042fce5e838c019b89eb7920a5d58c5ddf02af0beb5235c7a47509ba4"
+ }
+}

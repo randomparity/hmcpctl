@@ -59,6 +59,8 @@ BASELINED_FINDINGS = {
     "src/hmcpctl/_progress_codes.json": 2,
     "tests/app/test_cli.py": 2,
     "tests/conftest.py": 1,
+    # SHA-256 digests of the 171 indexed schema sources (#1813).
+    "tests/fixtures/live/vocabulary/enums-v9r2-sp953.json": 171,
     # An enum type name long enough to read as Base64 entropy, once per enum list (#1202).
     "tests/fixtures/live/vocabulary/enums-v10r3-p10-9080-hex.json": 1,
     "tests/fixtures/live/vocabulary/enums-v10r3-p8-8247-22l.json": 1,
