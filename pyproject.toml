@@ -11,7 +11,7 @@ dependencies = [
     "defusedxml>=0.7.1,<1",
     "httpx>=0.28.1,<1",
     "pydantic>=2.14.3,<3",
-    "pydantic-settings>=2.16.2,<3",
+    "pydantic-settings>=2.16.3,<3",
     "truststore>=0.10.5,<1",
     "typing-extensions>=4.16.0,<5",
 ]
@@ -22,7 +22,7 @@ app = [
     "mcp==2.3.0",
     "mcp-types==2.3.0",
     "rich==15.0.0",
-    "typer==0.28.0",
+    "typer==0.29.1",
     "uvicorn==0.54.0",
 ]
 
@@ -60,13 +60,13 @@ dev = [
     "hatchling==1.33.0",
     "prek==0.5.10",
     "pytest==9.2.0",
-    "pytest-asyncio==1.4.1.post1",
+    "pytest-asyncio==1.5.0",
     "pytest-cov==7.1.0",
     "pytest-xdist==3.8.0",
     "respx==0.23.1",
-    "ruff==0.17.4",
+    "ruff==0.17.5",
     "setuptools-scm==10.3.4",
-    "ty==0.0.99",
+    "ty==0.0.104",
     "zizmor==1.32.0",
 ]
 
